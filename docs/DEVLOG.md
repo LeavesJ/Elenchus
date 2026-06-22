@@ -24,3 +24,6 @@
 
 ## 2026-06-22 — Task 2: Content loader (TDD PASS)
 - Wrote `src/retnovation/content_loader.py` (load_map, load_rubric, load_experience_meta) with YAML maps and rubrics in `content/`. All 3 tests pass; ruff clean.
+
+## 2026-06-22 — Task 3: Persistence (SQLite Store) (TDD PASS)
+- Wrote `src/retnovation/persistence.py` (Store class: load_state, save_state, decay_frame, ledger I/O, queue FIFO); decay_frame enforces no-delete invariant (UPDATE only). All 3 tests pass; ruff clean.
