@@ -34,5 +34,8 @@ venv/
 dist/
 build/
 
+# === Worktrees (isolated execution workspaces) ===
+.worktrees/
+
 # === OS ===
 .DS_Store
