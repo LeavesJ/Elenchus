@@ -22,11 +22,8 @@ dev = [
 [project.scripts]
 retnovation = "retnovation.cli:main"
 
-[tool.setuptools]
-packages = ["retnovation"]
-
-[tool.setuptools.package-dir]
-"" = "src"
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.ruff]
 line-length = 100
