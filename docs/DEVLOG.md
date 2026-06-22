@@ -12,5 +12,9 @@
   curator rubrics as versioned YAML in `content/`; lean hygiene.
 - Read doctrine source: Berkeley Operating Guidebook §5 (retention: reversible decay, not
   erasure) and §6 (innovation bridge: the ledger of owned, unlabeled problems).
-- Next: commit the approved harness design as a spec; produce the Step-1 implementation
-  plan (writing-plans); execute Step 1 (six-link harness on the fixed experience) under TDD.
+- Committed the approved harness design as a spec (`docs/superpowers/specs/2026-06-22-harness-skeleton-design.md`).
+- Produced the Step-1 implementation plan via writing-plans: 13 right-sized TDD tasks
+  (`docs/superpowers/plans/2026-06-22-harness-skeleton.md`), self-reviewed for spec
+  coverage, placeholders, and type consistency.
+- Next: isolate an execution worktree (using-git-worktrees) and execute Step 1 task-by-task
+  under TDD; adversarial review on the core path (judgment loop, orchestration) before done.
