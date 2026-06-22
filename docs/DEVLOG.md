@@ -18,3 +18,6 @@
   coverage, placeholders, and type consistency.
 - Next: isolate an execution worktree (using-git-worktrees) and execute Step 1 task-by-task
   under TDD; adversarial review on the core path (judgment loop, orchestration) before done.
+
+## 2026-06-22 — Task 1: Types & enums (TDD PASS)
+- Wrote the full `src/retnovation/types.py` module: 6 str Enums, 13 BaseModel classes, 1 dataclass; all match the brief specification exactly.
