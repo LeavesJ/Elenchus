@@ -51,3 +51,6 @@
 
 ## 2026-06-22 — Task 9: Assessor dispatch + checkable_scorer stub (TDD PASS)
 - Created `src/retnovation/assessment/checkable_scorer.py`: assess raises NotImplementedError (built in step 4). Overwrote `__init__.py` with ASSESSORS registry (open_ended → judgment_loop, cs_technical → checkable_scorer) and get_assessor(regime) dispatch. Both tests pass; ruff clean; 23/23 suite green.
+
+## 2026-06-22 — Task 10: Experience selection (TDD PASS)
+- Wrote `src/retnovation/experience.py`: FIXED_EXPERIENCE="veldra_licensing_continuity"; select_experience(core, state, ledger, spec, root) loads the fixed experience from content, overriding ledger_ref if spec is given. Test verifies real load of protect_the_core_lane rubric frame and open_ended regime. 24/24 suite green; ruff clean.
