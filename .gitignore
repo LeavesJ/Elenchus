@@ -1,0 +1,38 @@
+# === Confidential design + doctrine docs — NEVER track (leak prevention) ===
+# Source design and the personal operating guidebook stay local only.
+*.pdf
+Berkeley_Operating_Guidebook*.md
+Retnovation_Blueprint*.md
+Retnovation_Build_Brief*.md
+Retnovation_FounderCEO_Design*.md
+Retnovation_JudgmentLoop*.md
+Retnovation_LiftTest*.md
+Retnovation_Loop*.md
+Retnovation_MVP_Scope*.md
+
+# === Runtime state (confidential: owned problems + learner state) ===
+/data/
+*.db
+*.sqlite
+*.sqlite3
+
+# === Secrets ===
+.env
+.env.*
+!.env.example
+*.key
+
+# === Python ===
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+dist/
+build/
+
+# === OS ===
+.DS_Store
