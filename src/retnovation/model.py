@@ -40,7 +40,7 @@ class FakeModel:
         return self._intake
 
     def generate_push(self, exp: Experience, kind: str, code: str) -> str:
-        return f"[push:{kind}:{code}]"
+        return f"[push:{kind}]"
 
     def classify_response(
         self, exp: Experience, kind: str, code: str, push: str, response: str
