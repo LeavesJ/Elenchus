@@ -1195,11 +1195,6 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
         response = work.respond(push_text)
         rc = model.classify_response(exp, kind, code, push_text, response)
 
-        if kind == "frame":
-            before = frame_states.get(code, FrameState.absent)
-        else:
-            before = frame_states.get(code, FrameState.absent)  # placeholder for delta symmetry
-
         moved = False
         if rc.hard_wrong and exp.rubric.mode is Mode.bounded_error:
             hard_wrong.append(code)
@@ -1210,6 +1205,7 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
 
         if rc.outcome == "closed" and rc.mechanism_supplied:
             if kind == "frame":
+                before = frame_states.get(code, FrameState.absent)
                 frame_states[code] = FrameState.present_reasoned
                 if before is not FrameState.present_reasoned:
                     deltas.append(FrameDelta(code=code, before=before,
@@ -1643,6 +1639,15 @@ Expected: FAIL with `ModuleNotFoundError`.
 
 - [ ] **Step 3: Write minimal implementation**
 
+First add a non-consuming queue count to `persistence.py` (the seed check must not consume the queue):
+
+```python
+    def queue_len(self) -> int:
+        return self._db.execute("SELECT COUNT(*) AS n FROM queue").fetchone()["n"]
+```
+
+Then write the CLI, using `queue_len()` (not the consuming `queue_pop()`) for the seed check:
+
 ```python
 # src/retnovation/cli.py
 from __future__ import annotations
@@ -1665,13 +1670,10 @@ def build_store(db_path: str | Path = DEFAULT_DB) -> Store:
     if not store.load_ledger():
         store.add_ledger_entry(LedgerEntry(id="veldra:licensing_continuity",
                                            owned_problem=_SEED_PROBLEM))
-    if store.queue_pop() is None:
+    if store.queue_len() == 0:
         store.queue_push(NextExperienceSpec(
             target_frames=["lead_with_what_you_refuse_to_do", "protect_the_core_lane"],
             ledger_ref="veldra:licensing_continuity", regime=Regime.open_ended))
-    else:
-        # queue_pop above consumed nothing meaningful only when empty; re-seed if we popped.
-        pass
     return store
 
 
@@ -1683,19 +1685,6 @@ def main(argv: list[str] | None = None) -> int:
     print(f"stop_reason={assessment.stop_reason.value} frames_moved={len(state.frames)}")
     return 0
 ```
-
-> Note: `build_store`'s `queue_pop()` check has a side effect (it consumes). Fix in Step 3 by
-> using a non-consuming count instead — add `Store.queue_len() -> int` to `persistence.py`
-> and use it here. Write that method + a test for it as part of this task before committing.
-
-Add to `persistence.py`:
-
-```python
-    def queue_len(self) -> int:
-        return self._db.execute("SELECT COUNT(*) AS n FROM queue").fetchone()["n"]
-```
-
-And revise `build_store` to use `if store.queue_len() == 0:` instead of the consuming `queue_pop()`.
 
 Add to `tests/test_persistence.py`:
 
