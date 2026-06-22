@@ -27,3 +27,6 @@
 
 ## 2026-06-22 — Task 3: Persistence (SQLite Store) (TDD PASS)
 - Wrote `src/retnovation/persistence.py` (Store class: load_state, save_state, decay_frame, ledger I/O, queue FIFO); decay_frame enforces no-delete invariant (UPDATE only). All 3 tests pass; ruff clean.
+
+## 2026-06-22 — Task 4: Model protocol + FakeModel (TDD PASS)
+- Wrote `src/retnovation/model.py`: Model Protocol (classify_intake, generate_push, classify_response); IntakeClassification and ResponseClassification Pydantic models; FakeModel deterministic test double (pops responses); AnthropicModel stub (raises NotImplementedError). Fixed conftest.py to add src to path. All 11 tests pass; ruff clean.
