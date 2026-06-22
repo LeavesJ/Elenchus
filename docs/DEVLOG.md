@@ -48,3 +48,6 @@
 
 ## 2026-06-22 — Strengthen judgment-loop disband assertion (verbatim passthrough)
 - Added `assert all(p.text == f"[push:{p.kind}]" for p in a.trajectory)` to `test_cooperative_student_converges`; confirms loop relays generate_push output verbatim without frame_code wrapping. 21/21 suite green; ruff clean.
+
+## 2026-06-22 — Task 9: Assessor dispatch + checkable_scorer stub (TDD PASS)
+- Created `src/retnovation/assessment/checkable_scorer.py`: assess raises NotImplementedError (built in step 4). Overwrote `__init__.py` with ASSESSORS registry (open_ended → judgment_loop, cs_technical → checkable_scorer) and get_assessor(regime) dispatch. Both tests pass; ruff clean; 23/23 suite green.
