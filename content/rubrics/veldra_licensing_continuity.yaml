@@ -1,0 +1,22 @@
+experience_id: veldra_licensing_continuity
+ledger_ref: "veldra:licensing_continuity"
+regime: open_ended
+mode: genuinely_open
+binding_constraint: null
+prompt: >
+  A long-standing customer is mid-rollout when a contract ambiguity surfaces:
+  honoring their reading costs you a guarantee you make to everyone else; refusing
+  risks the rollout and the relationship. They want an answer today. Decide what you
+  do and account for what you are trading. (No framework is named for you on purpose.)
+frames:
+  - frame_code: lead_with_what_you_refuse_to_do
+    frame_detail: State the boundary you will not cross before proposing any action.
+    paired_trap: scope_creep_to_please
+  - frame_code: protect_the_core_lane
+    frame_detail: Keep the promise the core product makes to everyone intact under pressure.
+    paired_trap: erode_core_for_one_customer
+traps:
+  - trap_code: scope_creep_to_please
+    trap_detail: Bending the offer to avoid saying no.
+  - trap_code: erode_core_for_one_customer
+    trap_detail: Special-casing one account in a way that weakens the core promise.

@@ -21,3 +21,6 @@
 
 ## 2026-06-22 — Task 1: Types & enums (TDD PASS)
 - Wrote the full `src/retnovation/types.py` module: 6 str Enums, 13 BaseModel classes, 1 dataclass; all match the brief specification exactly.
+
+## 2026-06-22 — Task 2: Content loader (TDD PASS)
+- Wrote `src/retnovation/content_loader.py` (load_map, load_rubric, load_experience_meta) with YAML maps and rubrics in `content/`. All 3 tests pass; ruff clean.
