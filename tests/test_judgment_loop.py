@@ -70,6 +70,10 @@ def test_cooperative_student_converges():
     }
     # disband rule: no push text contains a literal frame_code
     assert all("protect_the_core_lane" not in p.text for p in a.trajectory)
+    # disband: the loop relays generate_push output verbatim — it never wraps the
+    # frame_code into student-facing text. (A regression like
+    # f"Think about {code}: {push}" would change p.text and fail this.)
+    assert all(p.text == f"[push:{p.kind}]" for p in a.trajectory)
 
 
 def test_bounded_error_violation_stops_immediately():
