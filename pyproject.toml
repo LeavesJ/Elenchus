@@ -31,3 +31,6 @@ src = ["src", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "live: exercises the real Anthropic API (requires ANTHROPIC_API_KEY); skipped otherwise",
+]

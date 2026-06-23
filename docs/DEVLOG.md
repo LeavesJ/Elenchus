@@ -82,3 +82,14 @@
 - Approved design (inline TDD): doctrine prompts as versioned `content/prompts/`; list-of-pairs
   wire schema for strict structured outputs; mock unit tests + gated live smoke (skips with no
   key — none in env). Spec: `docs/superpowers/specs/2026-06-22-live-model-adapter.md`.
+- Authored `content/prompts/{intake,push,response}.md` (disband rules + sharper definition) +
+  `content_loader.load_prompt`; tests in `tests/test_prompts.py`.
+- Implemented `AnthropicModel.{classify_intake,generate_push,classify_response}` against
+  `claude-opus-4-8` (adaptive thinking, `effort=high`, no sampling params). Doctrine loaded
+  from `content/prompts/`; rubric rendered by the adapter. Intake uses a list-of-pairs wire
+  schema (`_IntakeWire`) for strict structured outputs → `IntakeClassification` with
+  `absent`/`not_tripped` defaulting. Refusal/empty raises `ModelError`. Client injectable for
+  tests (no SDK/network in unit tests).
+- Tests: `tests/test_anthropic_model.py` (4, mock client) + gated `tests/test_live_model.py`
+  (`@pytest.mark.live`, skips without a key); registered the `live` marker. 34 passed, 1 skipped;
+  ruff clean. Next: adversarial core-path review, then merge to main + push.

@@ -4,7 +4,12 @@ from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
+from .content_loader import load_prompt
 from .types import Experience, FrameState, TrapState
+
+
+class ModelError(RuntimeError):
+    """Raised when the rented model refuses or returns no usable output."""
 
 
 class IntakeClassification(BaseModel):
@@ -48,26 +53,134 @@ class FakeModel:
         return self._responses[code].pop(0)
 
 
-class AnthropicModel:
-    """Real adapter over Claude Opus 4.8. NOT exercised by the dry run.
+# Shared Opus 4.8 request params (claude-api reference): adaptive thinking + high effort,
+# no sampling parameters (temperature/top_p are removed on 4.8 and 400).
+_PARAMS = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}}
 
-    Before fleshing out the prompts, consult the claude-api reference for SDK usage.
-    The system prompt MUST encode the disband rules: never name the frame, never hand
-    the answer, never grade the conclusion; classify only frame/trap deltas + mechanism.
+
+class _FrameStateItem(BaseModel):
+    code: str
+    state: FrameState
+
+
+class _TrapStateItem(BaseModel):
+    code: str
+    state: TrapState
+
+
+class _IntakeWire(BaseModel):
+    """List-of-pairs wire shape — strict structured outputs cannot express an open-keyed map."""
+
+    frames: list[_FrameStateItem]
+    traps: list[_TrapStateItem]
+
+
+def _render_rubric(rubric) -> str:
+    lines = [
+        f"Mode: {rubric.mode.value}",
+        f"Binding constraint: {rubric.binding_constraint}",
+        "Frames (classify each by its code):",
+    ]
+    for f in rubric.frames:
+        lines.append(f"- {f.frame_code}: {f.frame_detail} (paired trap: {f.paired_trap})")
+    lines.append("Traps (classify each by its code):")
+    for t in rubric.traps:
+        lines.append(f"- {t.trap_code}: {t.trap_detail}")
+    return "\n".join(lines)
+
+
+def _target_detail(rubric, kind: str, code: str) -> str:
+    if kind == "trap":
+        for t in rubric.traps:
+            if t.trap_code == code:
+                return t.trap_detail
+    else:
+        for f in rubric.frames:
+            if f.frame_code == code:
+                return f.frame_detail
+    raise ModelError(f"unknown {kind} code: {code}")
+
+
+def _require(resp):
+    """Doctrine-critical calls never silently default: raise on refusal / empty output."""
+    if getattr(resp, "stop_reason", None) == "refusal" or resp.parsed_output is None:
+        raise ModelError("model refused or returned no parsed output")
+    return resp.parsed_output
+
+
+class AnthropicModel:
+    """Real adapter over Claude Opus 4.8. Doctrine lives in content/prompts/; this is plumbing.
+
+    The doctrine prompts (loaded from content/) carry the disband rules: never name the frame,
+    never hand the answer, never grade the conclusion; sharper = a gap closed with a supplied
+    mechanism. This class only renders the rubric, calls the model, and parses the result.
     """
 
-    def __init__(self, api_key: str | None = None, model: str = "claude-opus-4-8"):
+    def __init__(self, api_key: str | None = None, model: str = "claude-opus-4-8", client=None):
         self._model = model
         self._api_key = api_key
-        # Lazy import so tests never need the SDK or network.
+        self._client = client
+
+    def _get_client(self):
+        if self._client is None:
+            import anthropic  # lazy: tests never need the SDK or network
+
+            self._client = anthropic.Anthropic(api_key=self._api_key)
+        return self._client
 
     def classify_intake(self, exp: Experience, opening: str) -> IntakeClassification:
-        raise NotImplementedError("AnthropicModel.classify_intake: wire in step 1 interactive path")
+        system = load_prompt("intake") + "\n\n" + _render_rubric(exp.rubric)
+        resp = self._get_client().messages.parse(
+            model=self._model,
+            max_tokens=2048,
+            system=system,
+            messages=[{"role": "user", "content": opening}],
+            output_format=_IntakeWire,
+            **_PARAMS,
+        )
+        wire = _require(resp)
+        frame_states = {f.frame_code: FrameState.absent for f in exp.rubric.frames}
+        trap_states = {t.trap_code: TrapState.not_tripped for t in exp.rubric.traps}
+        for item in wire.frames:
+            frame_states[item.code] = item.state
+        for item in wire.traps:
+            trap_states[item.code] = item.state
+        return IntakeClassification(frame_states=frame_states, trap_states=trap_states)
 
     def generate_push(self, exp: Experience, kind: str, code: str) -> str:
-        raise NotImplementedError("AnthropicModel.generate_push: wire in step 1 interactive path")
-
-    def classify_response(self, exp, kind, code, push, response) -> ResponseClassification:
-        raise NotImplementedError(
-            "AnthropicModel.classify_response: wire in step 1 interactive path"
+        detail = _target_detail(exp.rubric, kind, code)
+        user = f"Experience:\n{exp.prompt}\n\nAngle to push on:\n{detail}"
+        resp = self._get_client().messages.create(
+            model=self._model,
+            max_tokens=1024,
+            system=load_prompt("push"),
+            messages=[{"role": "user", "content": user}],
+            **_PARAMS,
         )
+        if getattr(resp, "stop_reason", None) == "refusal":
+            raise ModelError("push generation refused")
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        raise ModelError("no text block in push response")
+
+    def classify_response(
+        self, exp: Experience, kind: str, code: str, push: str, response: str
+    ) -> ResponseClassification:
+        detail = _target_detail(exp.rubric, kind, code)
+        system = (
+            load_prompt("response")
+            + f"\n\nMode: {exp.rubric.mode.value}"
+            + f"\nBinding constraint: {exp.rubric.binding_constraint}"
+            + f"\nTarget angle: {detail}"
+        )
+        user = f"Push:\n{push}\n\nStudent reply:\n{response}"
+        resp = self._get_client().messages.parse(
+            model=self._model,
+            max_tokens=2048,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            output_format=ResponseClassification,
+            **_PARAMS,
+        )
+        return _require(resp)
