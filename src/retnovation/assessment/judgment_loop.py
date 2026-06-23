@@ -35,6 +35,8 @@ def _select_target(exp: Experience, frame_states, trap_states):
 
 
 def _converged(frame_states, trap_states) -> bool:
+    # NOTE: frame_states is always populated from the rubric at intake, so the empty-dict
+    # all()-is-True case (vacuous convergence) is not a live path.
     frames_ok = all(s is FrameState.present_reasoned for s in frame_states.values())
     traps_ok = all(s is not TrapState.tripped for s in trap_states.values())
     return frames_ok and traps_ok

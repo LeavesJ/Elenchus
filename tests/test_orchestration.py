@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from retnovation.aim import aim, derive_core
+from retnovation.experience import FIXED_EXPERIENCE
 from retnovation.orchestration import run_session
 from retnovation.persistence import Store
 from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
@@ -57,3 +58,4 @@ def test_run_session_closes_one_cycle(tmp_path):
     assert assessment.trajectory  # something happened
     assert state.frames  # state moved
     assert store.queue_pop() is not None  # a fresh next was queued
+    assert any(FIXED_EXPERIENCE in fs.last_evidence for fs in state.frames.values())

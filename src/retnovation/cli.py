@@ -34,6 +34,14 @@ def main(argv: list[str] | None = None) -> int:
     store = build_store()
     core = derive_core(aim())
     model = AnthropicModel()
-    state, assessment = run_session(store, core, model, datetime.now(timezone.utc))
-    print(f"stop_reason={assessment.stop_reason.value} frames_moved={len(state.frames)}")
+    try:
+        state, assessment = run_session(store, core, model, datetime.now(timezone.utc))
+    except NotImplementedError:
+        print(
+            "Retnovation step-1 harness: the live Opus 4.8 adapter is not wired yet "
+            "(deferred). The six-link loop is proven by the test suite — run `pytest`. "
+            "Interactive runs arrive with the model adapter."
+        )
+        return 1
+    print(f"stop_reason={assessment.stop_reason.value} frames_total={len(state.frames)}")
     return 0

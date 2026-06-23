@@ -4,7 +4,7 @@ from datetime import datetime
 from collections.abc import Callable
 
 from .assessment import get_assessor
-from .experience import select_experience
+from .experience import FIXED_EXPERIENCE, select_experience
 from .model import Model
 from .persistence import Store
 from .scheduler import schedule_next
@@ -37,7 +37,7 @@ def run_session(
     work = present(exp)
     assessor = get_assessor(exp.regime)
     assessment = assessor(exp, work, model)
-    state = update_state(state, assessment, now, exp.ledger_ref)
+    state = update_state(state, assessment, now, FIXED_EXPERIENCE)
     store.save_state(state)
     store.queue_push(schedule_next(state, ledger, now, exp.regime))
     return state, assessment

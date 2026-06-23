@@ -27,14 +27,19 @@ def update_state(
         if code in closed and final_state.get(code) is FrameState.present_reasoned:
             strength = Strength.forming
         elif final_state.get(code) is FrameState.present_reasoned:
+            # NOTE: currently unreachable from the judgment loop — the loop co-populates deltas and
+            # frames_closed_under_pressure, so a loop-driven present_reasoned is always "forming".
+            # "strong" is the documented, not-yet-calibrated sharp edge from spec section 7.
             strength = Strength.strong  # reasoned without needing the closing push
         else:
             strength = Strength.weak
+        fstate = final_state.get(code)
+        evidence = fstate.value if fstate is not None else "unmoved"
         state.frames[code] = FrameStrength(
             strength=strength,
             last_seen=now,
             due=now,
-            last_evidence=f"{experience_id}:{final_state.get(code, 'unmoved')}",
+            last_evidence=f"{experience_id}:{evidence}",
         )
 
     # Trap gallery: any trap target that was pushed and not repaired is logged.
