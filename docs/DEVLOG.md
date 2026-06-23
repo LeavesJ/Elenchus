@@ -102,3 +102,12 @@
   - Dismissed the reviewer's ValidationError-bubble finding: `messages.parse` sets
     `parsed_output=None` on a schema miss (does not raise), already handled by `_require`.
   - 35 passed, 1 skipped; ruff clean.
+
+## 2026-06-22 — Step 2: Veldra ingestion (branch veldra-ingestion)
+- Read-only Workflow sweep of Veldra docs (5 parallel readers over blockers/ADRs/BIZLOG/EXECLOG/
+  runbooks/vision) surfaced 30 candidate owned-problems; curated to a balanced 14 (7 founder + 7 CS),
+  user-vetted: ingest all 14, storage = gitignored `data/`, corpus = pointers + metadata.
+- Spec `docs/superpowers/specs/2026-06-22-veldra-ingestion.md`: seed YAML (gitignored `data/seed/`) +
+  `corpus` table + `veldra_ingest` (load_seed, idempotent ingest, `retnovation-ingest` console script);
+  generalizes the single fixed experience. Confidential ledger/corpus live only in gitignored `data/`;
+  tests use synthetic temp seeds.
