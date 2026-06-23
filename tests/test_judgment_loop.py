@@ -36,7 +36,11 @@ def _exp(mode=Mode.genuinely_open, binding=None):
         binding_constraint=binding,
     )
     return Experience(
-        prompt="...", rubric=rub, ledger_ref="veldra:licensing_continuity", regime=Regime.open_ended
+        experience_id="veldra:licensing_continuity",
+        prompt="...",
+        rubric=rub,
+        ledger_ref="veldra:licensing_continuity",
+        regime=Regime.open_ended,
     )
 
 

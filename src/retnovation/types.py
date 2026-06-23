@@ -44,6 +44,17 @@ class StopReason(str, Enum):
     budget = "budget"
 
 
+class GateCode(str, Enum):
+    recoverable_label = "recoverable_label"
+    pre_named_framework = "pre_named_framework"
+    type_hint_scaffold = "type_hint_scaffold"
+    softened_ambiguity = "softened_ambiguity"
+    cosmetic_engagement = "cosmetic_engagement"
+    owned_or_real = "owned_or_real"
+    process_layer_load = "process_layer_load"
+    insufficient_interrogation_depth = "insufficient_interrogation_depth"
+
+
 class Frame(BaseModel):
     frame_code: str
     frame_detail: str
@@ -75,10 +86,18 @@ class Core(BaseModel):
 
 
 class Experience(BaseModel):
+    experience_id: str
     prompt: str
     rubric: Rubric
     ledger_ref: str
     regime: Regime
+
+
+class GateResult(BaseModel):
+    passed: bool
+    rejects: list[GateCode]
+    downgrades: list[GateCode]
+    angle_count: int
 
 
 class Push(BaseModel):

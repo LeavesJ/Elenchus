@@ -19,5 +19,9 @@ def select_experience(
     meta = load_experience_meta(FIXED_EXPERIENCE, root=root)
     ledger_ref = spec.ledger_ref if spec is not None else meta["ledger_ref"]
     return Experience(
-        prompt=meta["prompt"], rubric=rubric, ledger_ref=ledger_ref, regime=Regime(meta["regime"])
+        experience_id=meta["experience_id"],
+        prompt=meta["prompt"],
+        rubric=rubric,
+        ledger_ref=ledger_ref,
+        regime=Regime(meta["regime"]),
     )

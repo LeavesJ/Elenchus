@@ -37,6 +37,7 @@ def _exp():
         binding_constraint=None,
     )
     return Experience(
+        experience_id="veldra:licensing_continuity",
         prompt="A customer contract ambiguity forces a same-day call.",
         rubric=rub,
         ledger_ref="veldra:licensing_continuity",

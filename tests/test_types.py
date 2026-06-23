@@ -27,7 +27,11 @@ def test_experience_roundtrips_through_json():
         mode=Mode.genuinely_open,
     )
     exp = Experience(
-        prompt="...", rubric=rub, ledger_ref="veldra:licensing_continuity", regime=Regime.open_ended
+        experience_id="veldra:licensing_continuity",
+        prompt="...",
+        rubric=rub,
+        ledger_ref="veldra:licensing_continuity",
+        regime=Regime.open_ended,
     )
     again = Experience.model_validate_json(exp.model_dump_json())
     assert again.regime is Regime.open_ended
@@ -56,3 +60,25 @@ def test_assessment_holds_stop_reason_and_work_is_callable():
     assert asmt.stop_reason is StopReason.converged
     w = Work(opening="hi", respond=lambda push: "ok")
     assert w.respond("anything") == "ok"
+
+
+def test_gatecode_and_gateresult_and_experience_id():
+    from retnovation.types import GateCode, GateResult, Experience, Rubric, Mode, Regime
+
+    assert GateCode.recoverable_label.value == "recoverable_label"
+    assert len(list(GateCode)) == 8
+
+    res = GateResult(
+        passed=False, rejects=[GateCode.recoverable_label], downgrades=[], angle_count=4
+    )
+    assert res.passed is False
+    assert res.angle_count == 4
+
+    exp = Experience(
+        experience_id="x",
+        prompt="p",
+        rubric=Rubric(frames=[], traps=[], mode=Mode.genuinely_open, binding_constraint=None),
+        ledger_ref="veldra:x",
+        regime=Regime.open_ended,
+    )
+    assert exp.experience_id == "x"

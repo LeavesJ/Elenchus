@@ -30,7 +30,12 @@ def load_rubric(name: str, root: Path | None = None) -> Rubric:
 
 def load_experience_meta(name: str, root: Path | None = None) -> dict:
     data = yaml.safe_load((_root(root) / "rubrics" / f"{name}.yaml").read_text())
-    return {"prompt": data["prompt"], "ledger_ref": data["ledger_ref"], "regime": data["regime"]}
+    return {
+        "experience_id": data["experience_id"],
+        "prompt": data["prompt"],
+        "ledger_ref": data["ledger_ref"],
+        "regime": data["regime"],
+    }
 
 
 def load_prompt(name: str, root: Path | None = None) -> str:
