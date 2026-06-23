@@ -52,6 +52,26 @@ def test_run_session_closes_one_cycle(tmp_path):
             corpus_pointers=[],
         )
     )
+    store.upsert_corpus(
+        CorpusEntry(
+            ledger_ref="veldra:concentrated_market_pricing_power",
+            domain="founder_ceo",
+            why_owned="stakes",
+            unlabeled="unlabeled",
+            provenance="synthetic-test",
+            corpus_pointers=[],
+        )
+    )
+    store.upsert_corpus(
+        CorpusEntry(
+            ledger_ref="veldra:first_customer_proof_loop",
+            domain="founder_ceo",
+            why_owned="stakes",
+            unlabeled="unlabeled",
+            provenance="synthetic-test",
+            corpus_pointers=[],
+        )
+    )
     store.queue_push(
         NextExperienceSpec(
             target_frames=["protect_the_core_lane"],

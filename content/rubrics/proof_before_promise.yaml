@@ -1,0 +1,24 @@
+experience_id: proof_before_promise
+ledger_ref: "veldra:first_customer_proof_loop"
+regime: open_ended
+mode: bounded_error
+binding_constraint: >
+  You may not commit to a capability the system has not actually demonstrated end to end;
+  an unproven claim made to win the deal is the hard line you do not cross.
+prompt: >
+  Your first reference customer will sign if you commit to a capability you have not yet proven
+  end to end. Closing them funds the next two quarters; over-committing and missing puts the only
+  proof you have at risk. Decide what you commit to and on what evidence. (No framework is named
+  for you on purpose.)
+frames:
+  - frame_code: protect_the_core_lane
+    frame_detail: Keep the promise the core product makes to everyone intact under pressure.
+    paired_trap: erode_core_for_one_customer
+  - frame_code: choose_the_failure_default_deliberately
+    frame_detail: State which way it fails if you are wrong, and justify defaulting to the reversible direction.
+    paired_trap: assumed_the_happy_path
+traps:
+  - trap_code: erode_core_for_one_customer
+    trap_detail: Special-casing one account in a way that weakens the core promise.
+  - trap_code: assumed_the_happy_path
+    trap_detail: Failure direction left unstated, or defaulted to whatever was cheapest.

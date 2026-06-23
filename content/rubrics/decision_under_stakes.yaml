@@ -1,0 +1,22 @@
+experience_id: decision_under_stakes
+ledger_ref: "veldra:concentrated_market_pricing_power"
+regime: open_ended
+mode: genuinely_open
+binding_constraint: null
+prompt: >
+  You hold unusual pricing power in a concentrated market. One move could lock in a year of
+  margin or trigger a backlash that invites a competitor in. The number is yours to set, today,
+  on incomplete information. Make the call and account for how it fails if you are wrong.
+  (No framework is named for you on purpose.)
+frames:
+  - frame_code: choose_the_failure_default_deliberately
+    frame_detail: State which way it fails if you are wrong, and justify defaulting to the reversible direction.
+    paired_trap: assumed_the_happy_path
+  - frame_code: lead_with_what_you_refuse_to_do
+    frame_detail: State the boundary you will not cross before proposing any action.
+    paired_trap: scope_creep_to_please
+traps:
+  - trap_code: assumed_the_happy_path
+    trap_detail: Failure direction left unstated, or defaulted to whatever was cheapest.
+  - trap_code: scope_creep_to_please
+    trap_detail: Bending the offer to avoid saying no.

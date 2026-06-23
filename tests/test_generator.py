@@ -254,3 +254,47 @@ def test_select_cs_technical_is_a_step4_stub():
 
     with pytest.raises(NotImplementedError):
         select_cs_technical(core=None, state=None, ledger=[], corpus=[], spec=None)
+
+
+def test_every_authored_rubric_passes_the_gate_and_clears_eight_angles():
+    """The moat: the gate holds the unlabeled test over everything the generator produces."""
+    from retnovation.content_loader import load_library, load_min_angle_count, load_denylist
+    from retnovation.generator import anti_label_gate, angle_count
+
+    min_angle = load_min_angle_count()
+    fw, sc = load_denylist("framework_denylist"), load_denylist("scaffold_denylist")
+    lib = load_library()
+    assert len(lib) >= 3, "the founder thin seed must hold the three authored experiences"
+    for exp in lib:
+        corpus = _corpus(ref=exp.ledger_ref)  # synthetic, hermetic — no confidential db
+        res = anti_label_gate(
+            exp, corpus, min_angle_count=min_angle, framework_denylist=fw, scaffold_denylist=sc
+        )
+        assert res.passed, f"{exp.experience_id} tripped {[c.value for c in res.rejects]}"
+        assert angle_count(exp.rubric) >= min_angle, exp.experience_id
+
+
+def test_seed_frame_subsets_differ_so_the_selector_discriminates():
+    from retnovation.content_loader import load_library
+
+    subsets = {frozenset(f.frame_code for f in e.rubric.frames) for e in load_library()}
+    assert len(subsets) >= 2
+
+
+@pytest.mark.skipif(
+    not __import__("pathlib").Path("data/retnovation.db").exists(),
+    reason="real seeded corpus (gitignored data/) not present",
+)
+def test_seed_ledger_refs_resolve_in_the_real_corpus():
+    """Catch the orphan class of bug: every seed must bind to a real seeded founder entry."""
+    from retnovation.content_loader import load_library
+    from retnovation.persistence import Store
+
+    store = Store("data/retnovation.db")
+    try:
+        for exp in load_library():
+            entry = store.get_corpus(exp.ledger_ref)
+            assert entry is not None, f"{exp.experience_id} -> orphan {exp.ledger_ref}"
+            assert entry.unlabeled.strip(), f"{exp.ledger_ref} has empty unlabeled rationale"
+    finally:
+        store.close()
