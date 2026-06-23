@@ -78,9 +78,10 @@ class Store:
 
     def add_ledger_entry(self, entry: LedgerEntry) -> None:
         self._db.execute(
+            # Preserve links_json on conflict: links accrue downstream and the entry/seed is not
+            # their authority, so a re-add (e.g. re-ingest) must not clobber accumulated links.
             "INSERT INTO ledger(id,owned_problem,links_json) VALUES(?,?,?) "
-            "ON CONFLICT(id) DO UPDATE SET owned_problem=excluded.owned_problem,"
-            "links_json=excluded.links_json",
+            "ON CONFLICT(id) DO UPDATE SET owned_problem=excluded.owned_problem",
             (entry.id, entry.owned_problem, json.dumps(entry.links_to_experiences)),
         )
         self._db.commit()

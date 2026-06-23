@@ -116,5 +116,11 @@
   idempotent `ingest` upserting ledger+corpus with `ledger_ref=veldra:<slug>`, `main` +
   `retnovation-ingest` console script). `tests/test_ingestion.py` (corpus CRUD+idempotent, load_seed,
   ingest+idempotent) with hermetic temp seeds. 38 passed, 1 skipped; ruff clean.
-- Next: adversarial review (persistence + confidentiality), merge to main + push, then create the
-  confidential 14-entry seed in main `data/seed/` + run ingestion.
+- Adversarial review (independent subagent): confidentiality clean (no Critical). Fixes applied:
+  - **Important:** ledger UPSERT now preserves `links_json` on conflict — a re-ingest no longer
+    clobbers downstream-accumulated experience links (the seed is not their authority).
+  - **Important:** `load_seed` rejects a non-list YAML with a clear `ValueError`.
+  - Minor: `retnovation-ingest` anchors seed + db paths to repo root (no cwd foot-gun); idempotency
+    test now asserts field stability; added link-preservation + non-list-seed tests.
+  - 40 passed, 1 skipped; ruff clean.
+- Next: merge to main + push, then create the confidential 14-entry seed in main `data/seed/` + run ingestion.

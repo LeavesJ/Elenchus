@@ -1,7 +1,8 @@
+import pytest
 import yaml
 
 from retnovation.persistence import Store
-from retnovation.types import CorpusEntry
+from retnovation.types import CorpusEntry, LedgerEntry
 from retnovation.veldra_ingest import SeedEntry, ingest, load_seed
 
 
@@ -79,7 +80,28 @@ def test_ingest_seeds_ledger_and_corpus_idempotent(tmp_path):
     assert "veldra:a_problem" in led
     assert led["veldra:a_problem"].owned_problem == "How to X?"
     assert {c.ledger_ref for c in s.load_corpus()} == {"veldra:a_problem", "veldra:b_problem"}
-    # idempotent: re-run leaves the counts unchanged
+    # idempotent: re-run leaves counts unchanged AND fields stable
     ingest(s, _seed_entries())
     assert len(s.load_ledger()) == 2
     assert len(s.load_corpus()) == 2
+    assert {e.id: e.owned_problem for e in s.load_ledger()}["veldra:a_problem"] == "How to X?"
+    assert s.get_corpus("veldra:a_problem").domain == "cs_technical"
+
+
+def test_reingest_preserves_ledger_links(tmp_path):
+    s = Store(tmp_path / "t.db")
+    # a downstream link is attached to a ledger entry...
+    s.add_ledger_entry(
+        LedgerEntry(id="veldra:a_problem", owned_problem="orig", links_to_experiences=["exp1"])
+    )
+    ingest(s, _seed_entries())  # ...and a re-seed passes links=[]
+    led = {e.id: e for e in s.load_ledger()}
+    assert led["veldra:a_problem"].links_to_experiences == ["exp1"]  # links preserved
+    assert led["veldra:a_problem"].owned_problem == "How to X?"  # owned_problem still updated
+
+
+def test_load_seed_rejects_non_list(tmp_path):
+    p = tmp_path / "empty.yaml"
+    p.write_text("")  # yaml.safe_load -> None
+    with pytest.raises(ValueError):
+        load_seed(p)

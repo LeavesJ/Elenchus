@@ -14,7 +14,9 @@ from pydantic import BaseModel, Field
 from .persistence import Store
 from .types import CorpusEntry, LedgerEntry
 
-DEFAULT_SEED = Path("data/seed/veldra_ledger.yaml")
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_SEED = _REPO_ROOT / "data" / "seed" / "veldra_ledger.yaml"
+DEFAULT_DB = _REPO_ROOT / "data" / "retnovation.db"
 
 
 class SeedEntry(BaseModel):
@@ -33,6 +35,8 @@ def ledger_ref(slug: str) -> str:
 
 def load_seed(path: str | Path) -> list[SeedEntry]:
     data = yaml.safe_load(Path(path).read_text())
+    if not isinstance(data, list):
+        raise ValueError(f"seed file must be a YAML list, got {type(data).__name__}: {path}")
     return [SeedEntry(**e) for e in data]
 
 
@@ -57,7 +61,7 @@ def ingest(store: Store, seeds: list[SeedEntry]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    store = Store("data/retnovation.db")
+    store = Store(DEFAULT_DB)
     seeds = load_seed(DEFAULT_SEED)
     n = ingest(store, seeds)
     by_domain: dict[str, int] = {}
