@@ -31,3 +31,8 @@ def load_rubric(name: str, root: Path | None = None) -> Rubric:
 def load_experience_meta(name: str, root: Path | None = None) -> dict:
     data = yaml.safe_load((_root(root) / "rubrics" / f"{name}.yaml").read_text())
     return {"prompt": data["prompt"], "ledger_ref": data["ledger_ref"], "regime": data["regime"]}
+
+
+def load_prompt(name: str, root: Path | None = None) -> str:
+    """Load a doctrine prompt template (system-prompt text) from content/prompts/."""
+    return (_root(root) / "prompts" / f"{name}.md").read_text()
