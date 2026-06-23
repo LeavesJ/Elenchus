@@ -11,6 +11,7 @@ from retnovation.types import (
     LedgerEntry,
     NextExperienceSpec,
     Regime,
+    Strength,
     StopReason,
     TrapState,
     Work,
@@ -88,9 +89,10 @@ def test_dry_run_closes_the_loop(tmp_path):
         d.code in {"lead_with_what_you_refuse_to_do", "protect_the_core_lane"}
         for d in assessment.frame_deltas
     )
-    # 3) at least one frame strength moved in persisted state
+    # 3) at least one frame strength moved (not the `weak` default) in persisted state
     reloaded = Store(tmp_path / "dryrun.db").load_state()
-    assert reloaded.frames
+    assert reloaded.frames  # persisted
+    assert any(fs.strength != Strength.weak for fs in reloaded.frames.values())
     # 4) the queue holds a fresh NextExperienceSpec
     assert reloaded_next(tmp_path) is not None
 
