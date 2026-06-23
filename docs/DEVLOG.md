@@ -124,3 +124,21 @@
     test now asserts field stability; added link-preservation + non-list-seed tests.
   - 40 passed, 1 skipped; ruff clean.
 - Next: merge to main + push, then create the confidential 14-entry seed in main `data/seed/` + run ingestion.
+
+## 2026-06-22 — Step 2 COMPLETE + handoff for Step 3
+- Veldra ingestion merged (`8f4c5e0`); the confidential 14-entry ledger + corpus is seeded into
+  gitignored `data/` (`data/retnovation.db`: 14 ledger + 14 corpus; 7 founder_ceo + 7 cs_technical).
+  Run/refresh anytime with `retnovation-ingest`; git tracks none of the seed/db.
+- Live Opus 4.8 is wired and verified (a real classify call + a full live `run_session`); key lives in
+  gitignored `.env` — **rotate it** (it was echoed into a session transcript).
+- **NEXT SESSION -> Step 3: experience generator + the anti-label gate (the moat).** Read first per the
+  session-start protocol: `docs/lessons.md` (esp. L-6, the unlabeled-problem test) and the design docs
+  the Build Brief points to — Build Brief build-order #3 + "anti label gate",
+  `Retnovation_JudgmentLoop_v0.1.md`, `Retnovation_FounderCEO_Design_v0.1.md`,
+  `Berkeley_Operating_Guidebook_v2.1.md` (all **local-only, gitignored** — present on this machine, do
+  NOT travel with a clone).
+- **Where Step 3 starts:** `src/retnovation/experience.py::select_experience` still returns the single
+  fixed experience. The 14-entry ledger is seeded in `data/` but not yet driving selection. Step 3:
+  generate experiences against the ledger's `weak`/`forming` frames + an owned problem, and gate each so
+  it is genuinely unlabeled (recognize-type-and-run-procedure => rejected). `checkable_scorer`
+  (cs_technical) is still a `NotImplementedError` stub (Step 4).
