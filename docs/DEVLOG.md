@@ -196,3 +196,26 @@
   selector + the scorer", not an engine rewrite. Read first per the session-start protocol:
   `docs/lessons.md`, then the local-only gitignored corpus — `Retnovation_Complete_Picture.md` §10–§12,
   MVP Scope §4 (the two regimes), and the Build Brief build-order #4.
+
+## 2026-06-23 — Step 4 design spec (branch step4-cs-checkable-scorer)
+- Read the session-start docs (lessons.md) + the local-only design corpus (Complete Picture §9–§12,
+  §15; MVP Scope §4; Build Brief build-order #4) and mapped both Step-4 seams against every engine
+  contract before designing.
+- Brainstormed the design with the user; two decisions confirmed: (1) **scoring = deterministic by
+  default, model-graded optional per question** (each question carries its own `check_type`; the
+  live grader path stays gated like the judgment-loop adapter); (2) **CS content = generic,
+  tracked in `content/`** (a non-confidential distributed-systems/consensus concept set; questions
+  anchor to `cs_technical` ledger refs for provenance but nothing confidential is tracked).
+- Chose **Approach 1 — shared types, regime-dispatched behavior** (over parallel CS types, and over
+  a regime-agnostic tagged-union core). One `Experience`/one loop, extended not forked; behavior
+  dispatches by regime through registries mirroring `ASSESSORS`/`SELECTORS`. CS drives the existing
+  unused `declarative_seed`/`SpacedItem` spaced index (new `concepts` persistence table); the two
+  paths (founder process-frames vs CS content-concepts) never collapse (Complete Picture §10).
+- Recorded that the Step-3 handoff's "content + map + selector + scorer" under-counted: honoring
+  "never collapse the two paths" needs a bounded engine change (a parallel concept-based
+  state/scheduling path), not a rewrite.
+- Spec committed: `docs/superpowers/specs/2026-06-23-cs-checkable-scorer-design.md` (self-reviewed:
+  no placeholders, internally consistent, single-plan scope). Baseline green before any code: 62
+  passed, 1 skipped; confidential-docs `git ls-files` check clean.
+- Next: user review of the spec, then `writing-plans` → subagent-driven TDD → final adversarial
+  review (§9 checklist) → merge.
