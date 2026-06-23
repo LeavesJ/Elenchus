@@ -111,3 +111,10 @@
   `corpus` table + `veldra_ingest` (load_seed, idempotent ingest, `retnovation-ingest` console script);
   generalizes the single fixed experience. Confidential ledger/corpus live only in gitignored `data/`;
   tests use synthetic temp seeds.
+- Implemented (TDD): `types.CorpusEntry`; persistence `corpus` table + `upsert_corpus`/`load_corpus`/
+  `get_corpus` (idempotent UPSERT); `veldra_ingest` (`SeedEntry`, `load_seed` YAML→model,
+  idempotent `ingest` upserting ledger+corpus with `ledger_ref=veldra:<slug>`, `main` +
+  `retnovation-ingest` console script). `tests/test_ingestion.py` (corpus CRUD+idempotent, load_seed,
+  ingest+idempotent) with hermetic temp seeds. 38 passed, 1 skipped; ruff clean.
+- Next: adversarial review (persistence + confidentiality), merge to main + push, then create the
+  confidential 14-entry seed in main `data/seed/` + run ingestion.

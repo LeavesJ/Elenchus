@@ -133,6 +133,15 @@ class LedgerEntry(BaseModel):
     links_to_experiences: list[str] = Field(default_factory=list)
 
 
+class CorpusEntry(BaseModel):
+    ledger_ref: str
+    domain: str
+    why_owned: str
+    unlabeled: str
+    provenance: str
+    corpus_pointers: list[str] = Field(default_factory=list)
+
+
 class NextExperienceSpec(BaseModel):
     target_frames: list[str]
     ledger_ref: str

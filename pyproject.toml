@@ -21,6 +21,7 @@ dev = [
 
 [project.scripts]
 retnovation = "retnovation.cli:main"
+retnovation-ingest = "retnovation.veldra_ingest:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

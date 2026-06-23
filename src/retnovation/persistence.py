@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .types import (
+    CorpusEntry,
     FrameStrength,
     LearnerState,
     LedgerEntry,
@@ -23,6 +24,9 @@ CREATE TABLE IF NOT EXISTS ledger (
 CREATE TABLE IF NOT EXISTS queue (
   position INTEGER PRIMARY KEY AUTOINCREMENT,
   target_frames_json TEXT NOT NULL, ledger_ref TEXT NOT NULL, regime TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS corpus (
+  ledger_ref TEXT PRIMARY KEY, domain TEXT NOT NULL, why_owned TEXT NOT NULL,
+  unlabeled TEXT NOT NULL, provenance TEXT NOT NULL, corpus_pointers_json TEXT NOT NULL);
 """
 
 
@@ -91,6 +95,44 @@ class Store:
             )
             for r in rows
         ]
+
+    def upsert_corpus(self, entry: CorpusEntry) -> None:
+        self._db.execute(
+            "INSERT INTO corpus(ledger_ref,domain,why_owned,unlabeled,provenance,"
+            "corpus_pointers_json) VALUES(?,?,?,?,?,?) ON CONFLICT(ledger_ref) DO UPDATE SET "
+            "domain=excluded.domain,why_owned=excluded.why_owned,unlabeled=excluded.unlabeled,"
+            "provenance=excluded.provenance,corpus_pointers_json=excluded.corpus_pointers_json",
+            (
+                entry.ledger_ref,
+                entry.domain,
+                entry.why_owned,
+                entry.unlabeled,
+                entry.provenance,
+                json.dumps(entry.corpus_pointers),
+            ),
+        )
+        self._db.commit()
+
+    @staticmethod
+    def _corpus_row(r: sqlite3.Row) -> CorpusEntry:
+        return CorpusEntry(
+            ledger_ref=r["ledger_ref"],
+            domain=r["domain"],
+            why_owned=r["why_owned"],
+            unlabeled=r["unlabeled"],
+            provenance=r["provenance"],
+            corpus_pointers=json.loads(r["corpus_pointers_json"]),
+        )
+
+    def load_corpus(self) -> list[CorpusEntry]:
+        return [
+            self._corpus_row(r)
+            for r in self._db.execute("SELECT * FROM corpus ORDER BY ledger_ref")
+        ]
+
+    def get_corpus(self, ledger_ref: str) -> CorpusEntry | None:
+        r = self._db.execute("SELECT * FROM corpus WHERE ledger_ref=?", (ledger_ref,)).fetchone()
+        return self._corpus_row(r) if r is not None else None
 
     def queue_push(self, spec: NextExperienceSpec) -> None:
         self._db.execute(
