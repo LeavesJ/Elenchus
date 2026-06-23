@@ -82,7 +82,8 @@ def _render_rubric(rubric) -> str:
         "Frames (classify each by its code):",
     ]
     for f in rubric.frames:
-        lines.append(f"- {f.frame_code}: {f.frame_detail} (paired trap: {f.paired_trap})")
+        paired = f" (paired trap: {f.paired_trap})" if f.paired_trap else ""
+        lines.append(f"- {f.frame_code}: {f.frame_detail}{paired}")
     lines.append("Traps (classify each by its code):")
     for t in rubric.traps:
         lines.append(f"- {t.trap_code}: {t.trap_detail}")
@@ -141,10 +142,14 @@ class AnthropicModel:
         wire = _require(resp)
         frame_states = {f.frame_code: FrameState.absent for f in exp.rubric.frames}
         trap_states = {t.trap_code: TrapState.not_tripped for t in exp.rubric.traps}
+        # Ignore codes the model invented that are not in the rubric — a hallucinated key
+        # would corrupt the judgment loop's convergence and target-selection logic.
         for item in wire.frames:
-            frame_states[item.code] = item.state
+            if item.code in frame_states:
+                frame_states[item.code] = item.state
         for item in wire.traps:
-            trap_states[item.code] = item.state
+            if item.code in trap_states:
+                trap_states[item.code] = item.state
         return IntakeClassification(frame_states=frame_states, trap_states=trap_states)
 
     def generate_push(self, exp: Experience, kind: str, code: str) -> str:

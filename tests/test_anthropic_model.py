@@ -154,3 +154,19 @@ def test_refusal_raises_model_error():
     client = _Client(parse_result=_Resp(parsed_output=None, stop_reason="refusal"))
     with pytest.raises(ModelError):
         AnthropicModel(client=client).classify_intake(_exp(), "opening")
+
+
+def test_classify_intake_ignores_hallucinated_codes():
+    # The model returns a frame/trap code that is not in the rubric — it must be dropped,
+    # or it would corrupt the judgment loop's convergence/target logic.
+    wire = _Wire(
+        frames=[
+            _Item("protect_the_core_lane", FrameState.present_reasoned),
+            _Item("totally_made_up_frame", FrameState.present_reasoned),
+        ],
+        traps=[_Item("not_a_real_trap", TrapState.tripped)],
+    )
+    client = _Client(parse_result=_Resp(parsed_output=wire))
+    result = AnthropicModel(client=client).classify_intake(_exp(), "opening")
+    assert set(result.frame_states) == {"protect_the_core_lane", "lead_with_what_you_refuse_to_do"}
+    assert set(result.trap_states) == {"erode_core_for_one_customer", "scope_creep_to_please"}

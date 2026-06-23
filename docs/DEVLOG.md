@@ -93,3 +93,12 @@
 - Tests: `tests/test_anthropic_model.py` (4, mock client) + gated `tests/test_live_model.py`
   (`@pytest.mark.live`, skips without a key); registered the `live` marker. 34 passed, 1 skipped;
   ruff clean. Next: adversarial core-path review, then merge to main + push.
+- Adversarial review (independent subagent) of the Opus 4.8 SDK path + doctrine. Fixes applied:
+  - **Critical:** `classify_intake` now ignores hallucinated codes not in the rubric — an invented
+    key would corrupt `judgment_loop._converged`/`_select_target`. Test
+    `test_classify_intake_ignores_hallucinated_codes` added.
+  - Minor: `_render_rubric` omits `(paired trap: None)`; `response.md` wording matches where the
+    angle is actually provided; live smoke asserts value types.
+  - Dismissed the reviewer's ValidationError-bubble finding: `messages.parse` sets
+    `parsed_output=None` on a schema miss (does not raise), already handled by `_require`.
+  - 35 passed, 1 skipped; ruff clean.
