@@ -142,3 +142,12 @@
   generate experiences against the ledger's `weak`/`forming` frames + an owned problem, and gate each so
   it is genuinely unlabeled (recognize-type-and-run-procedure => rejected). `checkable_scorer`
   (cs_technical) is still a `NotImplementedError` stub (Step 4).
+
+## 2026-06-23 — Task 7: Raise MAX_PUSHES 6→8 (COMPLETE)
+- Baseline judgment-loop tests: 3 passed (cooperative paths green).
+- Change: `src/retnovation/assessment/judgment_loop.py` line 16, `MAX_PUSHES = 6` → `MAX_PUSHES = 8` with
+  comment explaining 8-angle depth floor + budget-only semantics.
+- Post-change: judgment-loop tests 3 passed, full suite 61 passed + 1 skipped; no regression.
+- Linting: ruff format + check all clean.
+- Commit: `1cf6f4b` on `step3-experience-generator` with message "feat: raise MAX_PUSHES 6->8 to fit the 8-angle depth floor (budget-only)".
+- Self-review: Loop mechanics untouched; cooperative paths (`converged`, `bounded_error_violation`) remain green; budget-only prep for Step 5 deeper interrogation.
