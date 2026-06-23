@@ -63,3 +63,6 @@
 
 ## 2026-06-22 — Strengthen criterion-3 assertion (frame strength movement)
 - Test criterion 3 now asserts `assert any(fs.strength != Strength.weak for fs in reloaded.frames.values())` — proves a frame strength actually moved, not just that frames persisted. Criterion 3 still proves persistence via `assert reloaded.frames`. 26/26 suite green; ruff clean.
+
+## 2026-06-22 — Task 13: CLI entrypoint + non-consuming queue_len (TDD PASS)
+- Added `queue_len() -> int` non-consuming method to Store (Task 3); build_store checks empty state via queue_len (not consuming queue_pop); main wires aim, core, model, run_session. Tests verify seeding and non-consuming invariant. 28/28 suite green; ruff clean.

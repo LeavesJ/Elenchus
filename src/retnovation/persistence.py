@@ -110,3 +110,6 @@ class Store:
             ledger_ref=row["ledger_ref"],
             regime=Regime(row["regime"]),
         )
+
+    def queue_len(self) -> int:
+        return self._db.execute("SELECT COUNT(*) AS n FROM queue").fetchone()["n"]

@@ -56,3 +56,11 @@ def test_ledger_and_queue_fifo(tmp_path):
     popped = s.queue_pop()
     assert popped.target_frames == ["protect_the_core_lane"]
     assert s.queue_pop() is None
+
+
+def test_queue_len_is_non_consuming(tmp_path):
+    s = Store(tmp_path / "q.db")
+    assert s.queue_len() == 0
+    s.queue_push(NextExperienceSpec(target_frames=["a"], ledger_ref="x", regime=Regime.open_ended))
+    assert s.queue_len() == 1
+    assert s.queue_len() == 1  # still there
