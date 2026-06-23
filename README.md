@@ -20,5 +20,9 @@ Done = the dry run closes end-to-end with no manual stitching. See `docs/superpo
 
 ## Develop
     python3 -m venv .venv && source .venv/bin/activate
-    pip install -e ".[dev]"
+    pip install -e ".[dev]" --config-settings editable_mode=compat
     pytest
+
+(The `editable_mode=compat` flag installs a plain `src`-on-path editable so newly added
+modules/subpackages import without a reinstall — robust on Python 3.14. Tests also run
+without any install via `tests/conftest.py`.)
