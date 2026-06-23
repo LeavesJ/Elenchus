@@ -1,5 +1,5 @@
-experience_id: veldra_licensing_continuity
-ledger_ref: "veldra:licensing_continuity"
+experience_id: license_continuity
+ledger_ref: "veldra:license_fork_risk"
 regime: open_ended
 mode: genuinely_open
 binding_constraint: null

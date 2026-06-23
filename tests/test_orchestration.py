@@ -1,11 +1,11 @@
 from datetime import datetime, timezone
 
 from retnovation.aim import aim, derive_core
-from retnovation.experience import FIXED_EXPERIENCE
 from retnovation.orchestration import run_session
 from retnovation.persistence import Store
 from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
 from retnovation.types import (
+    CorpusEntry,
     FrameState,
     LedgerEntry,
     NextExperienceSpec,
@@ -41,11 +41,21 @@ def _fake_model():
 
 def test_run_session_closes_one_cycle(tmp_path):
     store = Store(tmp_path / "t.db")
-    store.add_ledger_entry(LedgerEntry(id="veldra:licensing_continuity", owned_problem="..."))
+    store.add_ledger_entry(LedgerEntry(id="veldra:license_fork_risk", owned_problem="..."))
+    store.upsert_corpus(
+        CorpusEntry(
+            ledger_ref="veldra:license_fork_risk",
+            domain="founder_ceo",
+            why_owned="stakes",
+            unlabeled="unlabeled",
+            provenance="synthetic-test",
+            corpus_pointers=[],
+        )
+    )
     store.queue_push(
         NextExperienceSpec(
             target_frames=["protect_the_core_lane"],
-            ledger_ref="veldra:licensing_continuity",
+            ledger_ref="veldra:license_fork_risk",
             regime=Regime.open_ended,
         )
     )
@@ -58,4 +68,4 @@ def test_run_session_closes_one_cycle(tmp_path):
     assert assessment.trajectory  # something happened
     assert state.frames  # state moved
     assert store.queue_pop() is not None  # a fresh next was queued
-    assert any(FIXED_EXPERIENCE in fs.last_evidence for fs in state.frames.values())
+    assert any("license_continuity" in fs.last_evidence for fs in state.frames.values())

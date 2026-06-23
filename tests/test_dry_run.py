@@ -7,6 +7,7 @@ from retnovation.model import FakeModel, IntakeClassification, ResponseClassific
 from retnovation.orchestration import run_session
 from retnovation.persistence import Store
 from retnovation.types import (
+    CorpusEntry,
     FrameState,
     LedgerEntry,
     NextExperienceSpec,
@@ -51,14 +52,24 @@ def test_dry_run_closes_the_loop(tmp_path):
     store = Store(tmp_path / "dryrun.db")
     store.add_ledger_entry(
         LedgerEntry(
-            id="veldra:licensing_continuity",
-            owned_problem="A customer contract ambiguity forces a same-day call.",
+            id="veldra:license_fork_risk",
+            owned_problem="A licensing-continuity decision under a same-day deadline.",
+        )
+    )
+    store.upsert_corpus(
+        CorpusEntry(
+            ledger_ref="veldra:license_fork_risk",
+            domain="founder_ceo",
+            why_owned="real stakes",
+            unlabeled="genuinely unlabeled",
+            provenance="synthetic-test",
+            corpus_pointers=[],
         )
     )
     store.queue_push(
         NextExperienceSpec(
             target_frames=["lead_with_what_you_refuse_to_do", "protect_the_core_lane"],
-            ledger_ref="veldra:licensing_continuity",
+            ledger_ref="veldra:license_fork_risk",
             regime=Regime.open_ended,
         )
     )
