@@ -72,3 +72,13 @@
 
 ## 2026-06-22 — Post-review hygiene
 - Reverted an erroneous force-add of the gitignored SDD scratch report (commit 670f6b7, removed). Added lesson L-7; gitignored `.superpowers/` and `.claude-flow/` tooling scratch.
+
+## 2026-06-22 — Step two: live Opus 4.8 model adapter (branch live-model)
+- Pushed the repo to GitHub: `LeavesJ/Retnovation` (private). Started step two: wire the
+  real `AnthropicModel` so the judgment loop runs against `claude-opus-4-8` instead of the
+  scripted `FakeModel`.
+- Consulted the `claude-api` reference: model `claude-opus-4-8`, adaptive thinking +
+  `effort="high"`, no sampling params, structured output via `messages.parse`.
+- Approved design (inline TDD): doctrine prompts as versioned `content/prompts/`; list-of-pairs
+  wire schema for strict structured outputs; mock unit tests + gated live smoke (skips with no
+  key — none in env). Spec: `docs/superpowers/specs/2026-06-22-live-model-adapter.md`.
