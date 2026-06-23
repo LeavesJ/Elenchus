@@ -57,3 +57,6 @@
 
 ## 2026-06-22 — Task 11: Orchestration (run_session) (TDD PASS)
 - Wrote `src/retnovation/orchestration.py`: present_and_collect (interactive default) and run_session wiring all six links (persistence, experience, assessment, state, scheduler, model) into one cycle; present is injectable for tests. 25/25 suite green; ruff clean.
+
+## 2026-06-22 — Task 12: Dry-run acceptance test (TDD PASS)
+- Wrote `tests/test_dry_run.py`: end-to-end test proving all six links close without manual stitching; real Store, real FakeModel, fixture student; four acceptance assertions (trajectory, converged, frame_deltas trace to rubric codes, persisted frames, fresh NextExperienceSpec queued). 26/26 suite green; ruff clean.
