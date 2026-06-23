@@ -1,3 +1,5 @@
+import pytest
+
 from retnovation.types import (
     CorpusEntry,
     Experience,
@@ -172,3 +174,83 @@ def test_quality_floors_downgrade_not_reject():
     res = anti_label_gate(_exp(), _corpus(prov="   "), **GATE_KW)  # empty provenance
     assert GateCode.owned_or_real in res.downgrades
     assert res.passed is True  # floors downgrade, never reject
+
+
+def _write_gate_files(root):
+    (root / "gate").mkdir()
+    (root / "gate" / "depth.yaml").write_text("min_angle_count: 8\n")
+    (root / "gate" / "framework_denylist.yaml").write_text("- swot\n")
+    (root / "gate" / "scaffold_denylist.yaml").write_text("- this is a\n")
+    (root / "rubrics").mkdir()
+
+
+def _write_seed(root, eid, ref, frames):
+    lines = [
+        f"experience_id: {eid}",
+        f'ledger_ref: "{ref}"',
+        "regime: open_ended",
+        "mode: genuinely_open",
+        "binding_constraint: null",
+        "prompt: Decide and account for the trade today.",
+        "frames:",
+    ]
+    traps = []
+    for code, trap in frames:
+        lines.append(f"  - {{frame_code: {code}, frame_detail: angle, paired_trap: {trap}}}")
+        traps.append(trap)
+    lines.append("traps:")
+    for trap in traps:
+        lines.append(f"  - {{trap_code: {trap}, trap_detail: shortcut}}")
+    (root / "rubrics" / f"{eid}.yaml").write_text("\n".join(lines) + "\n")
+
+
+def test_load_gated_library_raises_on_a_bad_rubric(tmp_path):
+    from retnovation.generator import load_gated_library, GateError
+
+    _write_gate_files(tmp_path)
+    # one thin (sub-8-angle) rubric: 1 frame + 1 trap + 4 = 6 < 8
+    _write_seed(
+        tmp_path, "thin", "veldra:x", [("protect_the_core_lane", "erode_core_for_one_customer")]
+    )
+    with pytest.raises(GateError):
+        load_gated_library([_corpus(ref="veldra:x")], root=tmp_path)
+
+
+def test_select_open_ended_ranks_by_frame_coverage(tmp_path):
+    from retnovation.generator import select_open_ended
+    from retnovation.types import LearnerState, NextExperienceSpec
+
+    _write_gate_files(tmp_path)
+    _write_seed(
+        tmp_path,
+        "seed_a",
+        "veldra:a",
+        [
+            ("lead_with_what_you_refuse_to_do", "scope_creep_to_please"),
+            ("protect_the_core_lane", "erode_core_for_one_customer"),
+        ],
+    )
+    _write_seed(
+        tmp_path,
+        "seed_b",
+        "veldra:b",
+        [
+            ("choose_the_failure_default_deliberately", "assumed_the_happy_path"),
+            ("lead_with_what_you_refuse_to_do", "scope_creep_to_please"),
+        ],
+    )
+    corpus = [_corpus(ref="veldra:a"), _corpus(ref="veldra:b")]
+    spec = NextExperienceSpec(
+        target_frames=["protect_the_core_lane"], ledger_ref="", regime=Regime.open_ended
+    )
+    exp = select_open_ended(
+        core=None, state=LearnerState(), ledger=[], corpus=corpus, spec=spec, root=tmp_path
+    )
+    assert exp.experience_id == "seed_a"  # only A carries protect_the_core_lane
+
+
+def test_select_cs_technical_is_a_step4_stub():
+    from retnovation.generator import select_cs_technical
+
+    with pytest.raises(NotImplementedError):
+        select_cs_technical(core=None, state=None, ledger=[], corpus=[], spec=None)

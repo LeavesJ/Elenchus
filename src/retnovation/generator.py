@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import re
 
-from .types import CorpusEntry, Experience, GateCode, GateResult, Mode, Rubric
+from .content_loader import load_denylist, load_library, load_min_angle_count
+from .types import CorpusEntry, Experience, GateCode, GateResult, Mode, Regime, Rubric
 
 ARTIFACT_DIMENSIONS = (
     4  # rigor, completeness, internal consistency, defensible assumptions (FounderCEO §2)
@@ -95,3 +96,48 @@ def anti_label_gate(
     return GateResult(
         passed=len(rejects) == 0, rejects=rejects, downgrades=downgrades, angle_count=ac
     )
+
+
+def load_gated_library(corpus, root=None):
+    """Load every authored experience and gate it. Raise on any hard reject (fail loud at load)."""
+    min_angle = load_min_angle_count(root)
+    fw = load_denylist("framework_denylist", root)
+    sc = load_denylist("scaffold_denylist", root)
+    by_ref = {c.ledger_ref: c for c in corpus}
+    out: list[tuple[Experience, GateResult]] = []
+    for exp in load_library(root):
+        res = anti_label_gate(
+            exp,
+            by_ref.get(exp.ledger_ref),
+            min_angle_count=min_angle,
+            framework_denylist=fw,
+            scaffold_denylist=sc,
+        )
+        if not res.passed:
+            raise GateError(
+                f"{exp.experience_id} failed the gate: {[c.value for c in res.rejects]}"
+            )
+        out.append((exp, res))
+    return out
+
+
+def _coverage(exp: Experience, target_frames: list[str]) -> int:
+    codes = {f.frame_code for f in exp.rubric.frames}
+    return sum(1 for tf in target_frames if tf in codes)
+
+
+def select_open_ended(core, state, ledger, corpus, spec, root=None) -> Experience:
+    gated = [(e, r) for (e, r) in load_gated_library(corpus, root) if e.regime is Regime.open_ended]
+    if not gated:
+        raise GateError("no shippable open_ended experience in the library")
+    target = spec.target_frames if spec is not None else []
+    # Rank: most target-frame coverage first; clean experiences before downgraded; then id.
+    ranked = sorted(
+        gated,
+        key=lambda er: (-_coverage(er[0], target), len(er[1].downgrades), er[0].experience_id),
+    )
+    return ranked[0][0]
+
+
+def select_cs_technical(core, state, ledger, corpus, spec, root=None) -> Experience:
+    raise NotImplementedError("cs_technical domain-path selector is built in step 4")
