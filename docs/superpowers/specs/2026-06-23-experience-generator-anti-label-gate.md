@@ -21,8 +21,20 @@ loaded from `content/rubrics/`, ignoring the ledger. Step 3 replaces that with a
 learner's weak/forming frames, binds it to a **real owned problem** from the ledger, and
 **gates** it so it is genuinely unlabeled and rich enough to interrogate deeply.
 
-Step 3 is proven on the **Founder CEO (`open_ended`)** side only. The `cs_technical`
-checkable scorer is Step 4; the seam stays clean.
+Step 3 is proven on the **Founder CEO** side only. The `cs_technical` selector + checkable
+scorer are Step 4; the seam stays clean.
+
+**Posture path vs domain path — do not collapse them (Complete Picture §10, interest tree).**
+The MVP is a two-path slice of one interest tree: **Founder CEO is a *posture path*** (outside
+the technical stack — process core / axis 2; content core starts near-empty and accretes from
+the ledger; `open_ended` regime), and **CS is a *domain path*** (a field with content — derives
+a content core directly; `cs_technical` regime; checkable). They are **different branch types
+on purpose**; "collapsing them is the quiet mistake that breaks the founder model." The
+practical consequence for this spec: **the way an experience is *selected* differs by path
+type** — the posture path selects by *process-frame coverage* against ledger owned-problems;
+the domain path selects by *content-concept coverage* and is checkable. So selection must be
+**pluggable by regime** (§2, Decision D4), exactly as assessment already is, so that adding the
+CS domain path in Step 4 is "content + a map + a registered selector," never an engine rewrite.
 
 ### The key insight that makes a deterministic gate sound
 
@@ -42,23 +54,35 @@ rented model's capability lives downstream in the judgment loop, not in seed aut
 
 ## 2. Module shape and data flow
 
-A new module `src/retnovation/generator.py` owns selection + gating (its own boundary, per
-the Build Brief's "experience generation" seam). `experience.py::select_experience` becomes
-a thin deterministic selector that delegates gating to it.
+A new module `src/retnovation/generator.py` owns the **posture-path (open_ended) selector**
++ the gate (its own boundary, per the Build Brief's "experience generation" seam).
+`experience.py::select_experience` becomes a thin **dispatcher**: it routes by `spec.regime`
+through a `SELECTORS` registry, mirroring the proven `assessment.ASSESSORS` pattern. This is
+what keeps posture and domain from collapsing (D4).
 
 ```
 scheduler.schedule_next → NextExperienceSpec{target_frames, ledger_ref, regime}
                                    │
 select_experience(core, state, ledger, corpus, spec, root)
+   └─ SELECTORS[spec.regime](...)        # registry dispatch (experience.py)
+        ├─ open_ended  → generator.select_open_ended(...)   # built in Step 3 (posture path)
+        └─ cs_technical → generator.select_cs_technical(...) # Step-4 stub: NotImplementedError
+
+select_open_ended (the founder posture-path selector):
    1. load experience LIBRARY = all authored rubrics in content/rubrics/  (gated at load)
-   2. filter to spec.regime           (open_ended for Step 3; cs_technical seam stays clean)
-   3. rank by frame-coverage of spec.target_frames (weakest-first), tie-break by experience_id
+   2. filter to open_ended
+   3. rank by PROCESS-FRAME coverage of spec.target_frames (weakest-first), tie-break by id
    4. bind via the candidate's OWN authored ledger_ref (+ its corpus entry, for the gate)
    5. anti_label_gate(candidate, corpus_entry) → pass | reject(code)
    6. pass → return Experience ; reject → try next candidate ; none → raise GateError
                                    │
                        orchestration → judgment_loop (assessment interface unchanged)
 ```
+
+`select_cs_technical` is a registered stub raising `NotImplementedError("built in step 4")`,
+exactly like `assessment/checkable_scorer.py`. The CS **domain-path** selector (Step 4) will
+select by *content-concept coverage*, not process-frame coverage — a different basis, which is
+precisely why the seam is pluggable rather than a shared frame-coverage function.
 
 **Selection & binding rules (deterministic, unambiguous):**
 - **Selection** is driven by `spec.target_frames`: rank candidates by how many target frames
@@ -128,6 +152,12 @@ in `src/` (L-1, doctrine-is-data). The framework denylist holds *method names on
 roleplay prompt that says "hostile takeover" or "leverage" is fine — only a named *method*
 trips `pre_named_framework`.
 
+**The gate vocabulary is path-type-agnostic** (the closed `GateCode` set applies to any
+experience), but Step 3 *exercises* it only on the **open_ended posture path**. When the CS
+**domain path** arrives (Step 4), the same codes apply, but `recoverable_label`'s reconciliation
+of "unlabeled coexists with answer keys" (a checkable problem must still strip the label —
+Complete Picture §1, §12) is refined there. Step 3 does not pre-solve that.
+
 ---
 
 ## 4. Schema & config additions (kept minimal)
@@ -146,10 +176,12 @@ field. A structured `persona` the judgment loop voices in-character belongs to S
 
 ---
 
-## 5. Starter content — Founder-only thin seed
+## 5. Starter content — the posture-path (Founder CEO) thin seed
 
 The MVP is "the engine plus a thin seed of content, never a content library"
-(MVP Scope §3). The seed exists to exercise the generator, not to be exhaustive.
+(MVP Scope §3). The seed exists to exercise the generator, not to be exhaustive. It seeds the
+**posture path only** (Founder CEO / `open_ended`); the CS **domain path** seed arrives with
+its selector + scorer in Step 4.
 
 **(a) Gate content** — the three `content/gate/*.yaml` files above.
 
@@ -201,8 +233,9 @@ deterministic; the rented model is already covered by the judgment-loop tests).
   crafted bad rubric and passes on a good one; `angle_count` math; mode-honesty
   (`genuinely_open ⇒ binding null`); denylist hits; `recoverable_label` tied to a
   missing/empty `corpus.unlabeled`; **library-load fails loud** on a thin/labeled rubric;
-  selection ranks by frame-coverage of `target_frames`; rejected-path
-  (try next → raise `GateError`).
+  the `open_ended` selector ranks by process-frame coverage of `target_frames`; `SELECTORS`
+  dispatch routes `open_ended` to the founder selector and `cs_technical` to a
+  `NotImplementedError` stub; rejected-path (try next → raise `GateError`).
 - **Acceptance (the moat):** a parametrized test asserting **every** `content/rubrics/*.yaml`
   passes the full gate + clears ≥8 angles — this *is* "the gate holds the unlabeled test
   over everything the generator produces," and satisfies MVP §7's "a sampled Founder CEO
@@ -243,16 +276,29 @@ deterministic; the rented model is already covered by the judgment-loop tests).
   angle; bundles split before judging") — afford many, judge one at a time. Configurable
   (`depth.yaml`), default 8, counting the 4 universal artifact dimensions so a small frame
   spine is not forced to pad.
+- **D4 — Posture path and domain path are different types; selection is pluggable by regime.**
+  The interest tree (Complete Picture §10) keeps **posture paths** (Founder CEO) and **domain
+  paths** (CS) as distinct branch types — "collapsing them is the quiet mistake that breaks the
+  founder model." They select differently: the posture path by *process-frame coverage* against
+  ledger owned-problems; the domain path by *content-concept coverage*, checkable. So
+  `select_experience` dispatches by `spec.regime` through a `SELECTORS` registry (mirroring
+  `assessment.ASSESSORS`); Step 3 implements `open_ended`, registers a `cs_technical` stub.
+  This makes Step 4's CS path "content + a map + a registered selector," not an engine rewrite
+  (§12 "pluggable by regime ... a new domain is content plus a map"). A *single shared
+  frame-coverage selector* would have collapsed the two types — explicitly avoided.
 
 ## 8. Out of scope (Step 3 does not do these)
 
-- The `cs_technical` checkable scorer (Step 4); Step 3 keeps the regime seam clean.
+- The `cs_technical` domain-path **selector** *and* checkable **scorer** (both Step 4); Step 3
+  registers stubs for both and keeps the regime seam clean.
 - Model-generation of experiences (scaling layer; the gate is built to wrap it later).
 - A structured `persona` field / in-character voicing (Step 5, with the loop changes).
-- Experiences-mapping-to-retention-functions (§5: articulation / transfer / declarative /
-  procedural / reactivation). Step 3 selects by frame-coverage only. **Known, deferred gap**,
-  stated rather than silently shipped; the MVP itself softens this ("In the MVP this barely
-  fires", §10).
+- **Explicit** experiences-mapping-to-retention-functions (§5: articulation / transfer /
+  declarative / procedural / reactivation) as a typed field. The posture-path selector ranks
+  by process-frame coverage only; experiences are not yet *tagged* by function. **Known,
+  deferred gap**, stated rather than silently shipped. (The seed *implicitly* spans two
+  functions — the Bobby-Axe decision-rep is articulation, the licensing/`bounded_error`
+  experiences are transfer — so the gap is "no function field," not "one monotone type.")
 - Deeper judgment-loop interrogation across the 8 angles (Step 5).
 
 ## 9. Acceptance criteria
@@ -289,3 +335,11 @@ The verification corrected one prior error (Bobby Axe is founder, not executive 
 confirmed the deterministic approach is not a spine violation (D1), confirmed the orphan and
 that retiring it is cleaner than re-anchoring, and flagged the 8-angle floor's provenance
 (D3) and the function-mapping gap (§8). The corpus docs are local-only and gitignored.
+
+A later revision of `Retnovation_Complete_Picture.md` added §10, the **interest tree**
+(`Retnovation_interest_tree.svg`), which made the **posture-path vs domain-path type
+distinction** explicit and named collapsing them "the quiet mistake that breaks the founder
+model." This spec was revised to honor it: Founder CEO is the posture path, CS is the domain
+path, and experience **selection is pluggable by regime** so the two are not collapsed into a
+single frame-coverage selector (Decision D4; §1, §2). The interest-tree artifacts are
+local-only and gitignored.
