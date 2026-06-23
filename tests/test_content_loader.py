@@ -20,3 +20,27 @@ def test_load_experience_meta():
     assert meta["ledger_ref"] == "veldra:licensing_continuity"
     assert meta["regime"] == "open_ended"
     assert meta["prompt"].strip()
+
+
+def test_load_min_angle_count_and_denylists():
+    from retnovation.content_loader import load_min_angle_count, load_denylist
+
+    assert load_min_angle_count() == 8
+    fw = load_denylist("framework_denylist")
+    assert "swot" in fw and all(isinstance(t, str) for t in fw)
+    sc = load_denylist("scaffold_denylist")
+    assert "this is a" in sc
+
+
+def test_load_experience_and_library_build_full_experiences():
+    from retnovation.content_loader import load_experience, load_library
+    from retnovation.types import Experience, Regime
+
+    lib = load_library()
+    assert lib, "content/rubrics should hold at least one experience"
+    assert all(isinstance(e, Experience) for e in lib)
+    one = lib[0]
+    again = load_experience(one.experience_id)
+    assert again.experience_id == one.experience_id
+    assert again.regime in (Regime.open_ended, Regime.cs_technical)
+    assert again.rubric.frames or again.rubric.traps

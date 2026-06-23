@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from .types import Frame, Rubric, Trap
+from .types import Experience, Frame, Mode, Regime, Rubric, Trap
 
 CONTENT_ROOT = Path(__file__).resolve().parents[2] / "content"
 
@@ -41,3 +41,37 @@ def load_experience_meta(name: str, root: Path | None = None) -> dict:
 def load_prompt(name: str, root: Path | None = None) -> str:
     """Load a doctrine prompt template (system-prompt text) from content/prompts/."""
     return (_root(root) / "prompts" / f"{name}.md").read_text()
+
+
+def load_min_angle_count(root: Path | None = None) -> int:
+    data = yaml.safe_load((_root(root) / "gate" / "depth.yaml").read_text())
+    return int(data["min_angle_count"])
+
+
+def load_denylist(name: str, root: Path | None = None) -> list[str]:
+    data = yaml.safe_load((_root(root) / "gate" / f"{name}.yaml").read_text())
+    if not isinstance(data, list):
+        raise ValueError(f"denylist {name} must be a YAML list")
+    return [str(x).lower() for x in data]
+
+
+def load_experience(name: str, root: Path | None = None) -> Experience:
+    data = yaml.safe_load((_root(root) / "rubrics" / f"{name}.yaml").read_text())
+    rubric = Rubric(
+        frames=[Frame(**f) for f in data["frames"]],
+        traps=[Trap(**t) for t in data["traps"]],
+        mode=Mode(data["mode"]),
+        binding_constraint=data.get("binding_constraint"),
+    )
+    return Experience(
+        experience_id=data["experience_id"],
+        prompt=data["prompt"],
+        rubric=rubric,
+        ledger_ref=data["ledger_ref"],
+        regime=Regime(data["regime"]),
+    )
+
+
+def load_library(root: Path | None = None) -> list[Experience]:
+    rubrics = sorted((_root(root) / "rubrics").glob("*.yaml"))
+    return [load_experience(p.stem, root=root) for p in rubrics]

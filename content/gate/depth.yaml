@@ -1,0 +1,4 @@
+# Minimum distinct interrogation angles an experience must afford.
+# angle_count = frames + traps + (1 if binding_constraint) + 4 universal artifact dimensions.
+# User-set floor (no corpus basis); doctrine-compatible. Configurable; calibrate from angle_count data.
+min_angle_count: 8
