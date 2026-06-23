@@ -219,3 +219,16 @@
   passed, 1 skipped; confidential-docs `git ls-files` check clean.
 - Next: user review of the spec, then `writing-plans` → subagent-driven TDD → final adversarial
   review (§9 checklist) → merge.
+
+## 2026-06-23 — Step 4 implementation plan (branch step4-cs-checkable-scorer)
+- User approved the spec. Authored the TDD implementation plan:
+  `docs/superpowers/plans/2026-06-23-cs-checkable-scorer.md` — 11 right-sized tasks
+  (types/invariant → CS content + loaders → model grader → checkable scorer → cs selector →
+  concept state + `STATE_UPDATERS` → regime-aware scheduler → `concepts` persistence →
+  domain-path onboarding → orchestration/CLI dispatch → CS dry-run acceptance), then a final
+  adversarial core-path review against spec §9.
+- Plan grounded in the real test suite (read all existing tests first) so every step has complete,
+  fixture-accurate code and no placeholders; verified against the project's ruff line-length=100
+  and the gated `live` marker. Self-review: full spec coverage, no placeholders, type-consistent
+  signatures end to end.
+- Next: execute via subagent-driven development (fresh implementer + independent reviewer per task).
