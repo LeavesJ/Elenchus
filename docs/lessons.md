@@ -42,3 +42,12 @@ Read this checklist before every code change. Update it after every correction o
   scratch and must never be committed. A fix subagent used `git add -f` to commit its report;
   it was reverted. Subagent dispatches must say: write reports under `.superpowers/sdd/` and
   stage ONLY source/test/docs paths — never `git add -A`, never `-f` on an ignored file.
+- **L-8 A green suite can hide a broken bootstrap.** When a runtime gate fails loud over the
+  *whole* content library (e.g. `load_gated_library` raises on any rubric lacking a corpus
+  anchor), every state-builder entry point (`cli.build_store`) must seed the WHOLE library, not
+  one hardcoded item. In Step 3 the e2e tests seeded all three refs explicitly AND the local
+  `data/retnovation.db` was already fully seeded — both masked a fresh-DB `GateError`; only the
+  final adversarial review, with a fresh-tempdir repro, caught it. Prevention: for any entry
+  point that seeds state, add a fresh-DB end-to-end regression test that exercises the real gated
+  path (build state → select → assert no raise), so fixtures and a pre-seeded local DB cannot hide
+  a broken shipped seed.

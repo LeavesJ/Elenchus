@@ -151,3 +151,48 @@
 - Linting: ruff format + check all clean.
 - Commit: `1cf6f4b` on `step3-experience-generator` with message "feat: raise MAX_PUSHES 6->8 to fit the 8-angle depth floor (budget-only)".
 - Self-review: Loop mechanics untouched; cooperative paths (`converged`, `bounded_error_violation`) remain green; budget-only prep for Step 5 deeper interrogation.
+
+## 2026-06-23 — Step 3 COMPLETE: experience generator + anti-label gate (the moat) + Step 4 handoff
+- Built on branch `step3-experience-generator` via subagent-driven development (7 TDD tasks, fresh
+  implementer + independent task reviewer each, then a final whole-branch adversarial review). Spec:
+  `docs/superpowers/specs/2026-06-23-experience-generator-anti-label-gate.md`; plan:
+  `docs/superpowers/plans/2026-06-23-experience-generator-anti-label-gate.md`.
+- **What shipped:** `select_experience` retired the single fixed experience. It now dispatches by regime
+  through a `SELECTORS` registry (mirroring `assessment.ASSESSORS`): `open_ended` →
+  `generator.select_open_ended` (deterministic: ranks the authored library by process-frame coverage of
+  the scheduler's `target_frames`, tie-break by `experience_id`, binds the candidate's own
+  `ledger_ref`); `cs_technical` → a `NotImplementedError` Step-4 stub.
+- **The gate** (`generator.anti_label_gate`, `src/retnovation/generator.py`): deterministic, closed
+  `GateCode` enum — 5 hard rejects (`recoverable_label`, `pre_named_framework`, `type_hint_scaffold`,
+  `softened_ambiguity`, `cosmetic_engagement`) + 1 user depth floor
+  (`insufficient_interrogation_depth`, ≥8 angles = frames+traps+binding+4 artifact dims) + 2 quality
+  floors (`owned_or_real`, `process_layer_load`, downgrade-not-reject). It verifies anchoring to the
+  curated corpus + structure; the curator's `unlabeled` rationale holds the semantic judgment.
+  `load_gated_library` fails loud (raises `GateError`) on any hard-reject rubric. Denylists + the depth
+  threshold are versioned content under `content/gate/` (L-1).
+- **Content:** founder thin seed = 3 abstracted `open_ended` rubrics bound to real founder ledger refs
+  (`license_continuity`→`license_fork_risk`, `decision_under_stakes`→`concentrated_market_pricing_power`,
+  `proof_before_promise`→`first_customer_proof_loop`, one `bounded_error`); the orphan
+  `veldra_licensing_continuity.yaml` (dangling `ledger_ref`) was re-homed, not deleted. Tracked rubrics
+  carry only abstracted prompts + codes + a ref id; the confidential corpus stays in gitignored `data/`.
+- **Doctrine correction absorbed mid-build (Complete Picture §10, interest tree):** Founder CEO is a
+  *posture path* (process core, ledger-driven, `open_ended`); CS is a *domain path* (content core,
+  checkable, `cs_technical`) — different types. Selection is pluggable-by-regime so the two never
+  collapse. Bobby-Axe = a founder articulation/decision-rep experience (in scope), not executive.
+- **MAX_PUSHES 6→8** (budget-only; the loop still pushes frames/traps — deeper dimension interrogation
+  is Step 5).
+- **Final adversarial review (opus)** confirmed the core-path invariants (gate soundness/no
+  false-negative, selection determinism, confidentiality, fail-loud, orphan retirement, loop closes,
+  cooperative path unchanged) and caught one real bug the green suite masked: `cli.build_store` seeded
+  only 1 of the 3 required corpus refs, so a *fresh* DB raised an uncaught `GateError`. Fixed
+  (`51029e3`): `build_store` now seeds every authored `open_ended` ref + a fresh-DB regression test.
+- **Verified:** full suite **62 passed, 1 skipped** (only skip = `@pytest.mark.live`, no key); ruff
+  clean; fresh-DB `build_store`→`select_experience` returns `license_continuity` with no error.
+- **NEXT SESSION -> Step 4: the CS checkable scorer + the cs_technical domain-path selector.** Two clean
+  seams are waiting, both `NotImplementedError`: `src/retnovation/assessment/checkable_scorer.py::assess`
+  (the checkable regime — answer keys, retrieval strength read off performance) and
+  `src/retnovation/generator.py::select_cs_technical` (the domain-path selector — selects by
+  *content-concept* coverage, not process-frame coverage). Adding CS is "content + a map + a registered
+  selector + the scorer", not an engine rewrite. Read first per the session-start protocol:
+  `docs/lessons.md`, then the local-only gitignored corpus — `Retnovation_Complete_Picture.md` §10–§12,
+  MVP Scope §4 (the two regimes), and the Build Brief build-order #4.
