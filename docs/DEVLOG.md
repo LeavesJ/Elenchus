@@ -69,3 +69,6 @@
 
 ## 2026-06-22 — Task 13: CLI entrypoint + non-consuming queue_len (TDD PASS)
 - Added `queue_len() -> int` non-consuming method to Store (Task 3); build_store checks empty state via queue_len (not consuming queue_pop); main wires aim, core, model, run_session. Tests verify seeding and non-consuming invariant. 28/28 suite green; ruff clean.
+
+## 2026-06-22 — Post-review hygiene
+- Reverted an erroneous force-add of the gitignored SDD scratch report (commit 670f6b7, removed). Added lesson L-7; gitignored `.superpowers/` and `.claude-flow/` tooling scratch.

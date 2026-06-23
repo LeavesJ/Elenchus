@@ -37,3 +37,8 @@ Read this checklist before every code change. Update it after every correction o
   soften, removes effort, or grades the conclusion. The friction is the product.
 - **L-6 The unlabeled problem is the moat.** If recognizing the type + running a procedure
   solves it, it is homework in a costume and does not ship.
+- **L-7 Never force-add gitignored scratch.** The SDD workspace `.superpowers/sdd/` (task
+  briefs, implementer reports, review packages) and tool dirs (`.claude-flow/`) are gitignored
+  scratch and must never be committed. A fix subagent used `git add -f` to commit its report;
+  it was reverted. Subagent dispatches must say: write reports under `.superpowers/sdd/` and
+  stage ONLY source/test/docs paths — never `git add -A`, never `-f` on an ignored file.
