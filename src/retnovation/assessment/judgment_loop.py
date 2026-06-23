@@ -13,7 +13,7 @@ from ..types import (
     Work,
 )
 
-MAX_PUSHES = 6
+MAX_PUSHES = 8  # >= the 8-angle depth floor; budget-only (loop still pushes frames/traps — Step 5 probes dims)
 
 
 def _select_target(exp: Experience, frame_states, trap_states):
