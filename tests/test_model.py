@@ -33,3 +33,23 @@ def test_fake_model_raises_when_script_exhausted():
         raise AssertionError("expected IndexError")
     except IndexError:
         pass
+
+
+def test_fake_model_grade_answer_is_scripted():
+    from retnovation.model import FakeModel, IntakeClassification
+    from retnovation.types import CheckableGrade, CheckableQuestion, CheckType
+
+    q = CheckableQuestion(
+        question_id="q1",
+        concept="c",
+        prompt="p",
+        check_type=CheckType.model_graded,
+        answer_key=["ref"],
+        criteria="be right",
+    )
+    m = FakeModel(
+        IntakeClassification(frame_states={}, trap_states={}),
+        responses={},
+        grades={"q1": [CheckableGrade(correct=True)]},
+    )
+    assert m.grade_answer(None, q, "an answer").correct is True

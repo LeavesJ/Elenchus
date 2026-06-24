@@ -5,7 +5,7 @@ from typing import Literal, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from .content_loader import load_prompt
-from .types import Experience, FrameState, TrapState
+from .types import CheckableGrade, CheckableQuestion, Experience, FrameState, TrapState
 
 
 class ModelError(RuntimeError):
@@ -30,16 +30,23 @@ class Model(Protocol):
     def classify_response(
         self, exp: Experience, kind: str, code: str, push: str, response: str
     ) -> ResponseClassification: ...
+    def grade_answer(
+        self, exp: Experience, question: CheckableQuestion, answer: str
+    ) -> CheckableGrade: ...
 
 
 class FakeModel:
     """Deterministic, scripted model for tests. Pops one response per (code) call."""
 
     def __init__(
-        self, intake: IntakeClassification, responses: dict[str, list[ResponseClassification]]
+        self,
+        intake: IntakeClassification,
+        responses: dict[str, list[ResponseClassification]],
+        grades: dict[str, list[CheckableGrade]] | None = None,
     ):
         self._intake = intake
         self._responses = responses
+        self._grades = grades or {}
 
     def classify_intake(self, exp: Experience, opening: str) -> IntakeClassification:
         return self._intake
@@ -51,6 +58,11 @@ class FakeModel:
         self, exp: Experience, kind: str, code: str, push: str, response: str
     ) -> ResponseClassification:
         return self._responses[code].pop(0)
+
+    def grade_answer(
+        self, exp: Experience, question: CheckableQuestion, answer: str
+    ) -> CheckableGrade:
+        return self._grades[question.question_id].pop(0)
 
 
 # Shared Opus 4.8 request params (claude-api reference): adaptive thinking + high effort,
@@ -186,6 +198,25 @@ class AnthropicModel:
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=ResponseClassification,
+            **_PARAMS,
+        )
+        return _require(resp)
+
+    def grade_answer(
+        self, exp: Experience, question: CheckableQuestion, answer: str
+    ) -> CheckableGrade:
+        system = (
+            load_prompt("grade")
+            + f"\n\nQuestion: {question.prompt}"
+            + f"\nReference answer(s): {question.answer_key}"
+            + f"\nCriteria: {question.criteria}"
+        )
+        resp = self._get_client().messages.parse(
+            model=self._model,
+            max_tokens=1024,
+            system=system,
+            messages=[{"role": "user", "content": f"Student answer:\n{answer}"}],
+            output_format=CheckableGrade,
             **_PARAMS,
         )
         return _require(resp)

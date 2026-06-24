@@ -251,3 +251,15 @@ Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult
   `load_spacing`, `load_checkable_experience`, `load_checkable_library`.
 - TDD: wrote 3 failing tests first (RED — ImportError); implemented loaders; all 3 turned GREEN.
 - Full suite: 67 passed, 1 skipped; ruff format + check clean; confidentiality gate CLEAN.
+
+## 2026-06-23 — Step 4 Task 3: Model grader (`grade_answer`) (TDD PASS)
+- Added `grade_answer(exp, question, answer) -> CheckableGrade` to the `Model` Protocol,
+  `FakeModel`, and `AnthropicModel`; updated the types import in `model.py`.
+- `FakeModel.__init__` gains an optional `grades: dict[str, list[CheckableGrade]] | None = None`
+  third param (pops by `question_id`); existing callers with 2 positional args unchanged.
+- `AnthropicModel.grade_answer`: builds system prompt from `load_prompt("grade")` + question
+  prompt/answer_key/criteria, sends student answer as user message, parses via `messages.parse`
+  with `output_format=CheckableGrade`; refusal/empty raises `ModelError` via `_require` (mirrors
+  `classify_response`).
+- TDD: 3 failing tests first (RED — unexpected kwarg + AttributeError); implemented; all 3 GREEN.
+- Full suite: 70 passed, 2 skipped (added 3 tests; live smoke stays skipped without key); ruff clean.

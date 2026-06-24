@@ -157,6 +157,39 @@ def test_refusal_raises_model_error():
         AnthropicModel(client=client).classify_intake(_exp(), "opening")
 
 
+def test_grade_answer_parses_correctness_against_criteria():
+    from retnovation.types import CheckableGrade, CheckableQuestion, CheckType
+
+    q = CheckableQuestion(
+        question_id="q1",
+        concept="at_least_once_vs_exactly_once",
+        prompt="Explain effectively-once.",
+        check_type=CheckType.model_graded,
+        answer_key=["idempotent handler makes a duplicate a no-op"],
+        criteria="must mention duplicates and idempotency",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=CheckableGrade(correct=True)))
+    out = AnthropicModel(client=client).grade_answer(
+        _exp(), q, "duplicates are no-ops if idempotent"
+    )
+    assert out.correct is True
+    call = client.messages.parse_calls[0]
+    sys = _system_text(call)
+    assert "must mention duplicates and idempotency" in sys  # criteria reach the grader
+    assert "duplicates are no-ops if idempotent" in _user_text(call)
+
+
+def test_grade_answer_refusal_raises():
+    from retnovation.types import CheckableQuestion, CheckType
+
+    q = CheckableQuestion(
+        question_id="q1", concept="c", prompt="p", check_type=CheckType.model_graded, criteria="x"
+    )
+    client = _Client(parse_result=_Resp(parsed_output=None, stop_reason="refusal"))
+    with pytest.raises(ModelError):
+        AnthropicModel(client=client).grade_answer(_exp(), q, "answer")
+
+
 def test_classify_intake_ignores_hallucinated_codes():
     # The model returns a frame/trap code that is not in the rubric — it must be dropped,
     # or it would corrupt the judgment loop's convergence/target logic.
