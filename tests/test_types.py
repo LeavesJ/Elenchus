@@ -157,3 +157,55 @@ def test_aim_core_content_core_accepts_a_concept_list():
     )
     assert a.content_core == ["safety_vs_liveness"]
     assert c.content_core == ["safety_vs_liveness"]
+
+
+def test_push_carries_raw_response_with_empty_default():
+    from retnovation.types import Push
+
+    p = Push(target_code="f", kind="frame", text="push", response_classification="closed")
+    assert p.response == ""
+    p2 = Push(
+        target_code="f",
+        kind="frame",
+        text="push",
+        response_classification="closed",
+        response="my reply",
+    )
+    assert p2.response == "my reply"
+
+
+def test_sharper_audit_types_and_assessment_field():
+    from retnovation.types import (
+        Assessment,
+        SharperAuditItem,
+        SharperVerdict,
+        StopReason,
+    )
+
+    assert SharperVerdict(sharper=False, reason="bare assent").sharper is False
+    item = SharperAuditItem(
+        code="protect_the_core_lane",
+        kind="frame",
+        instructor_sharper=True,
+        grader_sharper=False,
+        confirmed=False,
+        grader_reason="no mechanism",
+    )
+    assert item.confirmed is False
+    a = Assessment(
+        trajectory=[],
+        frame_deltas=[],
+        frames_closed_under_pressure=[],
+        hard_wrong_flags=[],
+        stop_reason=StopReason.converged,
+    )
+    assert a.sharper_audit == []  # default empty
+    a2 = Assessment(
+        trajectory=[],
+        frame_deltas=[],
+        frames_closed_under_pressure=[],
+        hard_wrong_flags=[],
+        stop_reason=StopReason.converged,
+        sharper_audit=[item],
+    )
+    assert a2.sharper_audit[0].code == "protect_the_core_lane"

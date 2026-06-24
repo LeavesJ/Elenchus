@@ -150,6 +150,7 @@ class Push(BaseModel):
     kind: str
     text: str
     response_classification: str
+    response: str = ""
 
 
 class FrameDelta(BaseModel):
@@ -158,12 +159,27 @@ class FrameDelta(BaseModel):
     after: FrameState
 
 
+class SharperVerdict(BaseModel):
+    sharper: bool
+    reason: str
+
+
+class SharperAuditItem(BaseModel):
+    code: str
+    kind: str
+    instructor_sharper: bool
+    grader_sharper: bool
+    confirmed: bool
+    grader_reason: str
+
+
 class Assessment(BaseModel):
     trajectory: list[Push]
     frame_deltas: list[FrameDelta]
     frames_closed_under_pressure: list[str]
     hard_wrong_flags: list[str]
     stop_reason: StopReason
+    sharper_audit: list[SharperAuditItem] = Field(default_factory=list)
 
 
 class FrameStrength(BaseModel):
