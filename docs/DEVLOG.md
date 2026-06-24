@@ -335,3 +335,20 @@ Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult
 - TDD: `test_concepts_roundtrip_and_never_deleted` appended first; ran RED (KeyError —
   `declarative_seed` not persisted); implemented; GREEN in 0.14 s.
 - Full suite: 81 passed, 2 skipped (was 80+2; net +1); ruff format + check clean.
+
+## 2026-06-23 — Step 4 Task 9: Domain-path onboarding (`aim` / `derive_core`) (TDD PASS)
+- Added `MIN_PROCESS_DIAL = 0` constant to `src/retnovation/aim.py` (CS — content axis maxed,
+  process near-empty per Complete Picture §10).
+- Made `aim(posture, root=None)` path-type-aware: calls `load_path_type(posture, root=root)`;
+  sets `dial = MAX_PROCESS_DIAL` for `path_type == "posture"` (founder), `MIN_PROCESS_DIAL`
+  otherwise (domain / CS). Signature now accepts `root` parameter (mirrors `derive_core`).
+- Made `derive_core(a, root=None)` branch by path type: for `domain` maps loads
+  `load_content_map` → `concepts`; returns `Core(process_frames=[], declarative_seed=concepts,
+  content_core=concepts)` — frames empty, seed = content concepts; for `posture` maps the
+  original `load_map` path is byte-identical (frames + seed, `content_core=None`).
+- Founder posture path (`aim()` / `derive_core(aim())`) fully unchanged — existing two tests
+  still pass.
+- TDD (RED then GREEN): appended 2 CS domain-path tests to `tests/test_aim.py` first;
+  ran RED (`ImportError: cannot import name 'MIN_PROCESS_DIAL'` + `KeyError: 'process_frames'`);
+  implemented; all 4 aim tests GREEN.
+- Full suite: 83 passed, 2 skipped (was 81+2; net +2 new CS tests); ruff format + check clean.
