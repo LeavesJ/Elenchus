@@ -436,3 +436,14 @@ def test_validate_scene_sees_through_markdown_emphasis():
         rubric,
         **kw,
     )  # no raise
+
+
+def test_anti_label_gate_sees_through_markdown_emphasis():
+    """The same emphasis strip applies to the open_ended prompt gate, so a bold-split frame leak in
+    exp.prompt is caught — the two gates stay consistent if abstract prompts also become legible."""
+    from retnovation.generator import anti_label_gate
+
+    res = anti_label_gate(
+        _exp(prompt="**Lead** with what you refuse to do, then decide."), _corpus(), **GATE_KW
+    )
+    assert GateCode.pre_named_framework in res.rejects

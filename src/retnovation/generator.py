@@ -37,6 +37,13 @@ def angle_count(rubric: Rubric) -> int:
     return len(rubric.frames) + len(rubric.traps) + binding + ARTIFACT_DIMENSIONS
 
 
+def _strip_emphasis(text: str) -> str:
+    """Drop markdown emphasis (* and `) so legible bolding cannot split a banned phrase past the
+    anti-label checks (e.g. `**Lead** with what you refuse to do`). `_` is kept — snake_case frame
+    codes legitimately use it. Both prompt gates run text through this before matching."""
+    return text.replace("*", "").replace("`", "")
+
+
 def _contains_phrase(text_lc: str, phrase: str) -> bool:
     return re.search(r"\b" + re.escape(phrase.lower()) + r"\b", text_lc) is not None
 
@@ -61,9 +68,9 @@ def validate_scene(
     framework, no leaked frame/trap code, no type-hint scaffold, no cosmetic wrapper word.
 
     Scenes are authored as legible markdown (bold key terms), so emphasis markers are stripped
-    before the checks — otherwise `**Lead** with what you refuse to do` would split a banned phrase
-    and slip past. `_` is kept (snake_case frame codes legitimately use it)."""
-    text_lc = f"{scene.prompt}\n{scene.situation}".replace("*", "").replace("`", "").lower()
+    (via `_strip_emphasis`) before the checks — otherwise `**Lead** with what you refuse to do`
+    would split a banned phrase and slip past."""
+    text_lc = _strip_emphasis(f"{scene.prompt}\n{scene.situation}").lower()
     banned = [t.lower() for t in framework_denylist] + _frame_trap_phrases(rubric)
     if any(_contains_phrase(text_lc, p) for p in banned):
         raise GateError("scene names a framework or leaks a frame/trap code")
@@ -83,7 +90,7 @@ def anti_label_gate(
 ) -> GateResult:
     rejects: list[GateCode] = []
     downgrades: list[GateCode] = []
-    prompt_lc = exp.prompt.lower()
+    prompt_lc = _strip_emphasis(exp.prompt).lower()
     rubric = exp.rubric
 
     # recoverable_label: anchored to a curated owned-problem with a non-empty unlabeled rationale.

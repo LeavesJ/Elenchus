@@ -806,6 +806,14 @@ Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEn
   its rubric (the gate strips the `**`). Scene stays confidential/untracked.
 - **Verified:** full suite **108 passed, 3 skipped**; ruff clean; confidentiality `git ls-files` empty;
   `data/` untracked.
+- **Adversarial-review fix (Important):** the review found the strip was applied only in
+  `validate_scene`, not in `anti_label_gate` (the abstract-prompt gate) — an asymmetry that would let
+  markdown into `Experience.prompt` bypass the moat if abstract prompts also become legible. Extracted a
+  shared `generator._strip_emphasis(text)` and applied it in BOTH gates; new
+  `test_anti_label_gate_sees_through_markdown_emphasis` (bold-split frame leak in `exp.prompt` now
+  rejected). Minor (pathological non-spaced bold `a**b**c`) deferred: the space-replacement alternative
+  would reopen a worse single-char hiding hole, so empty-replacement is the right tradeoff for curated
+  content. Full suite **109 passed, 3 skipped**; ruff clean.
 
 
 
