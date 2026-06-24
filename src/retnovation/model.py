@@ -239,6 +239,7 @@ class AnthropicModel:
         detail = _target_detail(exp.rubric, kind, code)
         system = (
             load_prompt("response")
+            + (("\n\n" + load_prompt("response_stress")) if stress else "")
             + _situation_block(exp)
             + f"\n\nMode: {exp.rubric.mode.value}"
             + f"\nBinding constraint: {exp.rubric.binding_constraint}"

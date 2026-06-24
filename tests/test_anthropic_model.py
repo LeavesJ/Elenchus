@@ -305,3 +305,23 @@ def test_generate_push_without_stress_is_byte_stable():
     AnthropicModel(client=client).generate_push(_exp(), "frame", "protect_the_core_lane")
     blob = _system_text(client.messages.create_calls[0])
     assert "already engaged this angle" not in blob  # no stress doctrine when stress=False
+
+
+def test_classify_response_stress_mode_adds_the_stress_doctrine():
+    rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push", "reply", stress=True
+    )
+    sys = _system_text(client.messages.parse_calls[0])
+    assert "deepening mechanism" in sys  # marker from response_stress.md
+
+
+def test_classify_response_without_stress_is_byte_stable():
+    rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push", "reply"
+    )
+    sys = _system_text(client.messages.parse_calls[0])
+    assert "deepening mechanism" not in sys  # no stress doctrine when stress=False

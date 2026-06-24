@@ -929,3 +929,7 @@ verify `git ls-files` after any content work). Core-path changes get an independ
 ## 2026-06-24 — Task 4: stress-aware generate_push via push_stress.md
 - Task 4 — stress-aware generate_push: push_stress.md appended only when stress=True;
   byte-stable otherwise; 121/3 green.
+
+## 2026-06-24 — Task 5: stress-aware classify_response via response_stress.md
+- Task 5 — stress-aware classify_response: response_stress.md inserted only when stress=True;
+  byte-stable otherwise; 123/3 green.
