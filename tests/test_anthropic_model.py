@@ -289,3 +289,19 @@ def test_no_scene_calls_omit_the_situation():
     cr = _Client(parse_result=_Resp(parsed_output=rc))
     AnthropicModel(client=cr).classify_response(_exp(), "frame", "protect_the_core_lane", "p", "r")
     assert "Situation:" not in _system_text(cr.messages.parse_calls[0])
+
+
+def test_generate_push_stress_mode_adds_the_stress_doctrine():
+    client = _Client(create_result=_Resp(content=[_TextBlock("What would reverse this?")]))
+    AnthropicModel(client=client).generate_push(
+        _exp(), "frame", "protect_the_core_lane", stress=True
+    )
+    blob = _system_text(client.messages.create_calls[0])
+    assert "already engaged this angle" in blob  # marker from push_stress.md
+
+
+def test_generate_push_without_stress_is_byte_stable():
+    client = _Client(create_result=_Resp(content=[_TextBlock("push")]))
+    AnthropicModel(client=client).generate_push(_exp(), "frame", "protect_the_core_lane")
+    blob = _system_text(client.messages.create_calls[0])
+    assert "already engaged this angle" not in blob  # no stress doctrine when stress=False

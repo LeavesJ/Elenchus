@@ -925,3 +925,7 @@ verify `git ls-files` after any content work). Core-path changes get an independ
 ## 2026-06-24 — Task 3: probe-gated convergence
 - Task 3 — probe-gated convergence (decision_frame force + probed set + stress flag);
   model contract gains keyword-only stress (AnthropicModel ignores until T4-5); 119/3 green.
+
+## 2026-06-24 — Task 4: stress-aware generate_push via push_stress.md
+- Task 4 — stress-aware generate_push: push_stress.md appended only when stress=True;
+  byte-stable otherwise; 121/3 green.

@@ -209,10 +209,13 @@ class AnthropicModel:
         detail = _target_detail(exp.rubric, kind, code)
         prefix = f"Situation:\n{exp.scene.situation}\n\n" if getattr(exp, "scene", None) else ""
         user = f"{prefix}Experience:\n{exp.prompt}\n\nAngle to push on:\n{detail}"
+        system = load_prompt("push")
+        if stress:
+            system += "\n\n" + load_prompt("push_stress")
         resp = self._get_client().messages.create(
             model=self._model,
             max_tokens=1024,
-            system=load_prompt("push"),
+            system=system,
             messages=[{"role": "user", "content": user}],
             **_PARAMS,
         )
