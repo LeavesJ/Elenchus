@@ -105,3 +105,33 @@ def test_load_seed_rejects_non_list(tmp_path):
     p.write_text("")  # yaml.safe_load -> None
     with pytest.raises(ValueError):
         load_seed(p)
+
+
+def test_seed_scene_threads_into_the_corpus(tmp_path):
+    from retnovation.persistence import Store
+    from retnovation.types import Scene
+    from retnovation.veldra_ingest import SeedEntry, ingest
+
+    store = Store(tmp_path / "ing.db")
+    seeds = [
+        SeedEntry(
+            slug="with_scene",
+            domain="founder_ceo",
+            owned_problem="op",
+            why_owned="w",
+            unlabeled="u",
+            provenance="p",
+            scene=Scene(prompt="concrete prompt", situation="the world"),
+        ),
+        SeedEntry(
+            slug="no_scene",
+            domain="founder_ceo",
+            owned_problem="op",
+            why_owned="w",
+            unlabeled="u",
+            provenance="p",
+        ),
+    ]
+    ingest(store, seeds)
+    assert store.get_corpus("veldra:with_scene").scene.prompt == "concrete prompt"
+    assert store.get_corpus("veldra:no_scene").scene is None

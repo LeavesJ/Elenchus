@@ -12,7 +12,7 @@ import yaml
 from pydantic import BaseModel, Field
 
 from .persistence import Store
-from .types import CorpusEntry, LedgerEntry
+from .types import CorpusEntry, LedgerEntry, Scene
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SEED = _REPO_ROOT / "data" / "seed" / "veldra_ledger.yaml"
@@ -27,6 +27,7 @@ class SeedEntry(BaseModel):
     unlabeled: str
     provenance: str
     corpus_pointers: list[str] = Field(default_factory=list)
+    scene: Scene | None = None
 
 
 def ledger_ref(slug: str) -> str:
@@ -55,6 +56,7 @@ def ingest(store: Store, seeds: list[SeedEntry]) -> int:
                 unlabeled=s.unlabeled,
                 provenance=s.provenance,
                 corpus_pointers=s.corpus_pointers,
+                scene=s.scene,
             )
         )
     return len(seeds)

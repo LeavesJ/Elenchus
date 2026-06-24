@@ -679,3 +679,16 @@ Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEn
 - TDD evidence: wrote 2 failing tests first (RED — `AttributeError: 'NoneType' has no attribute
   'prompt'` on both); implemented; GREEN in 0.20 s. Existing 5 persistence tests unaffected.
 - Full suite: **100 passed, 3 skipped** (was 98+3; net +2 new tests); ruff format + check clean.
+
+## 2026-06-23 — Immersive-scenes Task 3: Ingest — `SeedEntry.scene` threads into the corpus (TDD PASS)
+- Added `Scene` to the types import in `src/retnovation/veldra_ingest.py`
+  (`from .types import CorpusEntry, LedgerEntry, Scene`).
+- Added `scene: Scene | None = None` field to `SeedEntry` — optional; existing seed YAMLs without
+  a `scene:` key parse identically (Pydantic default None); idempotent ingest unchanged.
+- Added `scene=s.scene` to the `CorpusEntry(...)` call inside `ingest`'s `upsert_corpus` invocation
+  so the scene propagates from seed → corpus row (persisted by Task 2's `scene_json` column).
+- TDD evidence: appended `test_seed_scene_threads_into_the_corpus` first; ran RED
+  (`AttributeError: 'NoneType' object has no attribute 'prompt'` — `SeedEntry` silently dropped the
+  `scene` kwarg before the field existed, so corpus `scene` was always None); implemented; GREEN.
+- Full suite: **101 passed, 3 skipped** (was 100+3; net +1 new test); ruff format + check clean.
+- Files changed: `src/retnovation/veldra_ingest.py`, `tests/test_ingestion.py`, `docs/DEVLOG.md`.
