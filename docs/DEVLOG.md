@@ -908,9 +908,15 @@ verify `git ls-files` after any content work). Core-path changes get an independ
   + scene; no new `stop_reason` (the non-empty trajectory already encodes "converged after stress");
   core-path (`judgment_loop`/`types`/`model`) gets a whole-branch adversarial review before finishing.
 - Spec written + self-reviewed: `docs/superpowers/specs/2026-06-24-commitment-frame-stress-probe-design.md`
-  (goal, non-goals, doctrine, 7-task build order, edge cases, TDD plan, risks). **Status: design,
-  awaiting user review before the implementation plan.** No code changed yet; suite still 109/3.
-  `main` remains ~39 commits ahead of origin, unpushed (ask before pushing).
+  (goal, non-goals, doctrine, 7-task build order, edge cases, TDD plan, risks). User approved.
+- Implementation plan written + self-reviewed:
+  `docs/superpowers/plans/2026-06-24-commitment-frame-stress-probe.md` — 7 bite-sized TDD tasks
+  (types → loader → loop → stress push → stress response → content → adversarial review/finish), full
+  code per step, per-commit gate, expected suite counts 112→124. One refinement vs. the spec: stress
+  doctrine lives in separate `content/prompts/{push,response}_stress.md` files loaded only when
+  `stress=True` (cleaner byte-stability than an inline block). **Status: plan ready; awaiting the
+  execution-mode choice (subagent-driven vs inline).** No code changed yet; suite still 109/3. `main`
+  remains ~39 commits ahead of origin, unpushed (ask before pushing).
 
 
 
