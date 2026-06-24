@@ -787,5 +787,8 @@ Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEn
 - Next: merge to `main`; re-run the live dogfood to feel the concrete scene; then the queued
   mined-case-library project (see memory `retnovation-case-library-idea`).
 
+## 2026-06-23 — `veldra_ingest` `__main__` guard: `python -m retnovation.veldra_ingest` now runs `main()`
+- Added `if __name__ == "__main__": raise SystemExit(main())` so the module runs via `python -m` instead of silently importing and doing nothing (resolves the follow-up flagged in the immersive-scenes entry). Verified `PYTHONPATH=src python -m retnovation.veldra_ingest` → `ingested 14 ledger entries (...)`, exit 0; ruff format/check clean; pytest 107 passed, 3 skipped.
+
 
 

@@ -72,3 +72,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = ", ".join(f"{k}={v}" for k, v in sorted(by_domain.items()))
     print(f"ingested {n} ledger entries ({summary})")
     return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
