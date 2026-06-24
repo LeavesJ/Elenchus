@@ -727,4 +727,25 @@ Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEn
   ruff format + check clean.
 - Files changed: `src/retnovation/experience.py`, `tests/test_experience.py`, `docs/DEVLOG.md`.
 
+## 2026-06-23 — Immersive-scenes Task 6: `AnthropicModel` weaves `situation` into judgment-loop calls (TDD PASS)
+- Added module-level helper `_situation_block(exp) -> str` to `src/retnovation/model.py` (near
+  `_render_rubric`): guards `getattr(exp, "scene", None)` — returns `"\n\nSituation:\n{situation}"`
+  when a scene is present, `""` otherwise. Safe on any experience type.
+- Wove `_situation_block(exp)` into all three judgment-loop calls:
+  - `classify_intake` system: `load_prompt("intake") + _situation_block(exp) + "\n\n" + _render_rubric(exp.rubric)`
+  - `generate_push` user: replaced single `user = ...` line with `prefix`/`user` two-line version —
+    `prefix = f"Situation:\n{exp.scene.situation}\n\n" if getattr(exp, "scene", None) else ""`
+    then `user = f"{prefix}Experience:\n..."`. No unused local variable (ruff clean).
+  - `classify_response` system: inserted `_situation_block(exp)` between `load_prompt("response")`
+    and the mode/binding-constraint/target-angle lines.
+- Byte-stability: when `exp.scene` is None, all three calls produce NO `Situation:` text —
+  identical to pre-Task-6 behaviour. `FakeModel` unchanged (scripted; scenes irrelevant).
+- TDD evidence: appended `_exp_with_scene`, `test_situation_is_woven_in_when_a_scene_is_present`,
+  `test_no_scene_calls_omit_the_situation` to `tests/test_anthropic_model.py` BEFORE implementing.
+  `test_situation_is_woven_in_when_a_scene_is_present` RED (assert "mid-rollout" in call failed —
+  situation not yet in call). Implemented; both tests GREEN; all 11 model tests pass.
+- Full suite: **106 passed, 3 skipped** (was 104+3; net +2 new tests); ruff format + check clean.
+- Files changed: `src/retnovation/model.py`, `tests/test_anthropic_model.py`, `docs/DEVLOG.md`.
+
+
 

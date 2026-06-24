@@ -107,6 +107,11 @@ class _IntakeWire(BaseModel):
     traps: list[_TrapStateItem]
 
 
+def _situation_block(exp) -> str:
+    scene = getattr(exp, "scene", None)
+    return f"\n\nSituation:\n{scene.situation}" if scene is not None else ""
+
+
 def _render_rubric(rubric) -> str:
     lines = [
         f"Mode: {rubric.mode.value}",
@@ -162,7 +167,7 @@ class AnthropicModel:
         return self._client
 
     def classify_intake(self, exp: Experience, opening: str) -> IntakeClassification:
-        system = load_prompt("intake") + "\n\n" + _render_rubric(exp.rubric)
+        system = load_prompt("intake") + _situation_block(exp) + "\n\n" + _render_rubric(exp.rubric)
         resp = self._get_client().messages.parse(
             model=self._model,
             max_tokens=2048,
@@ -186,7 +191,8 @@ class AnthropicModel:
 
     def generate_push(self, exp: Experience, kind: str, code: str) -> str:
         detail = _target_detail(exp.rubric, kind, code)
-        user = f"Experience:\n{exp.prompt}\n\nAngle to push on:\n{detail}"
+        prefix = f"Situation:\n{exp.scene.situation}\n\n" if getattr(exp, "scene", None) else ""
+        user = f"{prefix}Experience:\n{exp.prompt}\n\nAngle to push on:\n{detail}"
         resp = self._get_client().messages.create(
             model=self._model,
             max_tokens=1024,
@@ -207,6 +213,7 @@ class AnthropicModel:
         detail = _target_detail(exp.rubric, kind, code)
         system = (
             load_prompt("response")
+            + _situation_block(exp)
             + f"\n\nMode: {exp.rubric.mode.value}"
             + f"\nBinding constraint: {exp.rubric.binding_constraint}"
             + f"\nTarget angle: {detail}"
