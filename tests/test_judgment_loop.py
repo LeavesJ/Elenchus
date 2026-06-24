@@ -161,3 +161,31 @@ def test_regression_stops_when_student_backslides():
     assert "protect_the_core_lane" not in a.frames_closed_under_pressure
     # the raw student response is captured on the push
     assert a.trajectory[-1].response == "reply"
+
+
+def test_plateau_stops_on_two_distinct_unmoved_targets():
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.absent,
+            "protect_the_core_lane": FrameState.absent,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+        },
+    )
+
+    def unchanged():
+        return [
+            ResponseClassification(outcome="unchanged", mechanism_supplied=False, hard_wrong=False)
+        ]
+
+    m = FakeModel(
+        intake,
+        {"lead_with_what_you_refuse_to_do": unchanged(), "protect_the_core_lane": unchanged()},
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+    assert a.stop_reason is StopReason.plateau
+    # rotation happened: the two pushes were on DISTINCT targets
+    pushed = [p.target_code for p in a.trajectory]
+    assert len(pushed) == 2 and pushed[0] != pushed[1]

@@ -26,19 +26,25 @@ def _lower(state: FrameState) -> FrameState:
     return _LOWER[state]
 
 
-def _select_target(exp: Experience, frame_states, trap_states):
-    """Tripped traps first, then binding-adjacent absent frames, then remaining absent frames."""
+def _select_target(exp: Experience, frame_states, trap_states, exhausted):
+    """Tripped traps first, then binding-adjacent absent frames, then remaining absent frames.
+    Skips codes already exhausted (a non-moving push) so the loop rotates to a fresh angle."""
     for t in exp.rubric.traps:
+        if t.trap_code in exhausted:
+            continue
         if trap_states.get(t.trap_code) is TrapState.tripped:
             return ("trap", t.trap_code)
     binding = exp.rubric.binding_constraint
     if (
         binding
+        and binding not in exhausted
         and frame_states.get(binding) is not None
         and frame_states[binding] is not FrameState.present_reasoned
     ):
         return ("frame", binding)
     for f in exp.rubric.frames:
+        if f.frame_code in exhausted:
+            continue
         if frame_states.get(f.frame_code) is not FrameState.present_reasoned:
             return ("frame", f.frame_code)
     return None
@@ -61,7 +67,8 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
     deltas: list[FrameDelta] = []
     closed: list[str] = []
     hard_wrong: list[str] = []
-    recent_moved: list[bool] = []
+    exhausted: set[str] = set()
+    recent: list[tuple[str, bool]] = []  # (code, moved) for the last pushes
     stop_reason: StopReason | None = None
 
     while True:
@@ -71,13 +78,18 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
         if len(trajectory) >= MAX_PUSHES:
             stop_reason = StopReason.budget
             break
-        if len(recent_moved) >= 2 and not recent_moved[-1] and not recent_moved[-2]:
+        if (
+            len(recent) >= 2
+            and recent[-1][0] != recent[-2][0]
+            and not recent[-1][1]
+            and not recent[-2][1]
+        ):
             stop_reason = StopReason.plateau
             break
 
-        target = _select_target(exp, frame_states, trap_states)
+        target = _select_target(exp, frame_states, trap_states, exhausted)
         if target is None:
-            stop_reason = StopReason.converged
+            stop_reason = StopReason.plateau
             break
         kind, code = target
 
@@ -131,6 +143,8 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
             else:
                 trap_states[code] = TrapState.repaired
             moved = True
+        else:
+            exhausted.add(code)
 
         trajectory.append(
             Push(
@@ -141,7 +155,7 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
                 response=response,
             )
         )
-        recent_moved.append(moved)
+        recent.append((code, moved))
 
     return Assessment(
         trajectory=trajectory,

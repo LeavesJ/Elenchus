@@ -529,6 +529,27 @@ Task 1 — added `Push.response` (default ""), `SharperVerdict`, `SharperAuditIt
   judgment_loop tests green).
 - Full suite: **95 passed, 3 skipped** (was 94+3; net +1 new test); ruff format + check clean.
 
+## 2026-06-23 — Step 5 Task 5: Distinct-target plateau via angle rotation (TDD PASS)
+- Replaced the single-target `recent_moved: list[bool]` plateau with a rotation-aware mechanism.
+- `_select_target` gains an `exhausted: set[str]` parameter; skips any code already in `exhausted`
+  so the loop rotates to a fresh angle on each non-moving push.
+- In `assess`: `recent_moved` replaced by `exhausted: set[str]` + `recent: list[tuple[str, bool]]`
+  (code, moved) for the last pushes.
+- Plateau check updated: fires when `recent[-1][0] != recent[-2][0]` and both moves are False —
+  i.e., two DISTINCT targets both moved nothing, matching JudgmentLoop §2/§6 doctrine.
+- `_select_target(...)` call updated to pass `exhausted`; the `target is None` branch now maps to
+  `StopReason.plateau` (out of distinct angles while not converged, not converged).
+- Move/no-move handling: `else: exhausted.add(code)` added; `recent.append((code, moved))`
+  replaces the old `recent_moved.append(moved)`.
+- TDD evidence: `test_plateau_stops_on_two_distinct_unmoved_targets` written first (RED —
+  `IndexError: pop from empty list` because loop re-hammered the first target); implemented;
+  GREEN. All 5 judgment_loop tests pass.
+- Regression checks: `test_cooperative_student_converges` (every push closes → moved=True → no
+  rotation → still converges), `test_bounded_error_violation_stops_immediately`,
+  `test_budget_caps_unproductive_loop` (stops at plateau, still in asserted set),
+  `test_regression_stops_when_student_backslides` (Task 4) all GREEN.
+- Full suite: **96 passed, 3 skipped** (was 95+3; net +1 new test); ruff format + check clean.
+
 ## 2026-06-23 — Step 5 Task 3: Independent blind sharper grader `audit_sharper` (TDD PASS)
 - Created `src/retnovation/assessment/sharper_grader.py`: `audit_sharper(exp, assessment, model) ->
   Assessment` — a pure function that re-grades every closing push for frames in
