@@ -886,5 +886,31 @@ verify `git ls-files` after any content work). Core-path changes get an independ
   beyond Veldra (Stripe…, later Dimon/Solomon/Lip-Bu Tan); the two-content-sources reframe + 3 moat
   tensions are captured there. Build *on* the scene mechanism.
 
+## 2026-06-24 — Commitment frame + stress probe: brainstorm + spec (design, pre-plan)
+- Picked up the handover's next task ("act on the commitment-frame finding / rubric depth"). Ran the
+  brainstorming skill against the dogfood finding (`retnovation-commitment-frame-gap`): the
+  `license_continuity` rubric scores *engaging the angles* but has no frame for the decision the
+  prompt demands, and a strong answer converges at intake with zero pushes / empty trajectory — the
+  instructor goes silent exactly when the student is strongest.
+- **Decisions (brainstorming, 4 forks):** (1) scope = a general opt-in **stress-mode convention**, not
+  a one-off patch (user accepted §13's generalize-from-one-datapoint caveat); (2) trigger = a declared
+  `decision_frame` rubric field (doctrine-as-data) — the named frame is exempt from intake-convergence
+  and always gets exactly one stress probe; (3) decision bar = **commit + own the trade + name the
+  reversal tripwire**, paired trap `commit_without_a_tripwire` (the tripwire is the supplied mechanism
+  → conclusion-agnostic by construction); (4) integration = **Approach A, probe-gated convergence** —
+  one unified loop path (`_converged`/`_select_target` guards on a new `probed` set; `generate_push`/
+  `classify_response` become stress-aware), reusing the existing push→response→sharper→audit machinery;
+  byte-stable for every rubric with no `decision_frame`. Rejected: content-only (doesn't cure the
+  silence), auto-stress-all-genuinely_open (eagerness confound), post-converge bolt-on (dual-path),
+  restoring `choose_the_failure_default_deliberately` (ReserveGrid-specific, misfits escrow).
+- **Hard doctrine carried through:** never grade the conclusion (the probe tests the commitment's
+  *reasoning*, not its rightness); the unlabeled moat auto-bans the new frame/trap phrases from prompt
+  + scene; no new `stop_reason` (the non-empty trajectory already encodes "converged after stress");
+  core-path (`judgment_loop`/`types`/`model`) gets a whole-branch adversarial review before finishing.
+- Spec written + self-reviewed: `docs/superpowers/specs/2026-06-24-commitment-frame-stress-probe-design.md`
+  (goal, non-goals, doctrine, 7-task build order, edge cases, TDD plan, risks). **Status: design,
+  awaiting user review before the implementation plan.** No code changed yet; suite still 109/3.
+  `main` remains ~39 commits ahead of origin, unpushed (ask before pushing).
+
 
 
