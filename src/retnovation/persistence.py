@@ -12,6 +12,7 @@ from .types import (
     LedgerEntry,
     NextExperienceSpec,
     Regime,
+    Scene,
     SpacedItem,
     Strength,
 )
@@ -27,7 +28,8 @@ CREATE TABLE IF NOT EXISTS queue (
   target_frames_json TEXT NOT NULL, ledger_ref TEXT NOT NULL, regime TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS corpus (
   ledger_ref TEXT PRIMARY KEY, domain TEXT NOT NULL, why_owned TEXT NOT NULL,
-  unlabeled TEXT NOT NULL, provenance TEXT NOT NULL, corpus_pointers_json TEXT NOT NULL);
+  unlabeled TEXT NOT NULL, provenance TEXT NOT NULL, corpus_pointers_json TEXT NOT NULL,
+  scene_json TEXT);
 CREATE TABLE IF NOT EXISTS concepts (
   concept TEXT PRIMARY KEY, due TEXT NOT NULL, interval_days INTEGER NOT NULL);
 """
@@ -40,6 +42,10 @@ class Store:
         self._db.row_factory = sqlite3.Row
         self._db.executescript(_SCHEMA)
         self._db.commit()
+        cols = {r["name"] for r in self._db.execute("PRAGMA table_info(corpus)")}
+        if "scene_json" not in cols:
+            self._db.execute("ALTER TABLE corpus ADD COLUMN scene_json TEXT")
+            self._db.commit()
 
     def close(self) -> None:
         self._db.close()
@@ -116,9 +122,11 @@ class Store:
     def upsert_corpus(self, entry: CorpusEntry) -> None:
         self._db.execute(
             "INSERT INTO corpus(ledger_ref,domain,why_owned,unlabeled,provenance,"
-            "corpus_pointers_json) VALUES(?,?,?,?,?,?) ON CONFLICT(ledger_ref) DO UPDATE SET "
+            "corpus_pointers_json,scene_json) VALUES(?,?,?,?,?,?,?) "
+            "ON CONFLICT(ledger_ref) DO UPDATE SET "
             "domain=excluded.domain,why_owned=excluded.why_owned,unlabeled=excluded.unlabeled,"
-            "provenance=excluded.provenance,corpus_pointers_json=excluded.corpus_pointers_json",
+            "provenance=excluded.provenance,corpus_pointers_json=excluded.corpus_pointers_json,"
+            "scene_json=excluded.scene_json",
             (
                 entry.ledger_ref,
                 entry.domain,
@@ -126,12 +134,14 @@ class Store:
                 entry.unlabeled,
                 entry.provenance,
                 json.dumps(entry.corpus_pointers),
+                entry.scene.model_dump_json() if entry.scene else None,
             ),
         )
         self._db.commit()
 
     @staticmethod
     def _corpus_row(r: sqlite3.Row) -> CorpusEntry:
+        scene_json = r["scene_json"]
         return CorpusEntry(
             ledger_ref=r["ledger_ref"],
             domain=r["domain"],
@@ -139,6 +149,7 @@ class Store:
             unlabeled=r["unlabeled"],
             provenance=r["provenance"],
             corpus_pointers=json.loads(r["corpus_pointers_json"]),
+            scene=Scene.model_validate_json(scene_json) if scene_json else None,
         )
 
     def load_corpus(self) -> list[CorpusEntry]:

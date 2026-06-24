@@ -664,3 +664,18 @@ Task 1 — added `Push.response` (default ""), `SharperVerdict`, `SharperAuditIt
 
 ## 2026-06-23 — Immersive-scenes Task 1: Types — `Scene`, `CorpusEntry.scene`, `Experience.scene` (TDD PASS)
 Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEntry.scene: Scene | None = None`; `Experience.scene: Scene | None = None` (runtime-only, after `checkable`). 98 passed, 3 skipped; ruff clean.
+
+## 2026-06-23 — Immersive-scenes Task 2: Persistence — `scene_json` column + guarded migration + round-trip (TDD PASS)
+- Added `Scene` to the types import in `src/retnovation/persistence.py`.
+- Extended `_SCHEMA` corpus table with `scene_json TEXT` (nullable) — fresh DBs get the column
+  automatically (L-8).
+- Added a guarded `ALTER TABLE corpus ADD COLUMN scene_json TEXT` migration in `Store.__init__`
+  (after `executescript`/`commit`): reads `PRAGMA table_info(corpus)`, adds the column only if
+  absent — idempotent; existing `data/retnovation.db` (and any pre-existing corpus table) is
+  migrated transparently on first open.
+- Updated `upsert_corpus`: inserts/updates `scene_json` via `entry.scene.model_dump_json()` or NULL.
+- Updated `_corpus_row`: parses `scene_json` back with `Scene.model_validate_json` when non-NULL;
+  returns `scene=None` for NULL rows — round-trip lossless.
+- TDD evidence: wrote 2 failing tests first (RED — `AttributeError: 'NoneType' has no attribute
+  'prompt'` on both); implemented; GREEN in 0.20 s. Existing 5 persistence tests unaffected.
+- Full suite: **100 passed, 3 skipped** (was 98+3; net +2 new tests); ruff format + check clean.

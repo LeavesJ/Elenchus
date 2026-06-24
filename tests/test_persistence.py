@@ -86,3 +86,65 @@ def test_concepts_roundtrip_and_never_deleted(tmp_path):
     re2 = Store(tmp_path / "c.db").load_state()
     assert set(re2.declarative_seed) == {"safety_vs_liveness"}
     assert re2.declarative_seed["safety_vs_liveness"].interval_days == 1
+
+
+def test_corpus_scene_roundtrip_and_none_default(tmp_path):
+    from retnovation.types import CorpusEntry, Scene
+
+    s = Store(tmp_path / "sc.db")
+    s.upsert_corpus(
+        CorpusEntry(
+            ledger_ref="veldra:a",
+            domain="founder_ceo",
+            why_owned="stakes",
+            unlabeled="u",
+            provenance="p",
+            corpus_pointers=[],
+            scene=Scene(prompt="concrete", situation="world"),
+        )
+    )
+    s.upsert_corpus(
+        CorpusEntry(
+            ledger_ref="veldra:b",
+            domain="founder_ceo",
+            why_owned="stakes",
+            unlabeled="u",
+            provenance="p",
+            corpus_pointers=[],
+        )
+    )  # no scene
+    loaded = Store(tmp_path / "sc.db")
+    assert loaded.get_corpus("veldra:a").scene.prompt == "concrete"
+    assert loaded.get_corpus("veldra:a").scene.situation == "world"
+    assert loaded.get_corpus("veldra:b").scene is None
+
+
+def test_corpus_scene_column_is_migrated_onto_an_old_table(tmp_path):
+    import sqlite3
+
+    from retnovation.types import CorpusEntry, Scene
+
+    db = tmp_path / "old.db"
+    # an OLD corpus table without scene_json
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "CREATE TABLE corpus (ledger_ref TEXT PRIMARY KEY, domain TEXT NOT NULL, "
+        "why_owned TEXT NOT NULL, unlabeled TEXT NOT NULL, provenance TEXT NOT NULL, "
+        "corpus_pointers_json TEXT NOT NULL)"
+    )
+    con.commit()
+    con.close()
+    # opening via Store migrates the table; a scene then round-trips
+    s = Store(db)
+    s.upsert_corpus(
+        CorpusEntry(
+            ledger_ref="veldra:a",
+            domain="founder_ceo",
+            why_owned="s",
+            unlabeled="u",
+            provenance="p",
+            corpus_pointers=[],
+            scene=Scene(prompt="c", situation="w"),
+        )
+    )
+    assert Store(db).get_corpus("veldra:a").scene.prompt == "c"
