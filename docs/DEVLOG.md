@@ -252,6 +252,19 @@ Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult
 - TDD: wrote 3 failing tests first (RED — ImportError); implemented loaders; all 3 turned GREEN.
 - Full suite: 67 passed, 1 skipped; ruff format + check clean; confidentiality gate CLEAN.
 
+## 2026-06-23 — Step 4 Task 4: Checkable scorer (cs_technical regime) (TDD PASS)
+- Replaced the `NotImplementedError` stub in `src/retnovation/assessment/checkable_scorer.py`
+  with the real scorer: `_normalize` (lowercase, strip, collapse whitespace, strip punctuation),
+  `_render` (question prompt + choices if any), `score_question` (deterministic: normalized
+  match against `answer_key`, model-free; model_graded: `model.grade_answer(...).correct`),
+  `assess` (iterates `exp.checkable.questions`, collects answers via `work.respond`, returns
+  `CheckableAssessment`). Empty `answer_key` on deterministic raises `ValueError` (fail loud).
+- TDD: wrote `tests/test_checkable_scorer.py` first (4 tests); confirmed RED (all 4 failed
+  with `NotImplementedError`); implemented; all 4 GREEN.
+- Updated `tests/test_dispatch.py`: replaced the old stub-era `NotImplementedError` expectation
+  with a real-registration assertion (`checkable_scorer.assess is get_assessor(Regime.cs_technical)`).
+- Full suite: 74 passed, 2 skipped (was 70 + 2 baseline; net +4 scorer tests); ruff clean.
+
 ## 2026-06-23 — Step 4 Task 3: Model grader (`grade_answer`) (TDD PASS)
 - Added `grade_answer(exp, question, answer) -> CheckableGrade` to the `Model` Protocol,
   `FakeModel`, and `AnthropicModel`; updated the types import in `model.py`.
