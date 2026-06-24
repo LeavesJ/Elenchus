@@ -23,6 +23,22 @@ SELECTORS: dict[Regime, Callable] = {
 }
 
 
+def _attach_scene(exp: Experience, corpus: list[CorpusEntry], root: Path | None) -> Experience:
+    entry = next((c for c in corpus if c.ledger_ref == exp.ledger_ref), None)
+    if entry is None or entry.scene is None or exp.rubric is None:
+        return exp  # no scene, or a non-open_ended (no rubric) experience → unchanged
+    from .content_loader import load_denylist
+    from .generator import validate_scene
+
+    validate_scene(
+        entry.scene,
+        exp.rubric,
+        framework_denylist=load_denylist("framework_denylist", root),
+        scaffold_denylist=load_denylist("scaffold_denylist", root),
+    )
+    return exp.model_copy(update={"prompt": entry.scene.prompt, "scene": entry.scene})
+
+
 def select_experience(
     core: Core,
     state: LearnerState,
@@ -32,4 +48,5 @@ def select_experience(
     root: Path | None = None,
 ) -> Experience:
     regime = spec.regime if spec is not None else Regime.open_ended
-    return SELECTORS[regime](core, state, ledger, corpus, spec, root)
+    exp = SELECTORS[regime](core, state, ledger, corpus, spec, root)
+    return _attach_scene(exp, corpus, root)

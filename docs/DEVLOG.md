@@ -707,3 +707,24 @@ Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEn
 - Full suite: **102 passed, 3 skipped** (was 101+3; net +1 new test); ruff format + check clean.
 - Files changed: `src/retnovation/generator.py`, `tests/test_generator.py`, `docs/DEVLOG.md`.
 
+## 2026-06-23 — Immersive-scenes Task 5: `select_experience` attaches + moat-validates the corpus scene (TDD PASS)
+- Added `_attach_scene(exp, corpus, root) -> Experience` helper to `src/retnovation/experience.py`:
+  looks up the corpus entry for `exp.ledger_ref`; if the entry has a `scene` AND `exp.rubric` is
+  not None (open_ended), calls `validate_scene` via local imports of `load_denylist`
+  (content_loader) and `validate_scene` (generator) — the moat holds over what the student sees;
+  then returns `exp.model_copy(update={"prompt": scene.prompt, "scene": scene})`.
+  No scene, no corpus entry, or `exp.rubric is None` (cs_technical) → `exp` unchanged.
+- Updated `select_experience`: captures the selector result as `exp`, passes it through
+  `_attach_scene(exp, corpus, root)`, returns the result. `run_session`, the selectors, and
+  all other modules are untouched.
+- TDD evidence: appended two failing tests to `tests/test_experience.py` first:
+  `test_select_experience_attaches_a_corpus_scene_and_overrides_prompt` (RED —
+  `exp2.prompt` still the abstract prompt; `exp2.scene` is None) and
+  `test_select_experience_without_a_scene_is_unchanged` (RED — would have passed coincidentally,
+  but the first test failure confirms the feature is not yet wired). Implemented; both GREEN.
+- Regression: `test_dry_run.py` and `test_orchestration.py` (corpus has no scenes) → experiences
+  unchanged; both pass. Full suite: **104 passed, 3 skipped** (was 102+3; net +2 new tests);
+  ruff format + check clean.
+- Files changed: `src/retnovation/experience.py`, `tests/test_experience.py`, `docs/DEVLOG.md`.
+
+
