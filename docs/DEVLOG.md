@@ -265,6 +265,22 @@ Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult
   with a real-registration assertion (`checkable_scorer.assess is get_assessor(Regime.cs_technical)`).
 - Full suite: 74 passed, 2 skipped (was 70 + 2 baseline; net +4 scorer tests); ruff clean.
 
+## 2026-06-23 — Step 4 Task 5: CS domain-path selector `select_cs_technical` (TDD PASS)
+- Replaced the `NotImplementedError` stub in `src/retnovation/generator.py::select_cs_technical`
+  with the real CS selector: `_concept_coverage(exp, targets)` counts how many target codes appear
+  in `{q.concept for q in exp.checkable.questions}`; `select_cs_technical` loads the checkable
+  library via `load_checkable_library` (NEVER `load_gated_library` / `load_library` — the anti-label
+  gate must never touch CS experiences), raises `GateError` if empty, resolves targets from
+  `spec.target_frames` → `core.content_core` → `[]` (cold start), ranks by
+  `(-coverage, experience_id)`, returns `ranked[0]`.
+- Added `load_checkable_library` to the import block in `generator.py`.
+- TDD: replaced `test_select_cs_technical_is_a_step4_stub` with two new tests (RED first — both
+  failed `NotImplementedError`); replaced `test_select_experience_cs_technical_is_stubbed` in
+  `test_experience.py` with `test_select_experience_dispatches_cs_technical`; confirmed RED (3
+  failures); implemented; all 3 GREEN.
+- Removed now-unused `import pytest` from `tests/test_experience.py` (ruff F401).
+- Full suite: 75 passed, 2 skipped (baseline was 74 + 2); ruff format + check clean.
+
 ## 2026-06-23 — Step 4 Task 3: Model grader (`grade_answer`) (TDD PASS)
 - Added `grade_answer(exp, question, answer) -> CheckableGrade` to the `Model` Protocol,
   `FakeModel`, and `AnthropicModel`; updated the types import in `model.py`.

@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import re
 
-from .content_loader import load_denylist, load_library, load_min_angle_count
+from .content_loader import (
+    load_checkable_library,
+    load_denylist,
+    load_library,
+    load_min_angle_count,
+)
 from .types import CorpusEntry, Experience, GateCode, GateResult, Mode, Regime, Rubric
 
 ARTIFACT_DIMENSIONS = (
@@ -139,5 +144,20 @@ def select_open_ended(core, state, ledger, corpus, spec, root=None) -> Experienc
     return ranked[0][0]
 
 
+def _concept_coverage(exp: Experience, targets: list[str]) -> int:
+    concepts = {q.concept for q in exp.checkable.questions}
+    return sum(1 for t in targets if t in concepts)
+
+
 def select_cs_technical(core, state, ledger, corpus, spec, root=None) -> Experience:
-    raise NotImplementedError("cs_technical domain-path selector is built in step 4")
+    lib = load_checkable_library(root)
+    if not lib:
+        raise GateError("no cs_technical experience in the checkable library")
+    if spec is not None and spec.target_frames:
+        targets = spec.target_frames
+    elif core is not None and core.content_core:
+        targets = core.content_core
+    else:
+        targets = []
+    ranked = sorted(lib, key=lambda e: (-_concept_coverage(e, targets), e.experience_id))
+    return ranked[0]

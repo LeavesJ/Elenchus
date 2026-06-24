@@ -1,5 +1,3 @@
-import pytest
-
 from retnovation.aim import aim, derive_core
 from retnovation.experience import SELECTORS, select_experience
 from retnovation.persistence import Store
@@ -43,12 +41,20 @@ def test_select_experience_dispatches_open_ended_and_gates(tmp_path):
     assert any(f.frame_code == "protect_the_core_lane" for f in exp.rubric.frames)
 
 
-def test_select_experience_cs_technical_is_stubbed(tmp_path):
-    store = Store(tmp_path / "e2.db")
-    _seed_corpus(store)
-    spec = NextExperienceSpec(target_frames=[], ledger_ref="", regime=Regime.cs_technical)
-    with pytest.raises(NotImplementedError):
-        select_experience(derive_core(aim()), LearnerState(), [], store.load_corpus(), spec)
+def test_select_experience_dispatches_cs_technical(tmp_path):
+    from retnovation.types import Core
+
+    spec = NextExperienceSpec(
+        target_frames=["safety_vs_liveness"], ledger_ref="", regime=Regime.cs_technical
+    )
+    core = Core(
+        process_frames=[],
+        declarative_seed=["safety_vs_liveness"],
+        content_core=["safety_vs_liveness"],
+    )
+    exp = select_experience(core, LearnerState(), [], [], spec)
+    assert exp.regime is Regime.cs_technical
+    assert exp.checkable is not None and exp.rubric is None
 
 
 def test_fixed_experience_is_retired():

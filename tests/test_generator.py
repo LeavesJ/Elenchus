@@ -249,11 +249,32 @@ def test_select_open_ended_ranks_by_frame_coverage(tmp_path):
     assert exp.experience_id == "seed_a"  # only A carries protect_the_core_lane
 
 
-def test_select_cs_technical_is_a_step4_stub():
+def test_select_cs_technical_ranks_by_concept_coverage():
     from retnovation.generator import select_cs_technical
+    from retnovation.types import LearnerState, NextExperienceSpec, Regime
 
-    with pytest.raises(NotImplementedError):
-        select_cs_technical(core=None, state=None, ledger=[], corpus=[], spec=None)
+    spec = NextExperienceSpec(
+        target_frames=["safety_vs_liveness", "quorum_intersection"],
+        ledger_ref="",
+        regime=Regime.cs_technical,
+    )
+    exp = select_cs_technical(core=None, state=LearnerState(), ledger=[], corpus=[], spec=spec)
+    # consensus_safety_liveness covers both target concepts; replication_models covers neither
+    assert exp.experience_id == "consensus_safety_liveness"
+    assert exp.regime is Regime.cs_technical and exp.ledger_ref == "veldra:consensus_correctness"
+
+
+def test_select_cs_technical_cold_start_falls_back_to_content_core():
+    from retnovation.generator import select_cs_technical
+    from retnovation.types import Core, LearnerState
+
+    core = Core(
+        process_frames=[],
+        declarative_seed=["linearizability_vs_eventual"],
+        content_core=["linearizability_vs_eventual"],
+    )
+    exp = select_cs_technical(core=core, state=LearnerState(), ledger=[], corpus=[], spec=None)
+    assert exp.experience_id == "replication_models"  # the one covering that concept
 
 
 def test_every_authored_rubric_passes_the_gate_and_clears_eight_angles():
