@@ -298,6 +298,17 @@ Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult
   unaffected.
 - Full suite: 78 passed, 2 skipped (was 75+2); ruff format + check clean.
 
+## 2026-06-23 — Step 4 Task 7: Regime-aware scheduler (TDD PASS)
+- Made `schedule_next` regime-aware: inserted a `cs_technical` branch before the existing frame
+  logic. For `cs_technical`, reads `state.declarative_seed` (`SpacedItem`); returns all
+  due concepts (`due <= now`, ordered by `due`) when any exist; otherwise the single
+  soonest-due concept; puts codes in `NextExperienceSpec.target_frames` with `regime=cs_technical`.
+- `open_ended` branch byte-identical — no logic touched.
+- TDD: 2 failing tests appended first (RED — both returned `[]`); implemented cs branch;
+  both GREEN. Existing 2 open_ended tests unchanged and still pass.
+- ruff: 1 file reformatted (dict-literal style in test); check clean.
+- Full suite: 80 passed, 2 skipped (baseline was 78+2; net +2).
+
 ## 2026-06-23 — Step 4 Task 3: Model grader (`grade_answer`) (TDD PASS)
 - Added `grade_answer(exp, question, answer) -> CheckableGrade` to the `Model` Protocol,
   `FakeModel`, and `AnthropicModel`; updated the types import in `model.py`.
