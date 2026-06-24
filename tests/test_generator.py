@@ -378,3 +378,30 @@ def test_seed_ledger_refs_resolve_in_the_real_corpus():
             assert entry.unlabeled.strip(), f"{exp.ledger_ref} has empty unlabeled rationale"
     finally:
         store.close()
+
+
+@pytest.mark.skipif(
+    not __import__("pathlib").Path("data/retnovation.db").exists(),
+    reason="real seeded corpus (gitignored data/) not present",
+)
+def test_seeded_license_scene_clears_the_moat():
+    """The authored (gitignored) license_continuity scene the student actually sees must clear the
+    same anti-label bar as the abstract prompt — the moat holds over the concrete scene + situation."""
+    from retnovation.content_loader import load_denylist, load_experience
+    from retnovation.generator import validate_scene
+    from retnovation.persistence import Store
+
+    store = Store("data/retnovation.db")
+    try:
+        entry = store.get_corpus("veldra:license_fork_risk")
+        if entry is None or entry.scene is None:
+            pytest.skip("license_fork_risk scene not authored in this data/")
+        rubric = load_experience("license_continuity").rubric
+        validate_scene(  # must not raise — a leaking authored scene would be a moat breach
+            entry.scene,
+            rubric,
+            framework_denylist=load_denylist("framework_denylist"),
+            scaffold_denylist=load_denylist("scaffold_denylist"),
+        )
+    finally:
+        store.close()

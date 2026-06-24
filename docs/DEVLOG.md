@@ -753,5 +753,39 @@ Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEn
 - Full suite: **106 passed, 3 skipped** (was 104+3; net +2 new tests); ruff format + check clean.
 - Files changed: `src/retnovation/model.py`, `tests/test_anthropic_model.py`, `docs/DEVLOG.md`.
 
+## 2026-06-23 — immersive-scenes COMPLETE: concrete corpus-sourced experience prompts
+- Built on branch `immersive-scenes` via subagent-driven development (6 TDD mechanism tasks, fresh
+  implementer + independent reviewer each, then an opus whole-branch adversarial review). Spec/plan:
+  `docs/superpowers/specs|plans/2026-06-23-immersive-scenes(.md|-design.md)`.
+- **What shipped:** a founder open-ended experience can present a concrete, situated `Scene`
+  (`prompt` + a reusable `situation` block) sourced from the gitignored corpus, while tracked content
+  stays abstract. `Scene` on `CorpusEntry`/`SeedEntry`/`Experience` (runtime-only); corpus `scene_json`
+  column (fresh-DB `_SCHEMA` + guarded `ADD COLUMN` migration, L-8); `SeedEntry.scene` threads through
+  ingest; `select_experience` validates the scene against the moat then overrides the prompt + attaches
+  the scene (no scene → unchanged fallback); `AnthropicModel` weaves the `situation` into all three
+  judgment-loop calls (intake/push/response); CS untouched, `run_session` unchanged.
+- **The moat holds over what the student sees:** `generator.validate_scene` runs the anti-label checks
+  (named framework / leaked frame-trap code / type-hint scaffold / cosmetic wrapper) over BOTH the
+  concrete `prompt` AND the `situation` (the latter feeds the student-facing push). Final-review fix
+  (3a33642) extended the gate from prompt-only to prompt+situation, closing a cross-task gap and making
+  spec §9.6 true; controller-repro'd against the real `license_continuity` rubric.
+- **Final opus review: MERGE WITH FIXES → resolved.** All 7 §9 invariants verified under live repro
+  (confidentiality; production-path moat; byte-stable no-scene fallback; fresh + old-table migration;
+  runtime-only scene; 3-call grounding; CS untouched). The one Important finding (situation ungated)
+  fixed; all minors DEFER.
+- **First authored scene (controller, gitignored):** drafted a concrete `license_continuity` scene
+  (the escrow-and-continuity-clause decision: procurement unlock vs. competitive exit-roadmap, BSL
+  rejected in a ~dozen-buyer market) into `data/seed/veldra_ledger.yaml`, re-ingested. It clears
+  `validate_scene` and drives `select_experience` → the concrete (escrow) prompt with the scene
+  attached. The scene is confidential → stays in the gitignored seed/`data/`, NEVER tracked.
+- **Gated tracked moat test** (`test_generator.py::test_seeded_license_scene_clears_the_moat`, skipif
+  `data/` absent): the authored scene must clear the moat against its real rubric — the spec §8 safety
+  net. **Verified:** full suite **107 passed, 3 skipped**; ruff clean; `git ls-files` confidential grep
+  empty; seed/db untracked.
+- Note: `python -m retnovation.veldra_ingest` is a no-op (no `__main__` guard); re-ingest via the
+  `retnovation-ingest` console script or `main()`. (Flagged as a follow-up.)
+- Next: merge to `main`; re-run the live dogfood to feel the concrete scene; then the queued
+  mined-case-library project (see memory `retnovation-case-library-idea`).
+
 
 
