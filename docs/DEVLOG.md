@@ -937,3 +937,22 @@ verify `git ls-files` after any content work). Core-path changes get an independ
 ## 2026-06-24 — Task 6: commit_under_the_deadline decision frame on license_continuity
 - Task 6 — license_continuity gains commit_under_the_deadline frame + commit_without_a_tripwire
   trap + decision_frame (10 angles); gate + seeded-scene moat green; 124/3.
+
+## 2026-06-24 — commitment-frame + stress-probe: whole-branch review + finish
+- Branch `commitment-frame-stress-probe` built via subagent-driven development (6 implementer TDD
+  tasks, fresh implementer + independent reviewer each; Task 3 — the core loop — got an opus reviewer).
+  All per-task reviews ✅ Approved; the seeded escrow scene cleared the moat against the new codes with
+  no rewording; `data/` stayed untracked throughout.
+- **Whole-branch opus adversarial review: MERGE — Yes.** Zero Critical, zero Important. Every checklist
+  item verified at source: byte-stability provable for non-`decision_frame` rubrics (both loop guards
+  no-op; `stress` structurally False; `stress=False` system prompts byte-identical); the forced probe
+  fires exactly once and terminates (unconditional `probed.add`, unmoved→`exhausted`+`probed`→converge);
+  the stress path stays conclusion-agnostic AND is independently policed by the unchanged blind
+  `grade_sharper` (which never sees `stress`); the moat auto-bans the new codes; confidentiality holds.
+  The plan's separate-stress-files refinement judged a strict improvement over the spec's inline block.
+- **Applied the review's one hardening:** the two `*_byte_stable` model tests asserted the stress
+  marker absent but not the base prompt present — a "base prompt dropped" regression could pass them
+  (cf. L-8 vacuous-pass lesson). Added `assert "case instructor" in {blob,sys}` to both. Test-only.
+- Final: suite 124 passed / 3 skipped (the hardening added assertions to two existing tests, not new
+  tests), ruff clean, confidentiality grep empty, `data/` untracked. Feature complete on the branch;
+  ready to merge to `main`. Not pushed (ask before pushing).

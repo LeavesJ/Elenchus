@@ -305,6 +305,7 @@ def test_generate_push_without_stress_is_byte_stable():
     AnthropicModel(client=client).generate_push(_exp(), "frame", "protect_the_core_lane")
     blob = _system_text(client.messages.create_calls[0])
     assert "already engaged this angle" not in blob  # no stress doctrine when stress=False
+    assert "case instructor" in blob  # the base push doctrine is still present (no drop)
 
 
 def test_classify_response_stress_mode_adds_the_stress_doctrine():
@@ -325,3 +326,4 @@ def test_classify_response_without_stress_is_byte_stable():
     )
     sys = _system_text(client.messages.parse_calls[0])
     assert "deepening mechanism" not in sys  # no stress doctrine when stress=False
+    assert "case instructor" in sys  # the base response doctrine is still present (no drop)
