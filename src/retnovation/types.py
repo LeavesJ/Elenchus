@@ -76,6 +76,13 @@ class Rubric(BaseModel):
     traps: list[Trap]
     mode: Mode
     binding_constraint: str | None = None
+    decision_frame: str | None = None
+
+    @model_validator(mode="after")
+    def _decision_frame_in_frames(self) -> "Rubric":
+        if self.decision_frame and self.decision_frame not in {f.frame_code for f in self.frames}:
+            raise ValueError(f"decision_frame {self.decision_frame!r} is not a rubric frame")
+        return self
 
 
 class CheckableQuestion(BaseModel):

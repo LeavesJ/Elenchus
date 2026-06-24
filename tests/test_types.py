@@ -1,3 +1,5 @@
+import pytest
+
 from datetime import datetime, timezone
 from retnovation.types import (
     Strength,
@@ -266,3 +268,32 @@ def test_scene_and_corpus_experience_scene_fields():
     )
     # CheckableSet import unused-guard: keep regimes coherent (CS experiences never get a scene)
     assert CheckableSet(questions=[]).questions == []
+
+
+def _frame(code="commit_under_the_deadline"):
+    return Frame(frame_code=code, frame_detail="commit and name the reversal")
+
+
+def test_decision_frame_defaults_to_none():
+    rub = Rubric(frames=[_frame()], traps=[], mode=Mode.genuinely_open)
+    assert rub.decision_frame is None
+
+
+def test_decision_frame_accepts_an_existing_frame_code():
+    rub = Rubric(
+        frames=[_frame()],
+        traps=[],
+        mode=Mode.genuinely_open,
+        decision_frame="commit_under_the_deadline",
+    )
+    assert rub.decision_frame == "commit_under_the_deadline"
+
+
+def test_decision_frame_naming_a_missing_frame_raises():
+    with pytest.raises(ValueError):
+        Rubric(
+            frames=[_frame()],
+            traps=[],
+            mode=Mode.genuinely_open,
+            decision_frame="not_a_frame",
+        )

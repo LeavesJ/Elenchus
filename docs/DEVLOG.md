@@ -886,6 +886,8 @@ verify `git ls-files` after any content work). Core-path changes get an independ
   beyond Veldra (Stripe…, later Dimon/Solomon/Lip-Bu Tan); the two-content-sources reframe + 3 moat
   tensions are captured there. Build *on* the scene mechanism.
 
+## 2026-06-24 — Task 1 — Rubric.decision_frame + fail-loud validator (TDD); 112/3 green.
+
 ## 2026-06-24 — Commitment frame + stress probe: brainstorm + spec (design, pre-plan)
 - Picked up the handover's next task ("act on the commitment-frame finding / rubric depth"). Ran the
   brainstorming skill against the dogfood finding (`retnovation-commitment-frame-gap`): the
