@@ -511,6 +511,24 @@ Task 1 — added `Push.response` (default ""), `SharperVerdict`, `SharperAuditIt
   gated with `@pytest.mark.skipif(not _HAS_KEY, ...)` — adds 3rd skip.
 - Full suite: **92 passed, 3 skipped** (was 89+2; net +3 tests, +1 skip); ruff format + check clean.
 
+## 2026-06-23 — Step 5 Task 4: Regression stop + populate `Push.response` in the loop (TDD PASS)
+- Added `_LOWER` dict and `_lower(state) -> FrameState` helper after `MAX_PUSHES` in
+  `src/retnovation/assessment/judgment_loop.py`: lowers `present_reasoned → present_asserted →
+  absent → absent` (floor clamp).
+- Inserted a `rc.outcome == "regressed"` branch immediately AFTER the `bounded_error hard_wrong`
+  block and BEFORE the `rc.outcome == "closed"` block (bounded hard-wrong still pre-empts).
+  On regression: lowers the frame one level, appends a `FrameDelta` if the level changed,
+  appends a `Push(response=response)`, sets `stop_reason = StopReason.regression`, breaks.
+  Doctrine: "the student is getting worse and more pushing harms" (§5.4).
+- Added `response=response` to the bounded-error `hard_wrong` `Push` and the normal end-of-loop
+  `Push` so every push carries the raw student reply (required by the Task 6 independent grader).
+- TDD evidence: test `test_regression_stops_when_student_backslides` written first (RED — loop
+  treated `"regressed"` as unchanged, re-hammered the target until `IndexError: pop from empty
+  list`); implemented; GREEN in 0.13 s.
+- Cooperative (`converged`), bounded-error, and budget/plateau paths all still pass (4/4
+  judgment_loop tests green).
+- Full suite: **95 passed, 3 skipped** (was 94+3; net +1 new test); ruff format + check clean.
+
 ## 2026-06-23 — Step 5 Task 3: Independent blind sharper grader `audit_sharper` (TDD PASS)
 - Created `src/retnovation/assessment/sharper_grader.py`: `audit_sharper(exp, assessment, model) ->
   Assessment` — a pure function that re-grades every closing push for frames in

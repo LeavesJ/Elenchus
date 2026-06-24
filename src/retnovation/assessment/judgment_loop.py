@@ -15,6 +15,16 @@ from ..types import (
 
 MAX_PUSHES = 8  # >= the 8-angle depth floor; budget-only (loop still pushes frames/traps — Step 5 probes dims)
 
+_LOWER = {
+    FrameState.present_reasoned: FrameState.present_asserted,
+    FrameState.present_asserted: FrameState.absent,
+    FrameState.absent: FrameState.absent,
+}
+
+
+def _lower(state: FrameState) -> FrameState:
+    return _LOWER[state]
+
 
 def _select_target(exp: Experience, frame_states, trap_states):
     """Tripped traps first, then binding-adjacent absent frames, then remaining absent frames."""
@@ -80,10 +90,33 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
             hard_wrong.append(code)
             trajectory.append(
                 Push(
-                    target_code=code, kind=kind, text=push_text, response_classification=rc.outcome
+                    target_code=code,
+                    kind=kind,
+                    text=push_text,
+                    response_classification=rc.outcome,
+                    response=response,
                 )
             )
             stop_reason = StopReason.bounded_error_violation
+            break
+
+        if rc.outcome == "regressed":
+            if kind == "frame":
+                before = frame_states.get(code, FrameState.absent)
+                after = _lower(before)
+                frame_states[code] = after
+                if after is not before:
+                    deltas.append(FrameDelta(code=code, before=before, after=after))
+            trajectory.append(
+                Push(
+                    target_code=code,
+                    kind=kind,
+                    text=push_text,
+                    response_classification=rc.outcome,
+                    response=response,
+                )
+            )
+            stop_reason = StopReason.regression
             break
 
         if rc.outcome == "closed" and rc.mechanism_supplied:
@@ -100,7 +133,13 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
             moved = True
 
         trajectory.append(
-            Push(target_code=code, kind=kind, text=push_text, response_classification=rc.outcome)
+            Push(
+                target_code=code,
+                kind=kind,
+                text=push_text,
+                response_classification=rc.outcome,
+                response=response,
+            )
         )
         recent_moved.append(moved)
 

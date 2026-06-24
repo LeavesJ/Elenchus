@@ -129,3 +129,35 @@ def test_budget_caps_unproductive_loop():
     )
     a = judgment_loop.assess(_exp(), _work(), m)
     assert a.stop_reason in (StopReason.plateau, StopReason.budget)
+
+
+def test_regression_stops_when_student_backslides():
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.present_reasoned,
+            "protect_the_core_lane": FrameState.present_asserted,  # unmet; will be targeted
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+        },
+    )
+    m = FakeModel(
+        intake,
+        {
+            "protect_the_core_lane": [
+                ResponseClassification(
+                    outcome="regressed", mechanism_supplied=False, hard_wrong=False
+                )
+            ]
+        },
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+    assert a.stop_reason is StopReason.regression
+    # backslide recorded: present_asserted -> absent, and not credited as closed
+    assert any(
+        d.code == "protect_the_core_lane" and d.after is FrameState.absent for d in a.frame_deltas
+    )
+    assert "protect_the_core_lane" not in a.frames_closed_under_pressure
+    # the raw student response is captured on the push
+    assert a.trajectory[-1].response == "reply"
