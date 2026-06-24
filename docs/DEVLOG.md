@@ -565,3 +565,24 @@ Task 1 — added `Push.response` (default ""), `SharperVerdict`, `SharperAuditIt
   both GREEN in 0.10s. The dispute test asserts the end-to-end `update_state` → `Strength.weak`
   chain, guarding the strong-misclassification trap.
 - Full suite: **94 passed, 3 skipped** (was 92+3; net +2 new tests); ruff format + check clean.
+
+## 2026-06-23 — Step 5 Task 6: Wire `audit_sharper` into `assess` + strengthen/extend loop tests (TDD PASS)
+- Added `from .sharper_grader import audit_sharper` import to
+  `src/retnovation/assessment/judgment_loop.py`.
+- Replaced the final `return Assessment(...)` with: build the instructor `assessment = Assessment(...)`,
+  then `return audit_sharper(exp, assessment, model)` — so every call to `assess` now runs the
+  independent blind grader pass before the Assessment reaches `update_state`.
+- `run_session`, `STATE_UPDATERS`, the `cs_technical` scorer, and all other modules are unchanged.
+  The `FakeModel.grade_sharper` default-agree behaviour preserves all cooperative/dry-run/CS paths.
+- **Strengthened** `test_cooperative_student_converges`: added 2 assertions at the end verifying
+  that the grader ran and confirmed both sharper calls (`len(a.sharper_audit) == 2`,
+  `all(item.confirmed for item in a.sharper_audit)`).
+- **Added** `test_grader_dispute_demotes_a_sharper_call_in_the_full_loop`: instructor closes both
+  frames; the scripted `FakeModel` disputes `protect_the_core_lane`; asserts demoted frame is absent
+  from `frames_closed_under_pressure` and the audit item has `confirmed=False`.
+- TDD evidence: tests written first; RED — `assert 0 == 2` (sharper_audit empty, audit not wired)
+  and `AssertionError` on dispute demotion. Implemented; GREEN in 0.14 s.
+- Regression: `test_dry_run`, `test_orchestration`, `test_state`, `test_cs_dry_run` all pass.
+- Full suite: **97 passed, 3 skipped** (was 96+3; net +1 new test, +2 assertions); ruff format + check clean.
+- Files changed: `src/retnovation/assessment/judgment_loop.py`, `tests/test_judgment_loop.py`,
+  `docs/DEVLOG.md`.

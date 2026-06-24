@@ -12,6 +12,7 @@ from ..types import (
     TrapState,
     Work,
 )
+from .sharper_grader import audit_sharper
 
 MAX_PUSHES = 8  # >= the 8-angle depth floor; budget-only (loop still pushes frames/traps — Step 5 probes dims)
 
@@ -157,10 +158,11 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
         )
         recent.append((code, moved))
 
-    return Assessment(
+    assessment = Assessment(
         trajectory=trajectory,
         frame_deltas=deltas,
         frames_closed_under_pressure=closed,
         hard_wrong_flags=hard_wrong,
         stop_reason=stop_reason or StopReason.budget,
     )
+    return audit_sharper(exp, assessment, model)

@@ -78,6 +78,9 @@ def test_cooperative_student_converges():
     # frame_code into student-facing text. (A regression like
     # f"Think about {code}: {push}" would change p.text and fail this.)
     assert all(p.text == f"[push:{p.kind}]" for p in a.trajectory)
+    # the independent grader ran and confirmed both sharper calls (default-agree FakeModel)
+    assert len(a.sharper_audit) == 2
+    assert all(item.confirmed for item in a.sharper_audit)
 
 
 def test_bounded_error_violation_stops_immediately():
@@ -189,3 +192,34 @@ def test_plateau_stops_on_two_distinct_unmoved_targets():
     # rotation happened: the two pushes were on DISTINCT targets
     pushed = [p.target_code for p in a.trajectory]
     assert len(pushed) == 2 and pushed[0] != pushed[1]
+
+
+def test_grader_dispute_demotes_a_sharper_call_in_the_full_loop():
+    from retnovation.types import SharperVerdict
+
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.absent,
+            "protect_the_core_lane": FrameState.absent,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+        },
+    )
+
+    def closed():
+        return [ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)]
+
+    m = FakeModel(
+        intake,
+        {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()},
+        sharper_verdicts={
+            "protect_the_core_lane": [SharperVerdict(sharper=False, reason="assent only")]
+        },
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+    # instructor closed both; the blind grader disputes protect_the_core_lane -> demoted
+    assert "lead_with_what_you_refuse_to_do" in a.frames_closed_under_pressure
+    assert "protect_the_core_lane" not in a.frames_closed_under_pressure
+    assert any(i.code == "protect_the_core_lane" and not i.confirmed for i in a.sharper_audit)
