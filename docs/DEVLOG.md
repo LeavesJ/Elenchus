@@ -956,3 +956,26 @@ verify `git ls-files` after any content work). Core-path changes get an independ
 - Final: suite 124 passed / 3 skipped (the hardening added assertions to two existing tests, not new
   tests), ruff clean, confidentiality grep empty, `data/` untracked. Feature complete on the branch;
   ready to merge to `main`. Not pushed (ask before pushing).
+
+## 2026-06-24 — Diagnostic-progression architecture: brainstorm + spec (design, pre-plan)
+- Picked up the second open thread (progression / intro-arc; memory `retnovation-commitment-frame-gap`).
+  User reframe: progression is a DIAGNOSTIC instrument (locate the learner), not an easy→hard ramp. Heavy
+  brainstorming, architected from scratch. Deep parallel recon first (code: scheduler/state/persistence/
+  orchestration/experience/generator; docs: Complete Picture, Loop, FounderCEO, Berkeley Guidebook,
+  Blueprint, MVP Scope, interest tree).
+- **Findings that shaped it:** the policy seam is `scheduler.schedule_next` (placeholder `weak>forming>
+  strong`, and it hardcodes `ledger_ref=ledger[0].id` — never actually picks a problem). The substrate is
+  half-built: estimator "too aggressive" (§17), `strong` is dead code, `decay_frame` never called, `due`
+  reset to now (no temporal signal), `trap_gallery` not persisted. So locating a learner needs the model
+  rebuilt to BE locatable.
+- **Decisions (brainstorming, 5 forks):** (1) learner model = strength × breadth × uncertainty per frame;
+  (2) selection = one unified value function over 3 named drives (reduce-uncertainty / retention-due /
+  transfer-opportunity), intro-arc emergent; (3) cold start = isolation by frame-load (uncertainty-gated
+  penalty, not difficulty); (4) receipt + redirect (fullest propose-and-decide; redirect = evidence);
+  (5) candidate space = (frame × ledger-problem) from the content graph (per-frame attribution,
+  transfer-native). cs_technical stays on its SM2-lite spacing; the judgment loop is untouched (evidence
+  source). Decomposes into 3 implementation projects (substrate → policy → receipt surface); Project 1
+  first.
+- Spec written + self-reviewed: `docs/superpowers/specs/2026-06-24-diagnostic-progression-design.md`.
+  **Status: design, awaiting user review before the Project 1 plan.** No code changed; suite still 124/3.
+  `main` ~48 commits ahead of origin, unpushed (ask before pushing).
