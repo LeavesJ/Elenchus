@@ -404,3 +404,46 @@ guard-coverage gaps (L-8: cover fail-loud guards). Applied exactly three changes
    directory in a `tmp_path` and asserts `select_cs_technical` raises `GateError`.
 
 Results: 87 passed, 2 skipped (was 84+2; +3 new tests); ruff format + check clean.
+
+## 2026-06-23 — Step 4 COMPLETE: CS checkable scorer + cs_technical regime + Step 5 handoff
+- Built on branch `step4-cs-checkable-scorer` via subagent-driven development (11 TDD tasks, fresh
+  implementer + independent task reviewer each, then a final whole-branch adversarial review on opus).
+  Spec: `docs/superpowers/specs/2026-06-23-cs-checkable-scorer-design.md`; plan:
+  `docs/superpowers/plans/2026-06-23-cs-checkable-scorer.md`. Approach 1 (shared types,
+  regime-dispatched behavior) — one `Experience`/one loop, extended not forked.
+- **What shipped — the second assessment regime runs through the same six-link plumbing:**
+  - `assessment/checkable_scorer.py::assess` retired its stub: iterates `exp.checkable.questions`,
+    collects each answer over the SAME `Work` channel the judgment loop uses, scores correctness, and
+    returns a `CheckableAssessment`. **Deterministic by default** (normalized answer-key match, NO model
+    call), **optional `model_graded` per question** (Opus grader via `Model.grade_answer`, `_require`-guarded
+    so refusal/empty raises — no silent leniency; gated live smoke).
+  - `generator.py::select_cs_technical` — the domain-path selector: ranks the checkable library by
+    **content-concept coverage** of the scheduler's target codes (cold-start fallback to `core.content_core`),
+    tie-break by `experience_id`. CS is **ungated** (the anti-label gate is the open_ended moat; CS is the
+    labeled/checkable contrast) — it loads from `content/checkables/`, which `load_library`/the gate never touch.
+  - CS drives the previously-unused `declarative_seed`/`SpacedItem` spaced index via
+    `state.update_state_checkable` (recall grows the interval by `ease_factor`, a miss resets to the floor —
+    reversible demotion, never deletion, L-3); new `concepts` SQLite table persists it; regime-aware
+    `schedule_next` targets due concepts. Dispatch is table-driven (`STATE_UPDATERS` mirroring
+    `ASSESSORS`/`SELECTORS`). **The two paths never collapse**: founder process-frames stay in `frames`,
+    CS content-concepts stay in `declarative_seed`/`concepts`.
+  - Domain-path onboarding: `aim("cs_systems")` → `MIN_PROCESS_DIAL`; `derive_core` loads the CS content
+    core (Complete Picture §10 — domain path maxes the content axis). Founder posture path byte-stable.
+  - `Experience` gained a regime/payload invariant (open_ended ⇒ rubric; cs_technical ⇒ checkable).
+- **Content (generic, non-confidential, tracked):** `content/maps/cs_systems.yaml` (a distributed-systems /
+  consensus content core), two `content/checkables/*.yaml` experiences (MCQ + short-answer + one model-graded),
+  `content/prompts/grade.md`, `content/cadence/spacing.yaml`. Nothing confidential tracked (`git ls-files` clean).
+- **Final adversarial review (opus): MERGE CLEAN** — all ten §9 invariants verified with live repros
+  (fresh-DB CS session closes the loop end-to-end; never-collapse holds across a 5-session run; confidentiality
+  `git ls-files` empty; founder path byte-stable). One Minor (scheduler tie-order determinism) fixed +
+  two fail-loud-guard regression tests added (L-8).
+- **Verified:** full suite **87 passed, 2 skipped** (only skips = the two `@pytest.mark.live` smokes, no key);
+  ruff format + check clean; confidentiality + `data/`-untracked clean; `test_cs_dry_run.py` closes the six
+  links for `cs_technical`.
+- **NEXT SESSION -> Step 5 (the last build-order item): harden the judgment loop.** Exercise the stops that
+  have never fired — `regression` and `plateau` (only the cooperative `converged`/`bounded_error_violation`
+  paths are proven; the model won't play a caving/safety-inverting student, so these need authored fixtures or
+  the dogfood) — and add the independent-grader pass for the "sharper" calls. Read first per the session-start
+  protocol: `docs/lessons.md`, then the local-only gitignored corpus — `Retnovation_JudgmentLoop_v0.1.md`,
+  `Retnovation_Complete_Picture.md` §12 (the judgment loop) + §13 (the empirical spine), and Build Brief
+  build-order #5.
