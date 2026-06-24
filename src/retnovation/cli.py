@@ -64,5 +64,11 @@ def main(argv: list[str] | None = None) -> int:
             "Interactive runs arrive with the model adapter."
         )
         return 1
-    print(f"stop_reason={assessment.stop_reason.value} frames_total={len(state.frames)}")
+    from .types import CheckableAssessment
+
+    if isinstance(assessment, CheckableAssessment):
+        recalled = sum(1 for r in assessment.results if r.correct)
+        print(f"concepts_scored={len(assessment.results)} recalled={recalled}")
+    else:
+        print(f"stop_reason={assessment.stop_reason.value} frames_total={len(state.frames)}")
     return 0

@@ -336,6 +336,24 @@ Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult
   `declarative_seed` not persisted); implemented; GREEN in 0.14 s.
 - Full suite: 81 passed, 2 skipped (was 80+2; net +1); ruff format + check clean.
 
+## 2026-06-23 — Step 4 Task 10: Orchestration + CLI regime dispatch (COMPLETE)
+- Updated `src/retnovation/orchestration.py`: swapped `from .state import update_state` for
+  `from .state import STATE_UPDATERS`; added `CheckableAssessment, Regime` to the types import.
+  `present_and_collect` is now regime-aware — `cs_technical` skips the opening prompt (returns
+  `Work(opening="", respond=respond)`); `open_ended` path byte-identical. `run_session` dispatches
+  the state update via `STATE_UPDATERS[exp.regime]`; return type widens to
+  `tuple[LearnerState, Assessment | CheckableAssessment]`.
+- Updated `src/retnovation/cli.py`: replaced the single `print(f"stop_reason=...")` line with a
+  regime-aware `isinstance(assessment, CheckableAssessment)` branch — CS prints
+  `concepts_scored=/recalled=`; founder prints `stop_reason=/frames_total=`.
+- Verification: no new tests this task; verification gate = founder-regression-stays-green + ruff
+  + full suite. Command:
+  `pytest tests/test_dispatch.py tests/test_orchestration.py tests/test_cli.py tests/test_dry_run.py -q`
+  → 6 passed. `ruff format . && ruff check .` → clean. Full suite `pytest -q` → **83 passed,
+  2 skipped** (baseline unchanged).
+- Files changed: `src/retnovation/orchestration.py`, `src/retnovation/cli.py`, `docs/DEVLOG.md`.
+- `tests/test_dispatch.py` NOT touched (Task 4 already provides the stronger assertion).
+
 ## 2026-06-23 — Step 4 Task 9: Domain-path onboarding (`aim` / `derive_core`) (TDD PASS)
 - Added `MIN_PROCESS_DIAL = 0` constant to `src/retnovation/aim.py` (CS — content axis maxed,
   process near-empty per Complete Picture §10).
