@@ -5,7 +5,14 @@ from typing import Literal, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from .content_loader import load_prompt
-from .types import CheckableGrade, CheckableQuestion, Experience, FrameState, TrapState
+from .types import (
+    CheckableGrade,
+    CheckableQuestion,
+    Experience,
+    FrameState,
+    SharperVerdict,
+    TrapState,
+)
 
 
 class ModelError(RuntimeError):
@@ -33,6 +40,9 @@ class Model(Protocol):
     def grade_answer(
         self, exp: Experience, question: CheckableQuestion, answer: str
     ) -> CheckableGrade: ...
+    def grade_sharper(
+        self, exp: Experience, kind: str, code: str, push: str, response: str
+    ) -> SharperVerdict: ...
 
 
 class FakeModel:
@@ -43,10 +53,12 @@ class FakeModel:
         intake: IntakeClassification,
         responses: dict[str, list[ResponseClassification]],
         grades: dict[str, list[CheckableGrade]] | None = None,
+        sharper_verdicts: dict[str, list[SharperVerdict]] | None = None,
     ):
         self._intake = intake
         self._responses = responses
         self._grades = grades or {}
+        self._sharper_verdicts = sharper_verdicts or {}
 
     def classify_intake(self, exp: Experience, opening: str) -> IntakeClassification:
         return self._intake
@@ -63,6 +75,14 @@ class FakeModel:
         self, exp: Experience, question: CheckableQuestion, answer: str
     ) -> CheckableGrade:
         return self._grades[question.question_id].pop(0)
+
+    def grade_sharper(
+        self, exp: Experience, kind: str, code: str, push: str, response: str
+    ) -> SharperVerdict:
+        scripted = self._sharper_verdicts.get(code)
+        if scripted:
+            return scripted.pop(0)
+        return SharperVerdict(sharper=True, reason="(default agree)")
 
 
 # Shared Opus 4.8 request params (claude-api reference): adaptive thinking + high effort,
@@ -217,6 +237,22 @@ class AnthropicModel:
             system=system,
             messages=[{"role": "user", "content": f"Student answer:\n{answer}"}],
             output_format=CheckableGrade,
+            **_PARAMS,
+        )
+        return _require(resp)
+
+    def grade_sharper(
+        self, exp: Experience, kind: str, code: str, push: str, response: str
+    ) -> SharperVerdict:
+        detail = _target_detail(exp.rubric, kind, code)
+        system = load_prompt("grade_sharper") + f"\n\nTarget angle: {detail}"
+        user = f"Push:\n{push}\n\nStudent reply:\n{response}"
+        resp = self._get_client().messages.parse(
+            model=self._model,
+            max_tokens=1024,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            output_format=SharperVerdict,
             **_PARAMS,
         )
         return _require(resp)

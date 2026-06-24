@@ -491,3 +491,22 @@ Results: 87 passed, 2 skipped (was 84+2; +3 new tests); ruff format + check clea
 
 ## 2026-06-23 — Step 5 Task 1: Types — Push.response + sharper-audit types + Assessment.sharper_audit (TDD PASS)
 Task 1 — added `Push.response` (default ""), `SharperVerdict`, `SharperAuditItem`, `Assessment.sharper_audit` (default []); 89 passed, 2 skipped; ruff clean.
+
+## 2026-06-23 — Step 5 Task 2: Model grader — `grade_sharper` + blind doctrine prompt (TDD PASS)
+- Created `content/prompts/grade_sharper.md`: skeptical auditor doctrine — assent≠sharper,
+  length≠sharper, conclusion-agnostic, default to not-sharper; identifies sharper by mechanism/reason
+  cited in the student's own words.
+- Added `Model.grade_sharper(self, exp, kind, code, push, response) -> SharperVerdict` to the
+  Protocol (blind: no instructor-outcome parameter).
+- Extended `FakeModel.__init__` with optional `sharper_verdicts: dict[str, list[SharperVerdict]] | None = None`
+  as the last param (existing callers unchanged). `FakeModel.grade_sharper` pops a scripted verdict
+  for `code` if present, else returns `SharperVerdict(sharper=True, reason="(default agree)")` so all
+  existing open_ended tests stay green without modification.
+- Implemented `AnthropicModel.grade_sharper`: `messages.parse` with `output_format=SharperVerdict`,
+  system = `load_prompt("grade_sharper")` + target detail via `_target_detail`, user = push + student
+  reply; refusal/empty raises `ModelError` via `_require` (mirrors `classify_response`).
+- Added `SharperVerdict` to the `model.py` types import.
+- TDD evidence: 3 tests RED before implementation (`AttributeError: 'AnthropicModel'/'FakeModel'
+  object has no attribute 'grade_sharper'`); GREEN after; live smoke (`test_live_grade_sharper_smoke`)
+  gated with `@pytest.mark.skipif(not _HAS_KEY, ...)` — adds 3rd skip.
+- Full suite: **92 passed, 3 skipped** (was 89+2; net +3 tests, +1 skip); ruff format + check clean.

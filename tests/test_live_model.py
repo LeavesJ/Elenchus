@@ -52,3 +52,43 @@ def test_live_grade_answer_smoke():
     )
     grade = AnthropicModel().grade_answer(exp, q, "idempotent")
     assert isinstance(grade.correct, bool)
+
+
+@pytest.mark.live
+@pytest.mark.skipif(not _HAS_KEY, reason="no Anthropic credential in env")
+def test_live_grade_sharper_smoke():
+    from retnovation.model import AnthropicModel
+    from retnovation.types import (
+        Experience,
+        Frame,
+        Mode,
+        Regime,
+        Rubric,
+        Trap,
+    )
+
+    exp = Experience(
+        experience_id="live",
+        prompt="p",
+        ledger_ref="veldra:x",
+        regime=Regime.open_ended,
+        rubric=Rubric(
+            frames=[
+                Frame(
+                    frame_code="protect_the_core_lane",
+                    frame_detail="Keep the promise the core product makes to everyone.",
+                    paired_trap="t",
+                )
+            ],
+            traps=[Trap(trap_code="t", trap_detail="d")],
+            mode=Mode.genuinely_open,
+        ),
+    )
+    v = AnthropicModel().grade_sharper(
+        exp,
+        "frame",
+        "protect_the_core_lane",
+        "What do you give up by holding that line?",
+        "you're right",
+    )
+    assert isinstance(v.sharper, bool)

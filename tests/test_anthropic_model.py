@@ -190,6 +190,36 @@ def test_grade_answer_refusal_raises():
         AnthropicModel(client=client).grade_answer(_exp(), q, "answer")
 
 
+def test_grade_sharper_is_blind_and_parses_verdict():
+    from retnovation.types import SharperVerdict
+
+    client = _Client(
+        parse_result=_Resp(parsed_output=SharperVerdict(sharper=True, reason="cited a mechanism"))
+    )
+    out = AnthropicModel(client=client).grade_sharper(
+        _exp(),
+        "frame",
+        "protect_the_core_lane",
+        "What do you give up by holding that line?",
+        "I hold it because unverified work destroys revenue exactly when outages cluster.",
+    )
+    assert out.sharper is True
+    call = client.messages.parse_calls[0]
+    # the target angle detail reaches the grader's system prompt
+    assert "Keep the promise the core product makes" in _system_text(call)
+    # the raw student reply reaches the grader's user turn
+    assert "unverified work destroys revenue" in _user_text(call)
+    # blindness is structural: grade_sharper's signature has no instructor-outcome parameter
+
+
+def test_grade_sharper_refusal_raises():
+    client = _Client(parse_result=_Resp(parsed_output=None, stop_reason="refusal"))
+    with pytest.raises(ModelError):
+        AnthropicModel(client=client).grade_sharper(
+            _exp(), "frame", "protect_the_core_lane", "push", "reply"
+        )
+
+
 def test_classify_intake_ignores_hallucinated_codes():
     # The model returns a frame/trap code that is not in the rubric — it must be dropped,
     # or it would corrupt the judgment loop's convergence/target logic.

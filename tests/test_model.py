@@ -53,3 +53,17 @@ def test_fake_model_grade_answer_is_scripted():
         grades={"q1": [CheckableGrade(correct=True)]},
     )
     assert m.grade_answer(None, q, "an answer").correct is True
+
+
+def test_fake_model_grade_sharper_scripted_then_default_agree():
+    from retnovation.model import FakeModel, IntakeClassification
+    from retnovation.types import SharperVerdict
+
+    m = FakeModel(
+        IntakeClassification(frame_states={}, trap_states={}),
+        responses={},
+        sharper_verdicts={"f": [SharperVerdict(sharper=False, reason="assent only")]},
+    )
+    assert m.grade_sharper(None, "frame", "f", "push", "yeah you're right").sharper is False
+    # an unscripted code -> the test double's grader agrees by default
+    assert m.grade_sharper(None, "frame", "other", "push", "because mechanism X").sharper is True
