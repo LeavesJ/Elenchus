@@ -586,3 +586,46 @@ Task 1 — added `Push.response` (default ""), `SharperVerdict`, `SharperAuditIt
 - Full suite: **97 passed, 3 skipped** (was 96+3; net +1 new test, +2 assertions); ruff format + check clean.
 - Files changed: `src/retnovation/assessment/judgment_loop.py`, `tests/test_judgment_loop.py`,
   `docs/DEVLOG.md`.
+
+## 2026-06-23 — Step 5 COMPLETE: judgment loop hardened + BUILD ORDER FINISHED
+- Built on branch `step5-harden-judgment-loop` via subagent-driven development (6 TDD tasks, fresh
+  implementer + independent task reviewer each, then a final whole-branch adversarial review on opus).
+  Spec: `docs/superpowers/specs/2026-06-23-harden-judgment-loop-design.md`; plan:
+  `docs/superpowers/plans/2026-06-23-harden-judgment-loop.md`. Done autonomously under the user's
+  standing delegation (user away; "quadruple-check / be mindful").
+- **What shipped (open_ended assessor only; cs_technical + run_session untouched):**
+  - **Regression stop** now fires on a genuine `"regressed"` outcome (previously in the enum but
+    never triggered): the targeted frame is lowered one level (`_lower`), the backslide delta is
+    recorded, and the loop stops — "more pushing harms". It ends NOT present_reasoned → scored weak.
+  - **Distinct-target plateau**: `_select_target` gained an `exhausted` set and rotates to a fresh
+    angle after a non-moving push; plateau fires on two distinct consecutive non-moves (or when no
+    fresh angle remains while not converged), matching JudgmentLoop §2/§6. The loop provably
+    terminates (convergence progress / exhausted-set shrinkage / `MAX_PUSHES` backstop). Cooperative
+    path never rotates; bounded hard-wrong still pre-empts.
+  - **Independent blind grader**: `assessment/sharper_grader.py::audit_sharper` re-judges each closed
+    frame via a separate skeptical `Model.grade_sharper` (`content/prompts/grade_sharper.md`;
+    blind — no instructor outcome in the prompt; assent/length ≠ sharper; conclusion-agnostic;
+    `_require`-guarded). A disputed sharper is dropped from `frames_closed_under_pressure` AND its
+    delta reverted, so `update_state` scores it **weak**, not strong (the strong-misclassification
+    trap is genuinely closed). `Push` now carries the raw `response`; `assess` runs the loop then the
+    audit. The grader gates "sharper" by a 2-vote (instructor + blind grader must agree).
+- **Final adversarial review (opus): MERGE CLEAN** — all ten §9 invariants verified with live repros
+  (loop termination; plateau + regression repros; disputed-sharper → `update_state` weak end-to-end
+  incl. fresh-DB persistence; bounded hard-wrong pre-empts a simultaneous regression; grader blind;
+  cooperative/CS/dry-run byte-stable). Two Minors, both DEFER (no live trigger): `audit_sharper`
+  requires a "closed" push (unreachable from the loop); a disputed frame persists evidence
+  `"unmoved"` (observability nit). Not fixed (mindful: no speculative churn for unreachable paths).
+- **Verified:** full suite **97 passed, 3 skipped** (only skips = the three `@pytest.mark.live`
+  smokes, no key); ruff format + check clean; confidentiality + `data/`-untracked clean.
+- **BUILD ORDER COMPLETE.** All 5 locked build-order steps are done (harness → Veldra ingestion →
+  experience generator + anti-label gate → CS checkable scorer → harden the judgment loop). The MVP
+  harness is feature-complete.
+- **NO "Step 6" in the locked build order.** What remains is post-MVP and needs the user's direction
+  (it was not autonomously started, per "be mindful"): (a) **dogfood** — run it as user-zero over a
+  semester to exercise the resistant paths live (the model over-refuses to role-play a caving student,
+  so regression/plateau/bounded are proven only by authored fixtures; real users are the validation);
+  (b) the deferred items, each its own spec → plan → build (MVP Scope §5): **blend** (needs two mature
+  stateful projects), the **crystallization mirror** (needs an accreted ledger), richer experience
+  types, the **business-executive** domain expansion (first per the locked decision), multi-user infra;
+  (c) a **usable surface** for the dogfood (today it is a CLI + `pytest`). See MVP Scope §7 success
+  criteria for what the harness now satisfies vs. what only real use can prove.
