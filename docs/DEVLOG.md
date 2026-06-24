@@ -730,6 +730,9 @@ Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEn
 ## 2026-06-23 — Immersive-scenes Task 6 review-fix: complete situation-weaving test coverage (additive tests only)
 - Extended `test_situation_is_woven_in_when_a_scene_is_present` with a `classify_response` block (asserts `"mid-rollout"` reaches the system text); extended `test_no_scene_calls_omit_the_situation` with `classify_intake` + `classify_response` byte-stability assertions (assert `"Situation:"` absent). No production code changed. 11 model tests pass; ruff clean.
 
+## 2026-06-23 — Immersive-scenes final-review fix: `validate_scene` checks both prompt AND situation (COMPLETE)
+- Closed spec §9.6 gap: `validate_scene` now builds `text_lc` from `"{prompt}\n{situation}"` so a leaked frame code or framework name in the situation (woven into instructor pushes the student sees) is caught with the same anti-label bar as the prompt. Added two new cases to `test_validate_scene_passes_clean_and_rejects_leaks`: situation-leaks-frame raises, fully-clean (both prompt and situation) passes. 106 passed, 3 skipped; ruff clean.
+
 ## 2026-06-23 — Immersive-scenes Task 6: `AnthropicModel` weaves `situation` into judgment-loop calls (TDD PASS)
 - Added module-level helper `_situation_block(exp) -> str` to `src/retnovation/model.py` (near
   `_render_rubric`): guards `getattr(exp, "scene", None)` — returns `"\n\nSituation:\n{situation}"`

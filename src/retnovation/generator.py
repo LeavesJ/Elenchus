@@ -56,16 +56,17 @@ def validate_scene(
     framework_denylist: list[str],
     scaffold_denylist: list[str],
 ) -> None:
-    """The concrete prompt the student SEES must clear the same anti-label bar as the abstract
-    one: no named framework, no leaked frame/trap code, no type-hint scaffold, no wrapper word."""
-    prompt_lc = scene.prompt.lower()
+    """The concrete prompt the student SEES — and the situation woven into the instructor's
+    pushes (whose text the student also sees) — must clear the same anti-label bar: no named
+    framework, no leaked frame/trap code, no type-hint scaffold, no cosmetic wrapper word."""
+    text_lc = f"{scene.prompt}\n{scene.situation}".lower()
     banned = [t.lower() for t in framework_denylist] + _frame_trap_phrases(rubric)
-    if any(_contains_phrase(prompt_lc, p) for p in banned):
-        raise GateError("scene prompt names a framework or leaks a frame/trap code")
-    if any(_contains_phrase(prompt_lc, p) for p in scaffold_denylist):
-        raise GateError("scene prompt contains a type-hint scaffold")
-    if any(w in prompt_lc for w in WRAPPER_WORDS):
-        raise GateError("scene prompt contains a cosmetic wrapper word")
+    if any(_contains_phrase(text_lc, p) for p in banned):
+        raise GateError("scene names a framework or leaks a frame/trap code")
+    if any(_contains_phrase(text_lc, p) for p in scaffold_denylist):
+        raise GateError("scene contains a type-hint scaffold")
+    if any(w in text_lc for w in WRAPPER_WORDS):
+        raise GateError("scene contains a cosmetic wrapper word")
 
 
 def anti_label_gate(

@@ -340,6 +340,26 @@ def test_validate_scene_passes_clean_and_rejects_leaks():
     with pytest.raises(GateError):  # cosmetic wrapper
         validate_scene(Scene(prompt="Keep your streak and decide.", situation="w"), rubric, **kw)
 
+    # a clean prompt but a SITUATION that leaks a frame code / framework must also raise
+    with pytest.raises(GateError):
+        validate_scene(
+            Scene(
+                prompt="A same-day call forces a real trade-off.",
+                situation="Lead with what you refuse to do, then run a SWOT.",
+            ),
+            rubric,
+            **kw,
+        )
+    # a fully-clean scene (clean prompt AND clean situation) passes
+    validate_scene(
+        Scene(
+            prompt="A same-day call forces a real trade-off.",
+            situation="A long client is mid-rollout; a guarantee is under pressure.",
+        ),
+        rubric,
+        **kw,
+    )  # no raise
+
 
 @pytest.mark.skipif(
     not __import__("pathlib").Path("data/retnovation.db").exists(),
