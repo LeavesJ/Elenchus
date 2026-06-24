@@ -82,3 +82,78 @@ def test_gatecode_and_gateresult_and_experience_id():
         regime=Regime.open_ended,
     )
     assert exp.experience_id == "x"
+
+
+def test_checkable_types_build_and_regime_invariant():
+    import pytest
+    from retnovation.types import (
+        CheckType,
+        CheckableQuestion,
+        CheckableSet,
+        ConceptResult,
+        CheckableAssessment,
+        CheckableGrade,
+        Experience,
+        Regime,
+    )
+
+    q = CheckableQuestion(
+        question_id="q1",
+        concept="safety_vs_liveness",
+        prompt="Which property guarantees nothing bad ever happens?",
+        check_type=CheckType.deterministic,
+        choices=["safety", "liveness"],
+        answer_key=["safety"],
+    )
+    cs = CheckableSet(questions=[q])
+    exp = Experience(
+        experience_id="cs1",
+        prompt="Answer the following.",
+        ledger_ref="veldra:consensus_correctness",
+        regime=Regime.cs_technical,
+        checkable=cs,
+    )
+    assert exp.checkable.questions[0].answer_key == ["safety"]
+    assert exp.rubric is None
+
+    asmt = CheckableAssessment(
+        results=[
+            ConceptResult(
+                concept="safety_vs_liveness",
+                question_id="q1",
+                correct=True,
+                check_type=CheckType.deterministic,
+            )
+        ]
+    )
+    assert asmt.results[0].correct is True
+    assert CheckableGrade(correct=False).correct is False
+
+    # invariant: cs_technical with a rubric is rejected
+    from retnovation.types import Rubric, Mode
+
+    with pytest.raises(Exception):
+        Experience(
+            experience_id="bad",
+            prompt="p",
+            ledger_ref="r",
+            regime=Regime.cs_technical,
+            rubric=Rubric(frames=[], traps=[], mode=Mode.genuinely_open),
+            checkable=cs,
+        )
+    # invariant: open_ended without a rubric is rejected
+    with pytest.raises(Exception):
+        Experience(experience_id="bad2", prompt="p", ledger_ref="r", regime=Regime.open_ended)
+
+
+def test_aim_core_content_core_accepts_a_concept_list():
+    from retnovation.types import Aim, Core
+
+    a = Aim(posture="cs_systems", process_dial=0, content_core=["safety_vs_liveness"])
+    c = Core(
+        process_frames=[],
+        declarative_seed=["safety_vs_liveness"],
+        content_core=["safety_vs_liveness"],
+    )
+    assert a.content_core == ["safety_vs_liveness"]
+    assert c.content_core == ["safety_vs_liveness"]

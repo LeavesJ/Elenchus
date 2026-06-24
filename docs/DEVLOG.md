@@ -232,3 +232,6 @@
   and the gated `live` marker. Self-review: full spec coverage, no placeholders, type-consistent
   signatures end to end.
 - Next: execute via subagent-driven development (fresh implementer + independent reviewer per task).
+
+## 2026-06-23 — Step 4 Task 1: Checkable types + Experience regime/payload invariant (TDD PASS)
+Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult`, `CheckableAssessment`, `CheckableGrade`); `Experience.rubric` optional + regime/payload validator; `Aim`/`Core` content_core widened.

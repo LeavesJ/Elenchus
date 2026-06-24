@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class Strength(str, Enum):
@@ -55,6 +55,11 @@ class GateCode(str, Enum):
     insufficient_interrogation_depth = "insufficient_interrogation_depth"
 
 
+class CheckType(str, Enum):
+    deterministic = "deterministic"
+    model_graded = "model_graded"
+
+
 class Frame(BaseModel):
     frame_code: str
     frame_detail: str
@@ -73,24 +78,64 @@ class Rubric(BaseModel):
     binding_constraint: str | None = None
 
 
+class CheckableQuestion(BaseModel):
+    question_id: str
+    concept: str
+    prompt: str
+    check_type: CheckType
+    choices: list[str] = Field(default_factory=list)
+    answer_key: list[str] = Field(default_factory=list)
+    criteria: str | None = None
+
+
+class CheckableSet(BaseModel):
+    questions: list[CheckableQuestion]
+
+
+class ConceptResult(BaseModel):
+    concept: str
+    question_id: str
+    correct: bool
+    check_type: CheckType
+
+
+class CheckableAssessment(BaseModel):
+    results: list[ConceptResult]
+
+
+class CheckableGrade(BaseModel):
+    correct: bool
+
+
 class Aim(BaseModel):
     posture: str
     process_dial: int
-    content_core: None = None
+    content_core: list[str] | None = None
 
 
 class Core(BaseModel):
     process_frames: list[str]
     declarative_seed: list[str]
-    content_core: None = None
+    content_core: list[str] | None = None
 
 
 class Experience(BaseModel):
     experience_id: str
     prompt: str
-    rubric: Rubric
     ledger_ref: str
     regime: Regime
+    rubric: Rubric | None = None
+    checkable: CheckableSet | None = None
+
+    @model_validator(mode="after")
+    def _regime_payload_invariant(self) -> "Experience":
+        if self.regime is Regime.open_ended:
+            if self.rubric is None or self.checkable is not None:
+                raise ValueError("open_ended experience requires a rubric and no checkable")
+        elif self.regime is Regime.cs_technical:
+            if self.checkable is None or self.rubric is not None:
+                raise ValueError("cs_technical experience requires a checkable and no rubric")
+        return self
 
 
 class GateResult(BaseModel):
@@ -162,6 +207,8 @@ class CorpusEntry(BaseModel):
 
 
 class NextExperienceSpec(BaseModel):
+    # target codes for the next experience: process frames for open_ended, content concepts
+    # for cs_technical. Overloaded by name (not renamed) to avoid a persisted-queue migration.
     target_frames: list[str]
     ledger_ref: str
     regime: Regime
