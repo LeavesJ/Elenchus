@@ -727,6 +727,9 @@ Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEn
   ruff format + check clean.
 - Files changed: `src/retnovation/experience.py`, `tests/test_experience.py`, `docs/DEVLOG.md`.
 
+## 2026-06-23 — Immersive-scenes Task 6 review-fix: complete situation-weaving test coverage (additive tests only)
+- Extended `test_situation_is_woven_in_when_a_scene_is_present` with a `classify_response` block (asserts `"mid-rollout"` reaches the system text); extended `test_no_scene_calls_omit_the_situation` with `classify_intake` + `classify_response` byte-stability assertions (assert `"Situation:"` absent). No production code changed. 11 model tests pass; ruff clean.
+
 ## 2026-06-23 — Immersive-scenes Task 6: `AnthropicModel` weaves `situation` into judgment-loop calls (TDD PASS)
 - Added module-level helper `_situation_block(exp) -> str` to `src/retnovation/model.py` (near
   `_render_rubric`): guards `getattr(exp, "scene", None)` — returns `"\n\nSituation:\n{situation}"`

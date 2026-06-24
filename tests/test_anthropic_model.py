@@ -263,6 +263,14 @@ def test_situation_is_woven_in_when_a_scene_is_present():
     AnthropicModel(client=c2).classify_intake(_exp_with_scene(), "opening")
     assert "mid-rollout" in _system_text(c2.messages.parse_calls[0])
 
+    # classify_response includes the situation (system context)
+    rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+    c3 = _Client(parse_result=_Resp(parsed_output=rc))
+    AnthropicModel(client=c3).classify_response(
+        _exp_with_scene(), "frame", "protect_the_core_lane", "push text", "student reply"
+    )
+    assert "mid-rollout" in _system_text(c3.messages.parse_calls[0])
+
 
 def test_no_scene_calls_omit_the_situation():
     client = _Client(create_result=_Resp(content=[_TextBlock("push")]))
@@ -271,3 +279,13 @@ def test_no_scene_calls_omit_the_situation():
     assert "Situation:" not in _system_text(call) + " " + _user_text(
         call
     )  # byte-identical to today
+
+    # classify_intake and classify_response also omit the situation with no scene
+    wire = _Wire(frames=[_Item("protect_the_core_lane", FrameState.present_reasoned)], traps=[])
+    ci = _Client(parse_result=_Resp(parsed_output=wire))
+    AnthropicModel(client=ci).classify_intake(_exp(), "opening")
+    assert "Situation:" not in _system_text(ci.messages.parse_calls[0])
+    rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+    cr = _Client(parse_result=_Resp(parsed_output=rc))
+    AnthropicModel(client=cr).classify_response(_exp(), "frame", "protect_the_core_lane", "p", "r")
+    assert "Situation:" not in _system_text(cr.messages.parse_calls[0])
