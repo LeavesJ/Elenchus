@@ -977,5 +977,20 @@ verify `git ls-files` after any content work). Core-path changes get an independ
   source). Decomposes into 3 implementation projects (substrate → policy → receipt surface); Project 1
   first.
 - Spec written + self-reviewed: `docs/superpowers/specs/2026-06-24-diagnostic-progression-design.md`.
-  **Status: design, awaiting user review before the Project 1 plan.** No code changed; suite still 124/3.
+- **Rev. 1 (external design review, received-via-receiving-code-review).** Analyzed faithfully (verified
+  each claim against the code/tests, not yes-manned). Four seams, all sound — accepted with two additions:
+  (1) **strength stored→derived** — the spec had strength as both persisted and derived with decay
+  mutating it (a real contradiction I introduced); now strength/due are pure functions of persistent
+  `{evidence_count, breadth, last_seen}`+`now`, computed on read → deletes `decay_frame`, removes the
+  decay-sweep mutation, kills incoherent-state class, gives the Berkeley §5 savings effect for free,
+  shrinks Project 1 (verified test_state forming/weak reproduce at staleness 0; test_scheduler direct
+  construction still works). (2) **cold start mean×frame-load → per-experience MAX constituent
+  uncertainty** — a mean conflates "half-known" with "half-blank"; max makes "integration test once the
+  parts are located" literal and subsumes both proxies; corrected the rationale from attribution (loop
+  already classifies per-frame) to integration readiness; added the sole-content-frame edge for Project 2.
+  (3) **content honesty** — `strong` is starved by the same thinness as transfer; P2/P3 on current content
+  deliver plumbing, the unlock is authored content (mined case library). (4) named the
+  authoring-order=cold-start-curriculum dependency, the endogenous-revealed-demand gap (ledger as latent
+  external signal), runner-up+margin in the receipt, and that redirect evidence is logged-but-unconsumed.
+  **Status: design rev. 1, awaiting user approval before the Project 1 plan.** No code changed; 124/3.
   `main` ~48 commits ahead of origin, unpushed (ask before pushing).
