@@ -4,7 +4,16 @@ from pathlib import Path
 
 import yaml
 
-from .types import Experience, Frame, Mode, Regime, Rubric, Trap
+from .types import (
+    CheckableQuestion,
+    CheckableSet,
+    Experience,
+    Frame,
+    Mode,
+    Regime,
+    Rubric,
+    Trap,
+)
 
 CONTENT_ROOT = Path(__file__).resolve().parents[2] / "content"
 
@@ -75,3 +84,39 @@ def load_experience(name: str, root: Path | None = None) -> Experience:
 def load_library(root: Path | None = None) -> list[Experience]:
     rubrics = sorted((_root(root) / "rubrics").glob("*.yaml"))
     return [load_experience(p.stem, root=root) for p in rubrics]
+
+
+def load_path_type(name: str, root: Path | None = None) -> str:
+    data = yaml.safe_load((_root(root) / "maps" / f"{name}.yaml").read_text())
+    return str(data.get("path_type", "posture"))
+
+
+def load_content_map(name: str, root: Path | None = None) -> list[str]:
+    data = yaml.safe_load((_root(root) / "maps" / f"{name}.yaml").read_text())
+    return list(data["content_core"])
+
+
+def load_spacing(root: Path | None = None) -> dict:
+    data = yaml.safe_load((_root(root) / "cadence" / "spacing.yaml").read_text())
+    return {
+        "initial_interval_days": int(data["initial_interval_days"]),
+        "ease_factor": float(data["ease_factor"]),
+        "min_interval_days": int(data["min_interval_days"]),
+    }
+
+
+def load_checkable_experience(name: str, root: Path | None = None) -> Experience:
+    data = yaml.safe_load((_root(root) / "checkables" / f"{name}.yaml").read_text())
+    questions = [CheckableQuestion(**q) for q in data["checkable"]["questions"]]
+    return Experience(
+        experience_id=data["experience_id"],
+        prompt=data["prompt"],
+        ledger_ref=data["ledger_ref"],
+        regime=Regime(data["regime"]),
+        checkable=CheckableSet(questions=questions),
+    )
+
+
+def load_checkable_library(root: Path | None = None) -> list[Experience]:
+    files = sorted((_root(root) / "checkables").glob("*.yaml"))
+    return [load_checkable_experience(p.stem, root=root) for p in files]

@@ -44,3 +44,36 @@ def test_load_experience_and_library_build_full_experiences():
     assert again.experience_id == one.experience_id
     assert again.regime in (Regime.open_ended, Regime.cs_technical)
     assert again.rubric.frames or again.rubric.traps
+
+
+def test_load_path_type_and_content_map():
+    from retnovation.content_loader import load_path_type, load_content_map
+
+    assert load_path_type("founder_ceo") == "posture"
+    assert load_path_type("cs_systems") == "domain"
+    core = load_content_map("cs_systems")
+    assert "safety_vs_liveness" in core and "quorum_intersection" in core
+
+
+def test_load_spacing_returns_policy():
+    from retnovation.content_loader import load_spacing
+
+    sp = load_spacing()
+    assert sp["initial_interval_days"] == 1
+    assert sp["ease_factor"] == 2.0
+    assert sp["min_interval_days"] == 1
+
+
+def test_load_checkable_library_builds_cs_experiences():
+    from retnovation.content_loader import load_checkable_experience, load_checkable_library
+    from retnovation.types import Experience, Regime, CheckType
+
+    lib = load_checkable_library()
+    assert lib, "content/checkables should hold at least one cs experience"
+    assert all(isinstance(e, Experience) and e.regime is Regime.cs_technical for e in lib)
+    one = load_checkable_experience("consensus_safety_liveness")
+    assert one.checkable.questions[0].concept == "safety_vs_liveness"
+    assert one.rubric is None and one.ledger_ref == "veldra:consensus_correctness"
+    # both check types are represented across the library
+    kinds = {q.check_type for e in lib for q in e.checkable.questions}
+    assert CheckType.deterministic in kinds and CheckType.model_graded in kinds

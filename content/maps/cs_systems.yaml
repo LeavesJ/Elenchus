@@ -1,0 +1,8 @@
+path_type: domain
+content_core:
+  - safety_vs_liveness
+  - linearizability_vs_eventual
+  - idempotency_under_retry
+  - quorum_intersection
+  - at_least_once_vs_exactly_once
+  - partition_tolerance_tradeoff

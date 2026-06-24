@@ -1,0 +1,26 @@
+experience_id: replication_models
+ledger_ref: "veldra:replication_consistency"
+regime: cs_technical
+prompt: >
+  Answer these questions on replication and delivery semantics. (Generic CS.)
+checkable:
+  questions:
+    - question_id: rm_consistency
+      concept: linearizability_vs_eventual
+      prompt: "Which model lets two reads after a write briefly disagree: linearizable or eventual?"
+      check_type: deterministic
+      choices: ["linearizable", "eventual"]
+      answer_key: ["eventual"]
+    - question_id: rm_delivery
+      concept: at_least_once_vs_exactly_once
+      prompt: "Explain why at-least-once delivery plus idempotent handlers approximates exactly-once."
+      check_type: model_graded
+      answer_key: ["retries can duplicate, but an idempotent handler makes a duplicate a no-op"]
+      criteria: >
+        Correct iff the answer states that at-least-once can deliver duplicates AND that an
+        idempotent handler makes a duplicate have no additional effect, yielding effectively-once.
+    - question_id: rm_partition
+      concept: partition_tolerance_tradeoff
+      prompt: "Under a network partition, CAP forces a choice between consistency and ____?"
+      check_type: deterministic
+      answer_key: ["availability"]

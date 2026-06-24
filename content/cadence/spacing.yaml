@@ -1,0 +1,3 @@
+initial_interval_days: 1
+ease_factor: 2.0
+min_interval_days: 1

@@ -1,0 +1,24 @@
+experience_id: consensus_safety_liveness
+ledger_ref: "veldra:consensus_correctness"
+regime: cs_technical
+prompt: >
+  Answer these questions on consensus correctness. (Generic CS — anchored to a real systems
+  concern for provenance.)
+checkable:
+  questions:
+    - question_id: csl_safety
+      concept: safety_vs_liveness
+      prompt: "Which property guarantees that nothing bad ever happens (no two nodes decide differently)?"
+      check_type: deterministic
+      choices: ["safety", "liveness"]
+      answer_key: ["safety"]
+    - question_id: csl_idempotency
+      concept: idempotency_under_retry
+      prompt: "One word: a handler you can apply twice with the same effect as once is ____."
+      check_type: deterministic
+      answer_key: ["idempotent", "idempotency"]
+    - question_id: csl_quorum
+      concept: quorum_intersection
+      prompt: "Two majority quorums of an odd-sized cluster always share at least how many nodes?"
+      check_type: deterministic
+      answer_key: ["one", "1", "at least one"]

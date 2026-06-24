@@ -235,3 +235,19 @@
 
 ## 2026-06-23 — Step 4 Task 1: Checkable types + Experience regime/payload invariant (TDD PASS)
 Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult`, `CheckableAssessment`, `CheckableGrade`); `Experience.rubric` optional + regime/payload validator; `Aim`/`Core` content_core widened.
+
+## 2026-06-23 — Step 4 Task 2: CS content + content-loader functions (TDD PASS)
+- Authored all CS content files: `content/maps/cs_systems.yaml` (domain path, 6 content-core
+  concepts), `content/cadence/spacing.yaml` (initial 1d, ease 2.0, min 1d),
+  `content/prompts/grade.md` (strict grader doctrine), `content/checkables/consensus_safety_liveness.yaml`
+  (3 deterministic questions), `content/checkables/replication_models.yaml` (2 deterministic + 1
+  model-graded question).
+- Additive edit to `content/maps/founder_ceo.yaml`: prepended `path_type: posture`; existing
+  `process_frames` / `declarative_seed` keys unchanged.
+- CS content lives in `content/checkables/` (separate from `content/rubrics/`) so
+  `load_library` / anti-label gate never pick it up.
+- Updated `src/retnovation/content_loader.py`: expanded import to include checkable types
+  (`CheckableQuestion`, `CheckableSet`); appended `load_path_type`, `load_content_map`,
+  `load_spacing`, `load_checkable_experience`, `load_checkable_library`.
+- TDD: wrote 3 failing tests first (RED — ImportError); implemented loaders; all 3 turned GREEN.
+- Full suite: 67 passed, 1 skipped; ruff format + check clean; confidentiality gate CLEAN.
