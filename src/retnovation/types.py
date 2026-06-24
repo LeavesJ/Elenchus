@@ -126,6 +126,7 @@ class Experience(BaseModel):
     regime: Regime
     rubric: Rubric | None = None
     checkable: CheckableSet | None = None
+    scene: Scene | None = None
 
     @model_validator(mode="after")
     def _regime_payload_invariant(self) -> "Experience":
@@ -213,6 +214,11 @@ class LedgerEntry(BaseModel):
     links_to_experiences: list[str] = Field(default_factory=list)
 
 
+class Scene(BaseModel):
+    prompt: str
+    situation: str
+
+
 class CorpusEntry(BaseModel):
     ledger_ref: str
     domain: str
@@ -220,6 +226,7 @@ class CorpusEntry(BaseModel):
     unlabeled: str
     provenance: str
     corpus_pointers: list[str] = Field(default_factory=list)
+    scene: Scene | None = None
 
 
 class NextExperienceSpec(BaseModel):

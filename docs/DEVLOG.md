@@ -661,3 +661,6 @@ Task 1 — added `Push.response` (default ""), `SharperVerdict`, `SharperAuditIt
   scenes — diversify the posture path beyond Veldra with real cases (Stripe…, later Dimon/Solomon/Lip-Bu Tan).
   Reframe: founder path has two content sources (the learner's owned ledger vs. a curated case library); mined
   cases fill the latter. Memory: `retnovation-case-library-idea`. Sequenced after immersive-scenes ships.
+
+## 2026-06-23 — Immersive-scenes Task 1: Types — `Scene`, `CorpusEntry.scene`, `Experience.scene` (TDD PASS)
+Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEntry.scene: Scene | None = None`; `Experience.scene: Scene | None = None` (runtime-only, after `checkable`). 98 passed, 3 skipped; ruff clean.

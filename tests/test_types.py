@@ -209,3 +209,60 @@ def test_sharper_audit_types_and_assessment_field():
         sharper_audit=[item],
     )
     assert a2.sharper_audit[0].code == "protect_the_core_lane"
+
+
+def test_scene_and_corpus_experience_scene_fields():
+    from retnovation.types import (
+        CheckableSet,
+        CorpusEntry,
+        Experience,
+        Frame,
+        Mode,
+        Regime,
+        Rubric,
+        Scene,
+        Trap,
+    )
+
+    sc = Scene(
+        prompt="A concrete, situated decision.", situation="The world, the actors, the stakes."
+    )
+    assert sc.prompt and sc.situation
+
+    ce = CorpusEntry(
+        ledger_ref="veldra:x",
+        domain="founder_ceo",
+        why_owned="stakes",
+        unlabeled="unlabeled",
+        provenance="docs/X",
+        corpus_pointers=[],
+    )
+    assert ce.scene is None  # default
+    ce2 = CorpusEntry(
+        ledger_ref="veldra:y",
+        domain="founder_ceo",
+        why_owned="stakes",
+        unlabeled="unlabeled",
+        provenance="docs/Y",
+        corpus_pointers=[],
+        scene=sc,
+    )
+    assert ce2.scene.prompt == "A concrete, situated decision."
+
+    exp = Experience(
+        experience_id="e",
+        prompt="abstract",
+        ledger_ref="veldra:y",
+        regime=Regime.open_ended,
+        rubric=Rubric(
+            frames=[Frame(frame_code="f", frame_detail="d", paired_trap="t")],
+            traps=[Trap(trap_code="t", trap_detail="d")],
+            mode=Mode.genuinely_open,
+        ),
+    )
+    assert exp.scene is None  # default; runtime-only
+    assert (
+        exp.model_copy(update={"scene": sc}).scene.situation == "The world, the actors, the stakes."
+    )
+    # CheckableSet import unused-guard: keep regimes coherent (CS experiences never get a scene)
+    assert CheckableSet(questions=[]).questions == []
