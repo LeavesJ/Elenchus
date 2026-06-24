@@ -81,3 +81,16 @@ def test_deterministic_without_answer_key_raises():
     )
     with pytest.raises(ValueError):
         checkable_scorer.assess(_exp([bad]), _work(["x"]), _no_model())
+
+
+def test_assess_raises_when_checkable_is_none():
+    exp = Experience.model_construct(
+        experience_id="x",
+        prompt="p",
+        ledger_ref="r",
+        regime=Regime.cs_technical,
+        rubric=None,
+        checkable=None,
+    )
+    with pytest.raises(ValueError):
+        checkable_scorer.assess(exp, _work([]), _no_model())

@@ -75,3 +75,10 @@ def test_cs_technical_with_nothing_due_targets_soonest():
     )
     spec = schedule_next(st, [], now, regime=Regime.cs_technical)
     assert spec.target_frames == ["soon"]
+
+
+def test_cs_technical_due_ties_break_by_concept_code():
+    now = _now()
+    st = _cs_state({"zebra": (now, 1), "alpha": (now, 1)})  # identical due
+    spec = schedule_next(st, [], now, regime=Regime.cs_technical)
+    assert spec.target_frames == ["alpha", "zebra"]  # deterministic, code-sorted

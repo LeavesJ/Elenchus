@@ -277,6 +277,17 @@ def test_select_cs_technical_cold_start_falls_back_to_content_core():
     assert exp.experience_id == "replication_models"  # the one covering that concept
 
 
+def test_select_cs_technical_raises_on_empty_library(tmp_path):
+    (tmp_path / "checkables").mkdir()
+    from retnovation.generator import select_cs_technical, GateError
+    from retnovation.types import LearnerState
+
+    with pytest.raises(GateError):
+        select_cs_technical(
+            core=None, state=LearnerState(), ledger=[], corpus=[], spec=None, root=tmp_path
+        )
+
+
 def test_every_authored_rubric_passes_the_gate_and_clears_eight_angles():
     """The moat: the gate holds the unlabeled test over everything the generator produces."""
     from retnovation.content_loader import load_library, load_min_angle_count, load_denylist

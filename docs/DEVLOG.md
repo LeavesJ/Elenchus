@@ -381,3 +381,26 @@ Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult
   ran RED (`ImportError: cannot import name 'MIN_PROCESS_DIAL'` + `KeyError: 'process_frames'`);
   implemented; all 4 aim tests GREEN.
 - Full suite: 83 passed, 2 skipped (was 81+2; net +2 new CS tests); ruff format + check clean.
+
+## 2026-06-23 — Step 4 final-review fixes (MERGE-CLEAN verdict, 3 minor closures)
+
+Whole-branch adversarial review returned MERGE CLEAN with one Minor finding and two
+guard-coverage gaps (L-8: cover fail-loud guards). Applied exactly three changes:
+
+1. **Scheduler tie-determinism** (`src/retnovation/scheduler.py`): Added concept-code
+   tiebreak to both sort keys in the `cs_technical` branch of `schedule_next`, matching
+   the deliberate `sorted()` determinism of the `open_ended` branch. Due-list key:
+   `(items[c].due, c)`; soonest-due fallback key: `(kv[1].due, kv[0])`.
+   New test: `test_cs_technical_due_ties_break_by_concept_code` asserts
+   `["alpha", "zebra"]` when both have identical due timestamps.
+
+2. **Guard regression test — `checkable is None`** (`tests/test_checkable_scorer.py`):
+   `test_assess_raises_when_checkable_is_none` uses `Experience.model_construct` to
+   bypass the regime validator and constructs a `cs_technical` experience with
+   `checkable=None`, then asserts the scorer's defensive `ValueError` guard fires.
+
+3. **Guard regression test — empty checkable library** (`tests/test_generator.py`):
+   `test_select_cs_technical_raises_on_empty_library` creates an empty `checkables/`
+   directory in a `tmp_path` and asserts `select_cs_technical` raises `GateError`.
+
+Results: 87 passed, 2 skipped (was 84+2; +3 new tests); ruff format + check clean.
