@@ -354,6 +354,17 @@ Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult
 - Files changed: `src/retnovation/orchestration.py`, `src/retnovation/cli.py`, `docs/DEVLOG.md`.
 - `tests/test_dispatch.py` NOT touched (Task 4 already provides the stronger assertion).
 
+## 2026-06-23 — Step 4 Task 11: CS dry-run acceptance test (TDD PASS)
+- Created `tests/test_cs_dry_run.py` (verbatim from brief): builds a real `Store`, queues a
+  `cs_technical` `NextExperienceSpec` targeting `safety_vs_liveness`, `idempotency_under_retry`,
+  `quorum_intersection`; derives a CS `Core` via `aim("cs_systems")`; runs `run_session` with a
+  fixture that answers each question correctly via `answer_key[0]` (fully deterministic, model-free).
+- Three acceptance assertions: (1) scorer ran every question, all correct; (2) concept spaced-index
+  moved + persisted across a `Store` reopen; (3) a fresh `cs_technical` next experience is queued.
+- Result: 1 passed in 0.15s. Full suite: **84 passed, 2 skipped** (was 83+2; net +1);
+  ruff format + check clean; confidentiality gate CLEAN.
+- Files changed: `tests/test_cs_dry_run.py`, `docs/DEVLOG.md`.
+
 ## 2026-06-23 — Step 4 Task 9: Domain-path onboarding (`aim` / `derive_core`) (TDD PASS)
 - Added `MIN_PROCESS_DIAL = 0` constant to `src/retnovation/aim.py` (CS — content axis maxed,
   process near-empty per Complete Picture §10).
