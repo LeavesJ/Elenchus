@@ -790,5 +790,22 @@ Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEn
 ## 2026-06-23 — `veldra_ingest` `__main__` guard: `python -m retnovation.veldra_ingest` now runs `main()`
 - Added `if __name__ == "__main__": raise SystemExit(main())` so the module runs via `python -m` instead of silently importing and doing nothing (resolves the follow-up flagged in the immersive-scenes entry). Verified `PYTHONPATH=src python -m retnovation.veldra_ingest` → `ingested 14 ledger entries (...)`, exit 0; ruff format/check clean; pytest 107 passed, 3 skipped.
 
+## 2026-06-24 — Scene legibility refinement (branch scene-legibility)
+- Dogfood feedback: make the experience the student reads **legible** (bold key terms, separated
+  paragraphs) — bare-minimum MVP; visual representation stays post-MVP. Also noted (deferred to the
+  progression thread): the escrow scene is a *max-difficulty capstone*, wrong as a cold-start intro —
+  input for the intro-arc / case-library work.
+- **Moat hardening (TDD, core-path):** scenes now carry markdown (`**bold**`), so `validate_scene`
+  strips emphasis (`*`, `` ` ``) before the anti-label checks — otherwise a frame phrase split by
+  bold (`**Lead** with what you refuse to do`) would slip past. `_` is kept (snake_case frame codes).
+  New `test_validate_scene_sees_through_markdown_emphasis` (RED→GREEN: bold-split phrase still raises;
+  legitimate bold passes). Independent adversarial review on the moat change.
+- **Content (gitignored):** re-authored the `license_continuity` scene prompt + situation into legible
+  markdown — 4 short paragraphs, key terms bolded, the ask set off — in `data/seed/veldra_ledger.yaml`;
+  re-ingested. Loads with real `\n\n` paragraph breaks + bold; still clears the gated moat test against
+  its rubric (the gate strips the `**`). Scene stays confidential/untracked.
+- **Verified:** full suite **108 passed, 3 skipped**; ruff clean; confidentiality `git ls-files` empty;
+  `data/` untracked.
+
 
 

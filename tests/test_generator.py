@@ -405,3 +405,34 @@ def test_seeded_license_scene_clears_the_moat():
         )
     finally:
         store.close()
+
+
+def test_validate_scene_sees_through_markdown_emphasis():
+    """Legibility lets scenes carry **bold**; the moat must strip emphasis before checking so a
+    frame phrase split by markdown (e.g. `**Lead** with what you refuse to do`) cannot slip past."""
+    import pytest
+
+    from retnovation.generator import GateError, validate_scene
+    from retnovation.types import Scene
+
+    rubric = _exp().rubric  # frames lead_with_what_you_refuse_to_do, protect_the_core_lane
+    kw = dict(
+        framework_denylist=["swot", "five forces"], scaffold_denylist=["this is a", "apply the"]
+    )
+
+    # bold across a frame phrase would split it for a raw-text check — must still raise
+    with pytest.raises(GateError):
+        validate_scene(
+            Scene(prompt="A clean decision.", situation="**Lead** with what you refuse to do."),
+            rubric,
+            **kw,
+        )
+    # legitimate bold on safe terms (and a code span) passes
+    validate_scene(
+        Scene(
+            prompt="Decide the **escrow** terms today.",
+            situation="A client mid-rollout; a `guarantee` is under pressure.",
+        ),
+        rubric,
+        **kw,
+    )  # no raise

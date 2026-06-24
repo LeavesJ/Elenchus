@@ -58,8 +58,12 @@ def validate_scene(
 ) -> None:
     """The concrete prompt the student SEES — and the situation woven into the instructor's
     pushes (whose text the student also sees) — must clear the same anti-label bar: no named
-    framework, no leaked frame/trap code, no type-hint scaffold, no cosmetic wrapper word."""
-    text_lc = f"{scene.prompt}\n{scene.situation}".lower()
+    framework, no leaked frame/trap code, no type-hint scaffold, no cosmetic wrapper word.
+
+    Scenes are authored as legible markdown (bold key terms), so emphasis markers are stripped
+    before the checks — otherwise `**Lead** with what you refuse to do` would split a banned phrase
+    and slip past. `_` is kept (snake_case frame codes legitimately use it)."""
+    text_lc = f"{scene.prompt}\n{scene.situation}".replace("*", "").replace("`", "").lower()
     banned = [t.lower() for t in framework_denylist] + _frame_trap_phrases(rubric)
     if any(_contains_phrase(text_lc, p) for p in banned):
         raise GateError("scene names a framework or leaks a frame/trap code")
