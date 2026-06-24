@@ -652,3 +652,12 @@ Task 1 — added `Push.response` (default ""), `SharperVerdict`, `SharperAuditIt
   gitignored material so the next dogfood is immediately immersive; the rest stay abstract.
 - Baseline before any code: 97 passed, 3 skipped; confidentiality `git ls-files` clean. Next: user review of
   the spec → `writing-plans` → subagent-driven TDD → final adversarial review (§9) → merge → re-dogfood.
+- User approved the spec. Authored the plan `docs/superpowers/plans/2026-06-23-immersive-scenes.md` — 6
+  subagent TDD tasks (types → persistence scene_json+migration → ingest threading → validate_scene →
+  select_experience attach → model situation-weaving) + a controller-executed Final (author the confidential
+  `license_continuity` scene into the gitignored seed, re-ingest, a gated tracked moat test, opus adversarial
+  review). Plan self-reviewed: full spec coverage, no placeholders, type-consistent.
+- Also captured (user idea, graded high-ROI): a **mined founder/exec case library** as the NEXT project after
+  scenes — diversify the posture path beyond Veldra with real cases (Stripe…, later Dimon/Solomon/Lip-Bu Tan).
+  Reframe: founder path has two content sources (the learner's owned ledger vs. a curated case library); mined
+  cases fill the latter. Memory: `retnovation-case-library-idea`. Sequenced after immersive-scenes ships.
