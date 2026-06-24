@@ -629,3 +629,26 @@ Task 1 — added `Push.response` (default ""), `SharperVerdict`, `SharperAuditIt
   types, the **business-executive** domain expansion (first per the locked decision), multi-user infra;
   (c) a **usable surface** for the dogfood (today it is a CLI + `pytest`). See MVP Scope §7 success
   criteria for what the harness now satisfies vs. what only real use can prove.
+
+## 2026-06-23 — First founder dogfood (live Opus 4.8) + immersive-scenes design (branch immersive-scenes)
+- Ran the first real user-zero dogfood: a turn-by-turn relay against live Opus 4.8 (a `/tmp` background
+  driver doing file-IPC around the unchanged `run_session`; the seeded `data/retnovation.db` selected the
+  founder `license_continuity` experience). Smoke-tested the relay plumbing first.
+- **Dogfood surfaced friction** (the loop working as intended — use → notice → improve): the abstracted
+  `license_continuity` prompt felt flat / not immersive, and selection shows no progression. Three distinct
+  threads: (a) immersion/concrete prompts, (b) a progression/curriculum model in selection, (c) the
+  intro/onboarding arc. User chose to brainstorm **(a) immersion** first.
+- **Root cause:** the immersive flatness is a confidentiality artifact — the tracked rubric prompt is
+  abstracted because the concrete Veldra specifics are gitignored; the corpus carries
+  `owned_problem`/`why_owned`/`unlabeled` but NO student-facing prompt. The JudgmentLoop ReserveGrid anchor
+  (concrete, named, numbered) is the immersion bar.
+- **Design (spec `docs/superpowers/specs/2026-06-23-immersive-scenes-design.md`):** add a `Scene` (concrete
+  `prompt` + a reusable `situation` block) to the gitignored corpus/seed; `select_experience` overrides the
+  displayed prompt + attaches the scene when present (abstract stays the fallback); `AnthropicModel` weaves
+  the situation into all three judgment-loop calls so the back-and-forth stays situated; **the moat holds
+  over the concrete prompt** via a new `generator.validate_scene` (same anti-label checks on what the student
+  actually sees). Corpus gains a nullable `scene_json` column (fresh-DB `_SCHEMA` + guarded `ADD COLUMN`
+  migration, L-8). Founder/open_ended only; CS untouched. v1 drafts ONE scene (`license_continuity`) from the
+  gitignored material so the next dogfood is immediately immersive; the rest stay abstract.
+- Baseline before any code: 97 passed, 3 skipped; confidentiality `git ls-files` clean. Next: user review of
+  the spec → `writing-plans` → subagent-driven TDD → final adversarial review (§9) → merge → re-dogfood.
