@@ -64,3 +64,25 @@ def test_queue_len_is_non_consuming(tmp_path):
     s.queue_push(NextExperienceSpec(target_frames=["a"], ledger_ref="x", regime=Regime.open_ended))
     assert s.queue_len() == 1
     assert s.queue_len() == 1  # still there
+
+
+def test_concepts_roundtrip_and_never_deleted(tmp_path):
+    from retnovation.types import SpacedItem
+
+    s = Store(tmp_path / "c.db")
+    st = LearnerState()
+    st.declarative_seed["safety_vs_liveness"] = SpacedItem(
+        concept="safety_vs_liveness", due=_now(), interval_days=4
+    )
+    s.save_state(st)
+    loaded = Store(tmp_path / "c.db").load_state()
+    assert loaded.declarative_seed["safety_vs_liveness"].interval_days == 4
+
+    # demote (shorter interval) — row stays present
+    st.declarative_seed["safety_vs_liveness"] = SpacedItem(
+        concept="safety_vs_liveness", due=_now(), interval_days=1
+    )
+    s.save_state(st)
+    re2 = Store(tmp_path / "c.db").load_state()
+    assert set(re2.declarative_seed) == {"safety_vs_liveness"}
+    assert re2.declarative_seed["safety_vs_liveness"].interval_days == 1

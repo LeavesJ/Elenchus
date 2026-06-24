@@ -12,6 +12,7 @@ from .types import (
     LedgerEntry,
     NextExperienceSpec,
     Regime,
+    SpacedItem,
     Strength,
 )
 
@@ -27,6 +28,8 @@ CREATE TABLE IF NOT EXISTS queue (
 CREATE TABLE IF NOT EXISTS corpus (
   ledger_ref TEXT PRIMARY KEY, domain TEXT NOT NULL, why_owned TEXT NOT NULL,
   unlabeled TEXT NOT NULL, provenance TEXT NOT NULL, corpus_pointers_json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS concepts (
+  concept TEXT PRIMARY KEY, due TEXT NOT NULL, interval_days INTEGER NOT NULL);
 """
 
 
@@ -50,6 +53,12 @@ class Store:
                 due=datetime.fromisoformat(r["due"]),
                 last_evidence=r["last_evidence"],
             )
+        for r in self._db.execute("SELECT * FROM concepts"):
+            st.declarative_seed[r["concept"]] = SpacedItem(
+                concept=r["concept"],
+                due=datetime.fromisoformat(r["due"]),
+                interval_days=r["interval_days"],
+            )
         return st
 
     def save_state(self, state: LearnerState) -> None:
@@ -66,6 +75,13 @@ class Store:
                     fs.due.isoformat(),
                     fs.last_evidence,
                 ),
+            )
+        for concept, si in state.declarative_seed.items():
+            self._db.execute(
+                "INSERT INTO concepts(concept,due,interval_days) VALUES(?,?,?) "
+                "ON CONFLICT(concept) DO UPDATE SET due=excluded.due, "
+                "interval_days=excluded.interval_days",
+                (concept, si.due.isoformat(), si.interval_days),
             )
         self._db.commit()
 

@@ -320,3 +320,18 @@ Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult
   `classify_response`).
 - TDD: 3 failing tests first (RED — unexpected kwarg + AttributeError); implemented; all 3 GREEN.
 - Full suite: 70 passed, 2 skipped (added 3 tests; live smoke stays skipped without key); ruff clean.
+
+## 2026-06-23 — Step 4 Task 8: Persistence — `concepts` table + `declarative_seed` I/O (TDD PASS)
+- Added `SpacedItem` to the types import in `src/retnovation/persistence.py`.
+- Appended `CREATE TABLE IF NOT EXISTS concepts (concept TEXT PRIMARY KEY, due TEXT NOT NULL,
+  interval_days INTEGER NOT NULL)` to `_SCHEMA` — fresh DB supports the CS path with no migration
+  (L-8: fresh-DB end-to-end; Spec §5.8).
+- Extended `load_state`: after the frames loop, reads every `concepts` row and populates
+  `st.declarative_seed[concept]` as a `SpacedItem`.
+- Extended `save_state`: after the frames loop, UPSERTs every `(concept, si)` in
+  `state.declarative_seed` via `INSERT ... ON CONFLICT(concept) DO UPDATE SET ...` — NO DELETE
+  (L-3: reversible decay; a demoted concept keeps its row, interval shrinks).
+- Frames I/O and all existing tables (frames, ledger, queue, corpus) are unchanged.
+- TDD: `test_concepts_roundtrip_and_never_deleted` appended first; ran RED (KeyError —
+  `declarative_seed` not persisted); implemented; GREEN in 0.14 s.
+- Full suite: 81 passed, 2 skipped (was 80+2; net +1); ruff format + check clean.
