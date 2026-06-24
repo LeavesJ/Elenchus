@@ -77,3 +77,45 @@ def test_load_checkable_library_builds_cs_experiences():
     # both check types are represented across the library
     kinds = {q.check_type for e in lib for q in e.checkable.questions}
     assert CheckType.deterministic in kinds and CheckType.model_graded in kinds
+
+
+def _write_decision_rubric(tmp_path):
+    import textwrap
+
+    rdir = tmp_path / "rubrics"
+    rdir.mkdir()
+    (rdir / "x.yaml").write_text(
+        textwrap.dedent(
+            """
+            experience_id: x
+            ledger_ref: "veldra:x"
+            regime: open_ended
+            mode: genuinely_open
+            binding_constraint: null
+            prompt: "A same-day call forces a real trade-off."
+            decision_frame: f1
+            frames:
+              - frame_code: f1
+                frame_detail: commit and name the reversal
+            traps: []
+            """
+        )
+    )
+    return tmp_path
+
+
+def test_load_rubric_threads_decision_frame(tmp_path):
+    root = _write_decision_rubric(tmp_path)
+    rub = content_loader.load_rubric("x", root=root)
+    assert rub.decision_frame == "f1"
+
+
+def test_load_experience_threads_decision_frame(tmp_path):
+    root = _write_decision_rubric(tmp_path)
+    exp = content_loader.load_experience("x", root=root)
+    assert exp.rubric.decision_frame == "f1"
+
+
+def test_load_rubric_without_decision_frame_is_none():
+    rub = content_loader.load_rubric("license_continuity")
+    assert rub.decision_frame is None  # not yet authored on the real rubric until Task 6

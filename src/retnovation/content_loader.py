@@ -34,6 +34,7 @@ def load_rubric(name: str, root: Path | None = None) -> Rubric:
         traps=[Trap(**t) for t in data["traps"]],
         mode=data["mode"],
         binding_constraint=data.get("binding_constraint"),
+        decision_frame=data.get("decision_frame"),
     )
 
 
@@ -71,6 +72,7 @@ def load_experience(name: str, root: Path | None = None) -> Experience:
         traps=[Trap(**t) for t in data["traps"]],
         mode=Mode(data["mode"]),
         binding_constraint=data.get("binding_constraint"),
+        decision_frame=data.get("decision_frame"),
     )
     return Experience(
         experience_id=data["experience_id"],
