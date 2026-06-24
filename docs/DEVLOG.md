@@ -510,3 +510,19 @@ Task 1 — added `Push.response` (default ""), `SharperVerdict`, `SharperAuditIt
   object has no attribute 'grade_sharper'`); GREEN after; live smoke (`test_live_grade_sharper_smoke`)
   gated with `@pytest.mark.skipif(not _HAS_KEY, ...)` — adds 3rd skip.
 - Full suite: **92 passed, 3 skipped** (was 89+2; net +3 tests, +1 skip); ruff format + check clean.
+
+## 2026-06-23 — Step 5 Task 3: Independent blind sharper grader `audit_sharper` (TDD PASS)
+- Created `src/retnovation/assessment/sharper_grader.py`: `audit_sharper(exp, assessment, model) ->
+  Assessment` — a pure function that re-grades every closing push for frames in
+  `frames_closed_under_pressure` (one audit per code, `kind == "frame"`,
+  `response_classification == "closed"`) using `model.grade_sharper` (the blind Task-2 grader).
+- A DISPUTED verdict (`verdict.sharper is False`) removes the code from
+  `frames_closed_under_pressure` AND removes its `FrameDelta` from `frame_deltas`, so a subsequent
+  `update_state` scores the frame `Strength.weak`, not strong — the misclassification trap is
+  closed. Records the full `SharperAuditItem` trail on `Assessment.sharper_audit`.
+- Returns via `assessment.model_copy(update={...})` — input Assessment is never mutated.
+- TDD evidence: tests written first (`tests/test_sharper_grader.py`); RED
+  (`ModuleNotFoundError: No module named 'retnovation.assessment.sharper_grader'`); implemented;
+  both GREEN in 0.10s. The dispute test asserts the end-to-end `update_state` → `Strength.weak`
+  chain, guarding the strong-misclassification trap.
+- Full suite: **94 passed, 3 skipped** (was 92+3; net +2 new tests); ruff format + check clean.
