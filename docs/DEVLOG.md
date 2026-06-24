@@ -815,5 +815,76 @@ Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEn
   would reopen a worse single-char hiding hole, so empty-replacement is the right tradeoff for curated
   content. Full suite **109 passed, 3 skipped**; ruff clean.
 
+## 2026-06-24 — SESSION PAUSE + HANDOVER (read this first to resume)
+
+**Exactly where we left off.** A live founder dogfood was run and two product findings were captured;
+the user chose to **act on the finding** but **paused before building** and asked for a clean handover.
+
+### Repo state (the literal facts)
+- Branch `main`, HEAD **`3344788`**, working tree **clean**. Suite **109 passed, 3 skipped** (the 3
+  skips are `@pytest.mark.live`, no key). `ruff format`/`check` clean. Confidentiality `git ls-files`
+  grep empty; `data/` untracked.
+- `main` is **~38 commits ahead of `origin/main` and has NOT been pushed** (every step this run merged
+  locally; the user never asked to push — ask before pushing).
+- The gitignored `data/seed/veldra_ledger.yaml` holds the authored, **legibly-formatted** concrete
+  `license_continuity` scene (escrow-continuity decision); `data/retnovation.db` is re-ingested with it
+  (scene present, 4 paragraphs). These are confidential, gitignored, local-only.
+- Throwaway live-dogfood relay: `/tmp/dogfood/driver.py` (file-IPC around `run_session`). `/tmp` is
+  ephemeral — recreate if gone; the seed/db are ready.
+
+### What shipped this session (post-MVP; build order was already complete)
+1. **`immersive-scenes`** (spec/plan `docs/superpowers/{specs,plans}/2026-06-23-immersive-scenes*`):
+   `Scene` (`prompt`+`situation`) on `CorpusEntry`/`SeedEntry`/`Experience` (runtime-only); corpus
+   `scene_json` column + guarded migration; `select_experience` moat-validates + attaches a scene and
+   overrides the prompt (abstract = fallback); `AnthropicModel` weaves `situation` into all 3
+   judgment-loop calls; `generator.validate_scene` (the moat over the concrete prompt + situation);
+   one authored scene + a gated moat test. cs_technical untouched. Subagent-driven TDD + opus review.
+2. **`scene-legibility`** (this entry's predecessors): scenes are legible markdown; both gates
+   (`validate_scene` + `anti_label_gate`) strip emphasis via shared `generator._strip_emphasis` so
+   bolding can't split a banned phrase past the moat. Plus the `veldra_ingest` `__main__` guard.
+
+### The dogfood + the findings (the reason for the next task)
+- Presented the concrete `license_continuity` escrow scene to the user (founder = user-zero). User
+  explored 6 proposals + a bonus, then **committed to "Proposal 1" (narrow internal-use escrow, hard
+  no-compete line, objective release triggers)**.
+- Fed Proposal 1 to the **live** instructor. Result: `classify_intake` judged **both** rubric frames
+  (`lead_with_what_you_refuse_to_do`, `protect_the_core_lane`) `present_reasoned` → the loop
+  **converged at intake with ZERO pushes / empty trajectory** (`stop_reason=converged`,
+  `trajectory=[]`, `sharper_audit=[]`).
+- **Finding (→ memory `retnovation-commitment-frame-gap`):** (a) the `genuinely_open` rubric scores
+  *engaging the angles* but has **no frame for the decision the prompt demands** ("Decide what you
+  commit to… before they sign this quarter"); (b) a **converged-at-intake answer produces no push and
+  no appreciating-asset trace — the case instructor goes silent exactly when the student is strong**.
+
+### NEXT SESSION — START HERE: "act on the finding" (rubric depth)
+**Goal:** deepen the `license_continuity` rubric (and the pattern for `genuinely_open` experiences
+that demand a decision) so a strong answer gets **pushed** instead of silently converging.
+**Candidate moves (decide in brainstorming — these are forks, not a fixed plan):**
+- Add a **commitment/decision frame** (e.g. `commit_under_the_deadline`) and/or restore the dropped
+  `choose_the_failure_default_deliberately` frame from the JudgmentLoop v0.1 anchor.
+- Consider a **"stress even a converged answer" loop mode** so the instructor probes the sharpest edge
+  rather than stopping when the thin rubric is already satisfied (relates to JudgmentLoop §6
+  push-quality / convergence concerns).
+- Decide scope: just `license_continuity`, or a general convention for decision-under-deadline
+  experiences (and whether a `binding_constraint` / `bounded_error` fits).
+**How to start (the established workflow, do not skip):** Session-start protocol → read
+`docs/lessons.md`; then this entry; then the local-only gitignored docs `Retnovation_JudgmentLoop_v0.1.md`
+(§2 the loop, §6 findings), `Retnovation_Complete_Picture.md` §12–§13; then the code:
+`src/retnovation/assessment/judgment_loop.py`, the `license_continuity` rubric in `content/rubrics/`,
+`src/retnovation/generator.py`. Then **brainstorming → writing-plans → subagent-driven-development
+(fresh implementer + independent reviewer per task) → final adversarial review → finishing**.
+**Hard doctrine the user stressed TWICE:** the loop is **conclusion-agnostic — NEVER score or grade
+the conclusion.** It outputs a *trajectory*, not a grade. Keep `sharper = a gap closed with a supplied
+mechanism`; presence is conclusion-agnostic; reversible decay (L-3); the unlabeled moat
+(`validate_scene`/`anti_label_gate`); confidentiality (Veldra design docs + `data/` are gitignored —
+verify `git ls-files` after any content work). Core-path changes get an independent adversarial review.
+
+### Other queued threads (not the immediate next, but live — see memory)
+- **Progression / intro-arc:** the escrow scene is a *max-difficulty capstone*, wrong as a cold start —
+  pairs with the rubric-depth work (`retnovation-commitment-frame-gap`).
+- **Mined founder/exec case library** (`retnovation-case-library-idea`): diversify the posture path
+  beyond Veldra (Stripe…, later Dimon/Solomon/Lip-Bu Tan); the two-content-sources reframe + 3 moat
+  tensions are captured there. Build *on* the scene mechanism.
+
 
 
