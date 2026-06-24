@@ -474,3 +474,17 @@ Results: 87 passed, 2 skipped (was 84+2; +3 new tests); ruff format + check clea
   placeholders, internally consistent, single-plan scope). Baseline before any code: 87 passed, 2 skipped;
   confidentiality `git ls-files` clean.
 - Next: `writing-plans` → subagent-driven TDD → final adversarial review (§9) → merge.
+
+## 2026-06-23 — Step 5 implementation plan (branch step5-harden-judgment-loop)
+- Authored the TDD plan `docs/superpowers/plans/2026-06-23-harden-judgment-loop.md` — 6 right-sized
+  tasks then a final opus adversarial review: (1) types (`Push.response`, `SharperVerdict`,
+  `SharperAuditItem`, `Assessment.sharper_audit`) → (2) `Model.grade_sharper` + blind skeptical
+  `content/prompts/grade_sharper.md` → (3) `assessment/sharper_grader.py::audit_sharper` (2-vote
+  demote+revert) → (4) regression stop + capture raw responses → (5) distinct-target plateau via
+  angle rotation → (6) wire the audit into `assess` + strengthen/extend the loop tests.
+- Plan grounded in the real suite (read judgment_loop + all touched tests first); every step has
+  complete, fixture-accurate code; quadruple-checked the cooperative/bounded/budget paths survive
+  rotation and the audit-wiring no-ops on no-closed-frame assessments. Self-review: full spec
+  coverage, no placeholders, type-consistent signatures end to end.
+- Next: execute via subagent-driven development (fresh implementer + independent reviewer per task),
+  then the final adversarial review.
