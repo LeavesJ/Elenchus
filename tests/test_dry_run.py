@@ -28,10 +28,12 @@ def _cooperative_model():
         frame_states={
             "lead_with_what_you_refuse_to_do": FrameState.absent,
             "protect_the_core_lane": FrameState.absent,
+            "commit_under_the_deadline": FrameState.absent,
         },
         trap_states={
             "scope_creep_to_please": TrapState.not_tripped,
             "erode_core_for_one_customer": TrapState.not_tripped,
+            "commit_without_a_tripwire": TrapState.not_tripped,
         },
     )
 
@@ -43,6 +45,7 @@ def _cooperative_model():
         {
             "lead_with_what_you_refuse_to_do": closed(),
             "protect_the_core_lane": closed(),
+            "commit_under_the_deadline": closed(),
         },
     )
 
@@ -117,7 +120,12 @@ def test_dry_run_closes_the_loop(tmp_path):
     assert assessment.trajectory
     assert assessment.stop_reason is StopReason.converged
     assert all(
-        d.code in {"lead_with_what_you_refuse_to_do", "protect_the_core_lane"}
+        d.code
+        in {
+            "lead_with_what_you_refuse_to_do",
+            "protect_the_core_lane",
+            "commit_under_the_deadline",
+        }
         for d in assessment.frame_deltas
     )
     # 3) at least one frame strength moved (not the `weak` default) in persisted state

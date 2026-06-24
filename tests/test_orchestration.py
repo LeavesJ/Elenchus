@@ -24,10 +24,12 @@ def _fake_model():
         frame_states={
             "lead_with_what_you_refuse_to_do": FrameState.absent,
             "protect_the_core_lane": FrameState.absent,
+            "commit_under_the_deadline": FrameState.absent,
         },
         trap_states={
             "scope_creep_to_please": TrapState.not_tripped,
             "erode_core_for_one_customer": TrapState.not_tripped,
+            "commit_without_a_tripwire": TrapState.not_tripped,
         },
     )
 
@@ -35,7 +37,12 @@ def _fake_model():
         return [ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)]
 
     return FakeModel(
-        intake, {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()}
+        intake,
+        {
+            "lead_with_what_you_refuse_to_do": closed(),
+            "protect_the_core_lane": closed(),
+            "commit_under_the_deadline": closed(),
+        },
     )
 
 

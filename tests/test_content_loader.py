@@ -116,6 +116,32 @@ def test_load_experience_threads_decision_frame(tmp_path):
     assert exp.rubric.decision_frame == "f1"
 
 
-def test_load_rubric_without_decision_frame_is_none():
+def test_a_rubric_without_a_decision_frame_loads_with_none(tmp_path):
+    import textwrap
+
+    rdir = tmp_path / "rubrics"
+    rdir.mkdir()
+    (rdir / "y.yaml").write_text(
+        textwrap.dedent(
+            """
+            experience_id: y
+            ledger_ref: "veldra:y"
+            regime: open_ended
+            mode: genuinely_open
+            binding_constraint: null
+            prompt: "p"
+            frames:
+              - frame_code: f1
+                frame_detail: d
+            traps: []
+            """
+        )
+    )
+    assert content_loader.load_rubric("y", root=tmp_path).decision_frame is None
+
+
+def test_license_continuity_declares_the_commitment_decision_frame():
     rub = content_loader.load_rubric("license_continuity")
-    assert rub.decision_frame is None  # not yet authored on the real rubric until Task 6
+    assert rub.decision_frame == "commit_under_the_deadline"
+    assert any(f.frame_code == "commit_under_the_deadline" for f in rub.frames)
+    assert any(t.trap_code == "commit_without_a_tripwire" for t in rub.traps)

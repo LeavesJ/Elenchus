@@ -15,8 +15,14 @@ frames:
   - frame_code: protect_the_core_lane
     frame_detail: Keep the promise the core product makes to everyone intact under pressure.
     paired_trap: erode_core_for_one_customer
+  - frame_code: commit_under_the_deadline
+    frame_detail: Commit to a decision today, account for what you trade for it, and name what would force you to reverse.
+    paired_trap: commit_without_a_tripwire
 traps:
   - trap_code: scope_creep_to_please
     trap_detail: Bending the offer to avoid saying no.
   - trap_code: erode_core_for_one_customer
     trap_detail: Special-casing one account in a way that weakens the core promise.
+  - trap_code: commit_without_a_tripwire
+    trap_detail: Committing to a course without naming what would make you reverse it.
+decision_frame: commit_under_the_deadline

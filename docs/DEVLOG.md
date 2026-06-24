@@ -933,3 +933,7 @@ verify `git ls-files` after any content work). Core-path changes get an independ
 ## 2026-06-24 — Task 5: stress-aware classify_response via response_stress.md
 - Task 5 — stress-aware classify_response: response_stress.md inserted only when stress=True;
   byte-stable otherwise; 123/3 green.
+
+## 2026-06-24 — Task 6: commit_under_the_deadline decision frame on license_continuity
+- Task 6 — license_continuity gains commit_under_the_deadline frame + commit_without_a_tripwire
+  trap + decision_frame (10 angles); gate + seeded-scene moat green; 124/3.
