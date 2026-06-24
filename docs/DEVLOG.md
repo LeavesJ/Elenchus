@@ -281,6 +281,23 @@ Task 1 — checkable types (`CheckType`, `CheckableQuestion/Set`, `ConceptResult
 - Removed now-unused `import pytest` from `tests/test_experience.py` (ruff F401).
 - Full suite: 75 passed, 2 skipped (baseline was 74 + 2); ruff format + check clean.
 
+## 2026-06-23 — Step 4 Task 6: Concept state update + `STATE_UPDATERS` registry (TDD PASS)
+- Added `update_state_checkable(state, assessment, now, experience_id, spacing=None) -> LearnerState`
+  to `src/retnovation/state.py`. Aggregates `CheckableAssessment.results` by concept; recalled iff
+  ALL questions correct (strict `all(corrects)`); recall multiplies interval by `ease_factor`
+  (floored at `min_interval_days`); miss resets to `min_interval_days` — the `SpacedItem` is
+  UPDATED, never deleted (L-3 reversible decay). Writes ONLY to `state.declarative_seed`; never
+  touches `state.frames` (NEVER-COLLAPSE invariant, Complete Picture §10).
+- Added `STATE_UPDATERS: dict[Regime, Callable]` = `{open_ended: update_state, cs_technical:
+  update_state_checkable}`, mirroring `ASSESSORS`/`SELECTORS` registries for orchestration dispatch
+  (Task 10).
+- Updated imports in `state.py`: `Callable`, `timedelta`, `load_spacing`, `CheckableAssessment`,
+  `Regime`, `SpacedItem`.
+- TDD: 3 failing tests appended to `tests/test_state.py` first (RED — ImportError on
+  `update_state_checkable`/`STATE_UPDATERS`); implemented; all 3 GREEN. Original 3 founder tests
+  unaffected.
+- Full suite: 78 passed, 2 skipped (was 75+2); ruff format + check clean.
+
 ## 2026-06-23 — Step 4 Task 3: Model grader (`grade_answer`) (TDD PASS)
 - Added `grade_answer(exp, question, answer) -> CheckableGrade` to the `Model` Protocol,
   `FakeModel`, and `AnthropicModel`; updated the types import in `model.py`.

@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import Callable
+from datetime import datetime, timedelta
 
+from .content_loader import load_spacing
 from .types import (
     Assessment,
+    CheckableAssessment,
     FrameState,
     FrameStrength,
     LearnerState,
+    Regime,
+    SpacedItem,
     Strength,
     TrapOccurrence,
 )
@@ -51,3 +56,41 @@ def update_state(
                 )
             )
     return state
+
+
+def update_state_checkable(
+    state: LearnerState,
+    assessment: CheckableAssessment,
+    now: datetime,
+    experience_id: str,
+    spacing: dict | None = None,
+) -> LearnerState:
+    if spacing is None:
+        spacing = load_spacing()
+    initial = spacing["initial_interval_days"]
+    ease = spacing["ease_factor"]
+    floor = spacing["min_interval_days"]
+
+    by_concept: dict[str, list[bool]] = {}
+    for r in assessment.results:
+        by_concept.setdefault(r.concept, []).append(r.correct)
+
+    for concept, corrects in by_concept.items():
+        recalled = all(corrects)
+        prev = state.declarative_seed.get(concept)
+        if prev is None:
+            interval = initial if recalled else floor
+        elif recalled:
+            interval = max(floor, round(prev.interval_days * ease))
+        else:
+            interval = floor  # reversible demotion — row is updated, never deleted (L-3)
+        state.declarative_seed[concept] = SpacedItem(
+            concept=concept, due=now + timedelta(days=interval), interval_days=interval
+        )
+    return state
+
+
+STATE_UPDATERS: dict[Regime, Callable] = {
+    Regime.open_ended: update_state,
+    Regime.cs_technical: update_state_checkable,
+}
