@@ -33,9 +33,18 @@ class ResponseClassification(BaseModel):
 @runtime_checkable
 class Model(Protocol):
     def classify_intake(self, exp: Experience, opening: str) -> IntakeClassification: ...
-    def generate_push(self, exp: Experience, kind: str, code: str) -> str: ...
+    def generate_push(
+        self, exp: Experience, kind: str, code: str, *, stress: bool = False
+    ) -> str: ...
     def classify_response(
-        self, exp: Experience, kind: str, code: str, push: str, response: str
+        self,
+        exp: Experience,
+        kind: str,
+        code: str,
+        push: str,
+        response: str,
+        *,
+        stress: bool = False,
     ) -> ResponseClassification: ...
     def grade_answer(
         self, exp: Experience, question: CheckableQuestion, answer: str
@@ -63,11 +72,18 @@ class FakeModel:
     def classify_intake(self, exp: Experience, opening: str) -> IntakeClassification:
         return self._intake
 
-    def generate_push(self, exp: Experience, kind: str, code: str) -> str:
+    def generate_push(self, exp: Experience, kind: str, code: str, *, stress: bool = False) -> str:
         return f"[push:{kind}]"
 
     def classify_response(
-        self, exp: Experience, kind: str, code: str, push: str, response: str
+        self,
+        exp: Experience,
+        kind: str,
+        code: str,
+        push: str,
+        response: str,
+        *,
+        stress: bool = False,
     ) -> ResponseClassification:
         return self._responses[code].pop(0)
 
@@ -189,7 +205,7 @@ class AnthropicModel:
                 trap_states[item.code] = item.state
         return IntakeClassification(frame_states=frame_states, trap_states=trap_states)
 
-    def generate_push(self, exp: Experience, kind: str, code: str) -> str:
+    def generate_push(self, exp: Experience, kind: str, code: str, *, stress: bool = False) -> str:
         detail = _target_detail(exp.rubric, kind, code)
         prefix = f"Situation:\n{exp.scene.situation}\n\n" if getattr(exp, "scene", None) else ""
         user = f"{prefix}Experience:\n{exp.prompt}\n\nAngle to push on:\n{detail}"
@@ -208,7 +224,14 @@ class AnthropicModel:
         raise ModelError("no text block in push response")
 
     def classify_response(
-        self, exp: Experience, kind: str, code: str, push: str, response: str
+        self,
+        exp: Experience,
+        kind: str,
+        code: str,
+        push: str,
+        response: str,
+        *,
+        stress: bool = False,
     ) -> ResponseClassification:
         detail = _target_detail(exp.rubric, kind, code)
         system = (

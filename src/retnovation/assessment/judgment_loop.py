@@ -27,9 +27,12 @@ def _lower(state: FrameState) -> FrameState:
     return _LOWER[state]
 
 
-def _select_target(exp: Experience, frame_states, trap_states, exhausted):
-    """Tripped traps first, then binding-adjacent absent frames, then remaining absent frames.
-    Skips codes already exhausted (a non-moving push) so the loop rotates to a fresh angle."""
+def _select_target(exp: Experience, frame_states, trap_states, exhausted, probed):
+    """Forced decision frame first (once), then tripped traps, binding-adjacent absent frames,
+    then remaining absent frames. Skips codes already exhausted (a non-moving push)."""
+    df = exp.rubric.decision_frame
+    if df is not None and df not in probed and df not in exhausted:
+        return ("frame", df)
     for t in exp.rubric.traps:
         if t.trap_code in exhausted:
             continue
@@ -51,9 +54,12 @@ def _select_target(exp: Experience, frame_states, trap_states, exhausted):
     return None
 
 
-def _converged(frame_states, trap_states) -> bool:
-    # NOTE: frame_states is always populated from the rubric at intake, so the empty-dict
-    # all()-is-True case (vacuous convergence) is not a live path.
+def _converged(frame_states, trap_states, exp, probed) -> bool:
+    # A rubric that declares a decision_frame may not converge until that frame has been
+    # stressed once — even if intake rated it present_reasoned (the silence-when-strong fix).
+    df = exp.rubric.decision_frame
+    if df is not None and df not in probed:
+        return False
     frames_ok = all(s is FrameState.present_reasoned for s in frame_states.values())
     traps_ok = all(s is not TrapState.tripped for s in trap_states.values())
     return frames_ok and traps_ok
@@ -69,11 +75,12 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
     closed: list[str] = []
     hard_wrong: list[str] = []
     exhausted: set[str] = set()
+    probed: set[str] = set()
     recent: list[tuple[str, bool]] = []  # (code, moved) for the last pushes
     stop_reason: StopReason | None = None
 
     while True:
-        if _converged(frame_states, trap_states):
+        if _converged(frame_states, trap_states, exp, probed):
             stop_reason = StopReason.converged
             break
         if len(trajectory) >= MAX_PUSHES:
@@ -88,15 +95,17 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
             stop_reason = StopReason.plateau
             break
 
-        target = _select_target(exp, frame_states, trap_states, exhausted)
+        target = _select_target(exp, frame_states, trap_states, exhausted, probed)
         if target is None:
             stop_reason = StopReason.plateau
             break
         kind, code = target
 
-        push_text = model.generate_push(exp, kind, code)
+        stress = kind == "frame" and frame_states.get(code) is FrameState.present_reasoned
+        probed.add(code)
+        push_text = model.generate_push(exp, kind, code, stress=stress)
         response = work.respond(push_text)
-        rc = model.classify_response(exp, kind, code, push_text, response)
+        rc = model.classify_response(exp, kind, code, push_text, response, stress=stress)
 
         moved = False
         if rc.hard_wrong and exp.rubric.mode is Mode.bounded_error:

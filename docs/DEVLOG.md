@@ -922,5 +922,6 @@ verify `git ls-files` after any content work). Core-path changes get an independ
   execution-mode choice (subagent-driven vs inline).** No code changed yet; suite still 109/3. `main`
   remains ~39 commits ahead of origin, unpushed (ask before pushing).
 
-
-
+## 2026-06-24 — Task 3: probe-gated convergence
+- Task 3 — probe-gated convergence (decision_frame force + probed set + stress flag);
+  model contract gains keyword-only stress (AnthropicModel ignores until T4-5); 119/3 green.

@@ -223,3 +223,142 @@ def test_grader_dispute_demotes_a_sharper_call_in_the_full_loop():
     assert "lead_with_what_you_refuse_to_do" in a.frames_closed_under_pressure
     assert "protect_the_core_lane" not in a.frames_closed_under_pressure
     assert any(i.code == "protect_the_core_lane" and not i.confirmed for i in a.sharper_audit)
+
+
+# ---------------------------------------------------------------------------
+# Decision-frame / probe-gated convergence tests (Task 3)
+# ---------------------------------------------------------------------------
+
+
+def _exp_decision():
+    rub = Rubric(
+        frames=[
+            Frame(
+                frame_code="lead_with_what_you_refuse_to_do",
+                frame_detail="boundary first",
+                paired_trap="scope_creep_to_please",
+            ),
+            Frame(
+                frame_code="protect_the_core_lane",
+                frame_detail="keep core",
+                paired_trap="erode_core_for_one_customer",
+            ),
+            Frame(
+                frame_code="commit_under_the_deadline",
+                frame_detail="commit, own the trade, name the reversal",
+                paired_trap="commit_without_a_tripwire",
+            ),
+        ],
+        traps=[
+            Trap(trap_code="scope_creep_to_please", trap_detail="bend to please"),
+            Trap(trap_code="erode_core_for_one_customer", trap_detail="special-case"),
+            Trap(trap_code="commit_without_a_tripwire", trap_detail="no reversal line"),
+        ],
+        mode=Mode.genuinely_open,
+        binding_constraint=None,
+        decision_frame="commit_under_the_deadline",
+    )
+    return Experience(
+        experience_id="veldra:license_continuity",
+        prompt="...",
+        rubric=rub,
+        ledger_ref="veldra:license_continuity",
+        regime=Regime.open_ended,
+    )
+
+
+def _all_reasoned_intake():
+    return IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.present_reasoned,
+            "protect_the_core_lane": FrameState.present_reasoned,
+            "commit_under_the_deadline": FrameState.present_reasoned,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+            "commit_without_a_tripwire": TrapState.not_tripped,
+        },
+    )
+
+
+def test_decision_frame_forces_one_stress_probe_before_converging():
+    # The dogfood repro: a strong answer rated all-present_reasoned at intake must NOT converge
+    # silently — the decision frame is stressed exactly once, then the loop converges.
+    m = FakeModel(
+        _all_reasoned_intake(),
+        {
+            "commit_under_the_deadline": [
+                ResponseClassification(
+                    outcome="unchanged", mechanism_supplied=False, hard_wrong=False
+                )
+            ]
+        },
+    )
+    a = judgment_loop.assess(_exp_decision(), _work(), m)
+    assert a.stop_reason is StopReason.converged
+    assert len(a.trajectory) == 1
+    assert a.trajectory[0].target_code == "commit_under_the_deadline"
+
+
+def test_decision_frame_stress_probe_can_be_credited_sharper():
+    m = FakeModel(
+        _all_reasoned_intake(),
+        {
+            "commit_under_the_deadline": [
+                ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+            ]
+        },
+    )
+    a = judgment_loop.assess(_exp_decision(), _work(), m)
+    assert a.stop_reason is StopReason.converged
+    assert "commit_under_the_deadline" in a.frames_closed_under_pressure
+    assert len(a.trajectory) == 1
+
+
+def test_decision_frame_absent_is_targeted_first():
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.absent,
+            "protect_the_core_lane": FrameState.absent,
+            "commit_under_the_deadline": FrameState.absent,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+            "commit_without_a_tripwire": TrapState.not_tripped,
+        },
+    )
+
+    def closed():
+        return [ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)]
+
+    m = FakeModel(
+        intake,
+        {
+            "commit_under_the_deadline": closed(),
+            "lead_with_what_you_refuse_to_do": closed(),
+            "protect_the_core_lane": closed(),
+        },
+    )
+    a = judgment_loop.assess(_exp_decision(), _work(), m)
+    # without the force, rubric order would target lead_with_what_you_refuse_to_do first
+    assert a.trajectory[0].target_code == "commit_under_the_deadline"
+
+
+def test_no_decision_frame_all_reasoned_still_converges_at_intake():
+    # Byte-stability lock: a rubric with no decision_frame keeps today's behavior —
+    # an all-present_reasoned opening converges immediately with an empty trajectory.
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.present_reasoned,
+            "protect_the_core_lane": FrameState.present_reasoned,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+        },
+    )
+    a = judgment_loop.assess(_exp(), _work(), FakeModel(intake, {}))
+    assert a.stop_reason is StopReason.converged
+    assert a.trajectory == []
