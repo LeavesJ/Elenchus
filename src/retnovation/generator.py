@@ -8,7 +8,7 @@ from .content_loader import (
     load_library,
     load_min_angle_count,
 )
-from .types import CorpusEntry, Experience, GateCode, GateResult, Mode, Regime, Rubric
+from .types import CorpusEntry, Experience, GateCode, GateResult, Mode, Regime, Rubric, Scene
 
 ARTIFACT_DIMENSIONS = (
     4  # rigor, completeness, internal consistency, defensible assumptions (FounderCEO §2)
@@ -47,6 +47,25 @@ def _frame_trap_phrases(rubric: Rubric) -> list[str]:
         phrases.append(code.lower())
         phrases.append(code.replace("_", " ").lower())
     return phrases
+
+
+def validate_scene(
+    scene: Scene,
+    rubric: Rubric,
+    *,
+    framework_denylist: list[str],
+    scaffold_denylist: list[str],
+) -> None:
+    """The concrete prompt the student SEES must clear the same anti-label bar as the abstract
+    one: no named framework, no leaked frame/trap code, no type-hint scaffold, no wrapper word."""
+    prompt_lc = scene.prompt.lower()
+    banned = [t.lower() for t in framework_denylist] + _frame_trap_phrases(rubric)
+    if any(_contains_phrase(prompt_lc, p) for p in banned):
+        raise GateError("scene prompt names a framework or leaks a frame/trap code")
+    if any(_contains_phrase(prompt_lc, p) for p in scaffold_denylist):
+        raise GateError("scene prompt contains a type-hint scaffold")
+    if any(w in prompt_lc for w in WRAPPER_WORDS):
+        raise GateError("scene prompt contains a cosmetic wrapper word")
 
 
 def anti_label_gate(

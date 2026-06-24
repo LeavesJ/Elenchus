@@ -692,3 +692,18 @@ Added `Scene(BaseModel)` (`prompt`, `situation`) before `CorpusEntry`; `CorpusEn
   `scene` kwarg before the field existed, so corpus `scene` was always None); implemented; GREEN.
 - Full suite: **101 passed, 3 skipped** (was 100+3; net +1 new test); ruff format + check clean.
 - Files changed: `src/retnovation/veldra_ingest.py`, `tests/test_ingestion.py`, `docs/DEVLOG.md`.
+
+## 2026-06-23 — Immersive-scenes Task 4: `generator.validate_scene` — the moat over the concrete prompt (TDD PASS)
+- Added `Scene` to the types import in `src/retnovation/generator.py`.
+- Implemented `validate_scene(scene, rubric, *, framework_denylist, scaffold_denylist) -> None`
+  immediately before `anti_label_gate`, reusing the existing helpers `_contains_phrase`,
+  `_frame_trap_phrases`, `WRAPPER_WORDS`, and `GateError` — no duplicated logic.
+- Guard order mirrors `anti_label_gate`: framework+frame/trap codes first, then scaffold denylist,
+  then wrapper words; raises `GateError` on the first violation found.
+- TDD evidence: appended `test_validate_scene_passes_clean_and_rejects_leaks` to
+  `tests/test_generator.py` first; ran RED (`ImportError: cannot import name 'validate_scene'`);
+  implemented; GREEN in 0.11 s. All four `GateError` branches exercised (framework, frame-code
+  spaced, scaffold, wrapper).
+- Full suite: **102 passed, 3 skipped** (was 101+3; net +1 new test); ruff format + check clean.
+- Files changed: `src/retnovation/generator.py`, `tests/test_generator.py`, `docs/DEVLOG.md`.
+

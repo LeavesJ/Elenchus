@@ -313,6 +313,34 @@ def test_seed_frame_subsets_differ_so_the_selector_discriminates():
     assert len(subsets) >= 2
 
 
+def test_validate_scene_passes_clean_and_rejects_leaks():
+    from retnovation.generator import GateError, validate_scene
+    from retnovation.types import Scene
+
+    rubric = _exp().rubric  # frames lead_with_what_you_refuse_to_do, protect_the_core_lane
+    kw = dict(
+        framework_denylist=["swot", "five forces"], scaffold_denylist=["this is a", "apply the"]
+    )
+
+    # clean concrete prompt: no framework, no frame leak, no scaffold, no wrapper
+    validate_scene(
+        Scene(prompt="A same-day call forces a real trade-off.", situation="w"), rubric, **kw
+    )  # no raise
+
+    import pytest
+
+    with pytest.raises(GateError):  # named framework
+        validate_scene(Scene(prompt="Run a SWOT and decide.", situation="w"), rubric, **kw)
+    with pytest.raises(GateError):  # leaked frame code (spaced)
+        validate_scene(
+            Scene(prompt="Lead with what you refuse to do.", situation="w"), rubric, **kw
+        )
+    with pytest.raises(GateError):  # type-hint scaffold
+        validate_scene(Scene(prompt="This is a tradeoff problem.", situation="w"), rubric, **kw)
+    with pytest.raises(GateError):  # cosmetic wrapper
+        validate_scene(Scene(prompt="Keep your streak and decide.", situation="w"), rubric, **kw)
+
+
 @pytest.mark.skipif(
     not __import__("pathlib").Path("data/retnovation.db").exists(),
     reason="real seeded corpus (gitignored data/) not present",
