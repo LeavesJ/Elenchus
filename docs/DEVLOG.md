@@ -447,3 +447,30 @@ Results: 87 passed, 2 skipped (was 84+2; +3 new tests); ruff format + check clea
   protocol: `docs/lessons.md`, then the local-only gitignored corpus — `Retnovation_JudgmentLoop_v0.1.md`,
   `Retnovation_Complete_Picture.md` §12 (the judgment loop) + §13 (the empirical spine), and Build Brief
   build-order #5.
+
+## 2026-06-23 — Step 5 design spec (branch step5-harden-judgment-loop)
+- Resumed under the user's standing delegation (do Step 5, then continue autonomously, "quadruple-check /
+  be mindful", user away). Read the session-start docs + the local-only Step-5 corpus
+  (`Retnovation_JudgmentLoop_v0.1.md` §2/§5/§6/Decisions, Build Brief #5) and the current
+  `assessment/judgment_loop.py` before designing.
+- **Diagnosis:** `regression` is in the `StopReason` enum but the loop has no branch for a `"regressed"`
+  outcome (silently treated as `"unchanged"`) → never fires. `plateau` fires on two consecutive non-moves
+  but the loop re-hammers one target, so it means "stuck on one angle", not the doctrine's "two *distinct*
+  targets moved nothing" (§2/§6). No independent grader exists — the instructor scores sharper in-line,
+  the over-credit confound §6 flagged.
+- **Design (Approach: extend the open_ended assessor; cs_technical untouched):** (1) regression stops on the
+  first genuine backslide (lower the frame one level + record delta); (2) plateau becomes distinct-target via
+  an `exhausted` set that rotates `_select_target` to a fresh angle, firing on two distinct consecutive
+  non-moves (or no fresh angle left while not converged); (3) a separate **blind skeptical grader**
+  (`assessment/sharper_grader.py::audit_sharper` + `Model.grade_sharper` + `content/prompts/grade_sharper.md`)
+  re-audits each closed frame and gates sharper by 2-vote — a disputed call is dropped from
+  `frames_closed_under_pressure` AND its `FrameDelta` reverted (so `update_state` scores it weak, not strong).
+  `Push` gains the raw `response` so the grader re-judges independently; `judgment_loop.assess` runs the loop
+  then the audit; `run_session`/`STATE_UPDATERS`/cs_technical all unchanged.
+- Resolved all design forks autonomously (recorded in spec §4/§11): regression-on-first-backslide,
+  distinct-target plateau via rotation, separate-pass 2-vote grader, `FakeModel` grader agrees-by-default
+  (disputes scripted) so existing open_ended tests stay green untouched.
+- Spec committed: `docs/superpowers/specs/2026-06-23-harden-judgment-loop-design.md` (self-reviewed: no
+  placeholders, internally consistent, single-plan scope). Baseline before any code: 87 passed, 2 skipped;
+  confidentiality `git ls-files` clean.
+- Next: `writing-plans` → subagent-driven TDD → final adversarial review (§9) → merge.
