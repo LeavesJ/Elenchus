@@ -14,6 +14,16 @@ class Strength(str, Enum):
     strong = "strong"
 
 
+class Outcome(str, Enum):
+    accepted = "accepted"
+    redirected = "redirected"
+
+
+class CoreKind(str, Enum):
+    promote = "promote"
+    demote = "demote"
+
+
 class Regime(str, Enum):
     open_ended = "open_ended"
     cs_technical = "cs_technical"
@@ -265,6 +275,46 @@ class SelectionReceipt(BaseModel):
     margin: float
     content_gaps: list[str]
     created_at: datetime
+
+
+class CoreCandidate(BaseModel):
+    kind: CoreKind
+    target: str
+    rationale: str
+
+
+class CoreVerdict(BaseModel):
+    candidate: CoreCandidate
+    outcome: str  # "accepted" | "rejected"
+
+
+@dataclass
+class Proposal:
+    # ranked best-first; each entry is the (spec, receipt) the policy scored
+    candidates: list[tuple[NextExperienceSpec, SelectionReceipt]]
+
+    @property
+    def top(self) -> tuple[NextExperienceSpec, SelectionReceipt]:
+        return self.candidates[0]
+
+    def problem_menu(self) -> list[tuple[NextExperienceSpec, SelectionReceipt]]:
+        # learner-facing projection: best-ranked candidate per owned problem, rank order preserved
+        seen: set[str] = set()
+        out: list[tuple[NextExperienceSpec, SelectionReceipt]] = []
+        for spec, receipt in self.candidates:
+            if spec.ledger_ref in seen:
+                continue
+            seen.add(spec.ledger_ref)
+            out.append((spec, receipt))
+        return out
+
+
+@dataclass
+class Selection:
+    proposed_receipt: SelectionReceipt
+    chosen_spec: NextExperienceSpec
+    chosen_receipt: SelectionReceipt
+    outcome: Outcome
 
 
 @dataclass

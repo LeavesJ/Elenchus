@@ -355,3 +355,49 @@ def test_selection_receipt_shape():
         and r.scores["V"] == 0.5
         and r.content_gaps == ["commit_under_the_deadline"]
     )
+
+
+def test_proposal_top_and_problem_menu_dedup():
+    from retnovation.types import NextExperienceSpec, Proposal, Regime, SelectionReceipt
+    from datetime import datetime, timezone
+
+    now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+
+    def mk(frame, ref, eid):
+        spec = NextExperienceSpec(
+            target_frames=[frame], ledger_ref=ref, regime=Regime.open_ended, experience_id=eid
+        )
+        rc = SelectionReceipt(
+            frame=frame,
+            problem=ref,
+            experience_id=eid,
+            drive="diagnose",
+            scores={"V": 0.5},
+            runner_up_drive=None,
+            margin=0.0,
+            content_gaps=[],
+            created_at=now,
+        )
+        return (spec, rc)
+
+    p = Proposal(
+        candidates=[
+            mk("a", "veldra:p1", "e1"),
+            mk("b", "veldra:p1", "e2"),
+            mk("c", "veldra:p2", "e3"),
+        ]
+    )
+    assert p.top[0].experience_id == "e1"
+    menu = p.problem_menu()
+    assert [s.ledger_ref for s, _ in menu] == ["veldra:p1", "veldra:p2"]  # deduped, rank order
+    assert menu[0][0].experience_id == "e1"  # best candidate per problem kept
+
+
+def test_core_candidate_and_verdict_roundtrip():
+    from retnovation.types import CoreCandidate, CoreKind, CoreVerdict
+
+    c = CoreCandidate(
+        kind=CoreKind.demote, target="orphan_frame", rationale="no evidence, unreferenced"
+    )
+    v = CoreVerdict(candidate=c, outcome="rejected")
+    assert v.candidate.kind is CoreKind.demote and v.outcome == "rejected"
