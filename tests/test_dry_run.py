@@ -10,8 +10,6 @@ from retnovation.types import (
     CorpusEntry,
     FrameState,
     LedgerEntry,
-    NextExperienceSpec,
-    Regime,
     Strength,
     StopReason,
     TrapState,
@@ -50,8 +48,23 @@ def _cooperative_model():
     )
 
 
+def _to_license(proposal):
+    from retnovation.types import Outcome, Selection
+
+    top_spec, top_receipt = proposal.top
+    for spec, receipt in proposal.problem_menu():
+        if spec.ledger_ref == "veldra:license_fork_risk":
+            outcome = Outcome.accepted if spec is top_spec else Outcome.redirected
+            return Selection(
+                proposed_receipt=top_receipt,
+                chosen_spec=spec,
+                chosen_receipt=receipt,
+                outcome=outcome,
+            )
+    raise AssertionError("license_fork_risk not in the proposal")
+
+
 def test_dry_run_closes_the_loop(tmp_path):
-    # Arrange: a learner who opens to a queued next experience on an owned problem.
     store = Store(tmp_path / "dryrun.db")
     store.add_ledger_entry(
         LedgerEntry(
@@ -59,45 +72,22 @@ def test_dry_run_closes_the_loop(tmp_path):
             owned_problem="A licensing-continuity decision under a same-day deadline.",
         )
     )
-    store.upsert_corpus(
-        CorpusEntry(
-            ledger_ref="veldra:license_fork_risk",
-            domain="founder_ceo",
-            why_owned="real stakes",
-            unlabeled="genuinely unlabeled",
-            provenance="synthetic-test",
-            corpus_pointers=[],
+    for ref in (
+        "veldra:license_fork_risk",
+        "veldra:concentrated_market_pricing_power",
+        "veldra:first_customer_proof_loop",
+    ):
+        store.upsert_corpus(
+            CorpusEntry(
+                ledger_ref=ref,
+                domain="founder_ceo",
+                why_owned="real stakes",
+                unlabeled="genuinely unlabeled",
+                provenance="synthetic-test",
+                corpus_pointers=[],
+            )
         )
-    )
-    store.upsert_corpus(
-        CorpusEntry(
-            ledger_ref="veldra:concentrated_market_pricing_power",
-            domain="founder_ceo",
-            why_owned="stakes",
-            unlabeled="unlabeled",
-            provenance="synthetic-test",
-            corpus_pointers=[],
-        )
-    )
-    store.upsert_corpus(
-        CorpusEntry(
-            ledger_ref="veldra:first_customer_proof_loop",
-            domain="founder_ceo",
-            why_owned="stakes",
-            unlabeled="unlabeled",
-            provenance="synthetic-test",
-            corpus_pointers=[],
-        )
-    )
-    store.queue_push(
-        NextExperienceSpec(
-            target_frames=["lead_with_what_you_refuse_to_do", "protect_the_core_lane"],
-            ledger_ref="veldra:license_fork_risk",
-            regime=Regime.open_ended,
-        )
-    )
     core = derive_core(aim())
-
     student_replies = iter(
         [
             "I refuse to weaken the core promise; here is the mechanism...",
@@ -105,36 +95,27 @@ def test_dry_run_closes_the_loop(tmp_path):
         ]
     )
 
-    def fixture(exp):  # brief uses lambda; def keeps ruff E731 clean with identical semantics
+    def fixture(exp):
         return Work(
-            opening="my opening reasoning",
-            respond=lambda push: next(student_replies, "..."),  # noqa: E731
-        )
+            opening="my opening reasoning", respond=lambda push: next(student_replies, "...")
+        )  # noqa: E731
 
-    # Act: run exactly one session, no manual stitching between links.
-    state, assessment = run_session(store, core, _cooperative_model(), _now(), present=fixture)
-
-    # Assert the four acceptance criteria from the spec.
-    # 1) experience came off the queue (queue had been consumed before re-queue)
-    # 2) judgment loop produced a trajectory + deltas tracing to rubric codes
+    state, assessment = run_session(
+        store,
+        core,
+        _cooperative_model(),
+        _now(),
+        present=fixture,
+        decide=_to_license,
+        decide_core=lambda c: [],
+    )
     assert assessment.trajectory
     assert assessment.stop_reason is StopReason.converged
     assert all(
         d.code
-        in {
-            "lead_with_what_you_refuse_to_do",
-            "protect_the_core_lane",
-            "commit_under_the_deadline",
-        }
+        in {"lead_with_what_you_refuse_to_do", "protect_the_core_lane", "commit_under_the_deadline"}
         for d in assessment.frame_deltas
     )
-    # 3) at least one frame strength moved (not the `weak` default) in persisted state
     reloaded = Store(tmp_path / "dryrun.db").load_state(_now())
-    assert reloaded.frames  # persisted
+    assert reloaded.frames
     assert any(fs.strength != Strength.weak for fs in reloaded.frames.values())
-    # 4) the queue holds a fresh NextExperienceSpec
-    assert reloaded_next(tmp_path) is not None
-
-
-def reloaded_next(tmp_path):
-    return Store(tmp_path / "dryrun.db").queue_pop()

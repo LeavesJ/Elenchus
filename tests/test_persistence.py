@@ -315,39 +315,3 @@ def test_core_decision_log_roundtrip(tmp_path):
     row = store._db.execute("SELECT * FROM core_decision_log").fetchone()
     assert row["kind"] == "promote" and row["target"] == "protect" and row["outcome"] == "accepted"
     store.close()
-
-
-def test_log_selection_round_trips(tmp_path):
-    from datetime import datetime, timezone
-    from retnovation.persistence import Store
-    from retnovation.types import SelectionReceipt
-
-    s = Store(tmp_path / "log.db")
-    s.log_selection(
-        SelectionReceipt(
-            frame="lead",
-            problem="veldra:x",
-            experience_id="license_continuity",
-            drive="deploy",
-            scores={"V": 1.5},
-            runner_up_drive="diagnose",
-            margin=0.5,
-            content_gaps=["g"],
-            created_at=datetime(2026, 6, 24, tzinfo=timezone.utc),
-        )
-    )
-    import json
-
-    rows = list(
-        s._db.execute(
-            "SELECT frame, experience_id, drive, scores_json, content_gaps_json, margin, runner_up_drive FROM selection_log"
-        )
-    )
-    assert (
-        rows[0]["frame"] == "lead"
-        and rows[0]["experience_id"] == "license_continuity"
-        and rows[0]["drive"] == "deploy"
-    )
-    assert json.loads(rows[0]["scores_json"]) == {"V": 1.5}
-    assert json.loads(rows[0]["content_gaps_json"]) == ["g"]
-    assert rows[0]["margin"] == 0.5 and rows[0]["runner_up_drive"] == "diagnose"

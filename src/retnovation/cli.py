@@ -8,10 +8,9 @@ from .content_loader import load_library
 from .model import AnthropicModel
 from .orchestration import run_session
 from .persistence import Store
-from .types import CorpusEntry, LedgerEntry, NextExperienceSpec, Regime
+from .types import CorpusEntry, LedgerEntry, Regime
 
 DEFAULT_DB = Path("data/retnovation.db")
-_SEED_REF = "veldra:license_fork_risk"
 
 
 def build_store(db_path: str | Path = DEFAULT_DB) -> Store:
@@ -40,14 +39,6 @@ def build_store(db_path: str | Path = DEFAULT_DB) -> Store:
                     corpus_pointers=[],
                 )
             )
-    if store.queue_len() == 0:
-        store.queue_push(
-            NextExperienceSpec(
-                target_frames=["lead_with_what_you_refuse_to_do", "protect_the_core_lane"],
-                ledger_ref=_SEED_REF,
-                regime=Regime.open_ended,
-            )
-        )
     return store
 
 
@@ -56,7 +47,9 @@ def main(argv: list[str] | None = None) -> int:
     core = derive_core(aim())
     model = AnthropicModel()
     try:
-        state, assessment = run_session(store, core, model, datetime.now(timezone.utc))
+        state, assessment = run_session(
+            store, core, model, datetime.now(timezone.utc), regime=Regime.open_ended
+        )
     except NotImplementedError:
         print(
             "Retnovation step-1 harness: the live Opus 4.8 adapter is not wired yet "

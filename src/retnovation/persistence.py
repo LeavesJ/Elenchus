@@ -15,7 +15,6 @@ from .types import (
     Regime,
     Scene,
     Selection,
-    SelectionReceipt,
     SpacedItem,
     TrapOccurrence,
 )
@@ -245,24 +244,6 @@ class Store:
             regime=Regime(row["regime"]),
             experience_id=row["experience_id"],
         )
-
-    def log_selection(self, receipt: SelectionReceipt) -> None:
-        self._db.execute(
-            "INSERT INTO selection_log(created_at,frame,problem,experience_id,drive,scores_json,"
-            "runner_up_drive,margin,content_gaps_json) VALUES(?,?,?,?,?,?,?,?,?)",
-            (
-                receipt.created_at.isoformat(),
-                receipt.frame,
-                receipt.problem,
-                receipt.experience_id,
-                receipt.drive,
-                json.dumps(receipt.scores),
-                receipt.runner_up_drive,
-                receipt.margin,
-                json.dumps(receipt.content_gaps),
-            ),
-        )
-        self._db.commit()
 
     def log_decision(self, selection: Selection) -> None:
         p = selection.proposed_receipt

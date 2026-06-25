@@ -36,7 +36,9 @@ def test_cs_dry_run_closes_the_loop(tmp_path):
         answers = iter(q.answer_key[0] for q in exp.checkable.questions)
         return Work(opening="", respond=lambda push: next(answers, ""))  # noqa: E731
 
-    state, assessment = run_session(store, core, _model_unused(), _now(), present=fixture)
+    state, assessment = run_session(
+        store, core, _model_unused(), _now(), present=fixture, regime=Regime.cs_technical
+    )
 
     # 1) the checkable scorer ran every question, all correct
     assert isinstance(assessment, CheckableAssessment)
