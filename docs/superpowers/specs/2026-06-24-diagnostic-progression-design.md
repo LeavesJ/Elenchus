@@ -1,7 +1,8 @@
 # Diagnostic Progression — Locating the Learner, Not Ramping Difficulty
 
 Date: 2026-06-24
-Status: design — rev. 3 (§15); Project 1 built+merged; §16 pins Project 2 (value-function policy) plan-ready
+Status: design — rev. 3 (§15); Projects 1–2 built+merged; §16 pins Project 2 (value-function policy);
+§17 pins Project 3 (the interactive surface) plan-ready
 Origin: the second open thread from the commitment-frame work (memory `retnovation-commitment-frame-gap`)
 and the "escrow scene is a max-difficulty cold-start capstone" note. The user's reframe: progression
 must **serve a purpose so the system actually understands where the learner is** — a diagnostic
@@ -452,3 +453,161 @@ predicate logged for an unlocatable-in-isolation / transfer-blocked frame (asser
 with two backing experiences scores each `(f, e)` distinctly and the selector runs the scored `e`;
 `progression.yaml` loads; the `selection_log` decomposition (incl. `experience_id`) is correct; cs path
 byte-stable.
+
+## 17. Project 3 scope detail (plan-ready) — the interactive surface
+
+Projects 1 (substrate) and 2 (value-function policy) are built and merged. This section pins **Project 3**
+(spec §8/§10.3) to plan-ready, decided in a brainstorming pass + two adversarial reviews (an external design
+review and a five-lens internal review against the merged code). Forks resolved with the user:
+**redirect = a ranked menu** (not free-form / not skip-only), and **core promote/demote = advisory + logged,
+in P3** (not deferred, not mutating). The reviews then reshaped two things the first draft got wrong — the
+**audience the receipt serves** (§17.1, the gating fix) and the **demote/promote signal** (§17.4) — and
+corrected three factual gaps against the merged code (no `queue_peek`; the dead `links_to_experiences`
+field; the false §16 `_INTERVAL_DAYS`-moved claim). Those corrections are folded in below.
+
+**Scope.** The interactive **propose → accept/redirect** surface for the `open_ended` path + a **two-audience
+receipt** (§17.1) + an advisory **core promote/demote** pass. **Out (named):** cross-regime arbitration —
+the value function stays `open_ended`-only (§2); *consumption* of redirect or promote/demote decisions —
+weight tuning is dogfood-informed and later (§2); the rich crystallization mirror (§2); experience
+synthesis (§2). `cs_technical` *behavior/scheduling* is **byte-stable** (see §17.2 on the one mechanical
+seam change).
+
+### 17.1 The gating fix — split the two audiences (do not name the frame to the learner)
+
+The first draft showed the learner a frame-naming receipt **before** the experience
+(`Serving DEPLOY … lead_with_what_you_refuse_to_do … aims it at licensing`). That **re-attaches the label
+the system exists to strip** and prompts the deployment, so it would no longer count as unprompted — quietly
+corrupting `reasoned_unprompted` / `evidence_count`, the very signal P1's rev. 3 (§15) was the hard-won fix
+to make trustworthy. `content/prompts/push.md` already forbids this at the model layer ("**Never name the
+frame** … Naming it re-adds the label and contaminates the next experience"); the receipt would violate the
+same rule one layer up. The conclusion-agnostic invariant does **not** catch it (a frame is not a
+conclusion). This is a doctrine violation for any non-author learner, and contaminates the measurement even
+in the author dogfood. The fix splits the single receptacle into two audiences:
+
+- **Learner-facing (pre-experience) → the problem/scenario level only.** The proposal and the redirect menu
+  are over **active owned problems**, never frames or drives. The menu rows are the ranking **projected up**
+  to distinct problems — each problem's best-ranked `(frame, experience)`, displayed as the owned-problem /
+  scenario text. Accept (`#1`) runs the proposed problem; a number redirects to another owned problem. The
+  scenario the learner reads *is* the experience prompt — no information the experience wouldn't already
+  show — so this leaks nothing the move-to-apply. **The ranking and the log stay `(frame, experience)`** per
+  §16; only the learner *view* projects to the problem level (so two `(f,e)` sharing an experience collapse
+  to one learner row).
+- **Author-facing (post-assessment + `selection_log`) → the full frame-level decomposition.** The drive,
+  frame, runner-up, margin, scores, and content-gaps go to the async audit log (read by you, after the fact)
+  and may be shown post-assessment. Naming frames there costs nothing — the experience is already over.
+
+This is the one call that gates the plan: `format_receipt` and the `decide` menu both key off it.
+
+### 17.2 The orchestration seam (explicit regime; no `queue_peek` needed)
+
+P2 runs the policy at end-of-session (queue-time) and parks a 1-element spec in `queue`. P3 moves the
+`open_ended` policy to **propose-from-live-state at session start**, so the proposal reflects fresh derived
+state, never a possibly-stale queued spec.
+
+**Regime is an explicit `run_session` parameter, not queue-implicit** (default `open_ended`). The first
+draft branched on the queued spec's regime, which is uncomputable — `queue_pop` *consumes* the head and
+there is no `queue_peek` (only `queue_len`), and re-deriving regime by popping would silently drain a spec.
+Making regime an explicit caller choice removes that need entirely, and removes the **one-way-door lock** the
+external review caught (cs re-queues itself while `open_ended` never pushes, so once cs is entered it never
+yields). This is *not* cross-regime arbitration (the caller decides, the system does not):
+- **`open_ended`** (the product / dogfood path): **ignores the queue**, proposes from live state, surfaces
+  the problem-level proposal (§17.1), takes the accept/redirect decision, runs the chosen experience,
+  assesses, persists, then runs the advisory promote/demote pass. **No** end-of-session
+  `schedule_next` / `queue_push`.
+- **`cs_technical`**: the existing queue-driven path is preserved **behaviorally** (`queue_pop` →
+  run → `schedule_next(cs)` → `queue_push`). The only change is mechanical — the caller passes the regime
+  instead of it being read off the popped spec. `test_cs_dry_run` gains a one-line explicit `regime=`
+  argument; cs scheduling/behavior is otherwise byte-stable.
+
+**L-10 atomic task (every commit green).** The `open_ended` call-site moves from after-assess to
+before-select, `select_next`/`schedule_next`/`log_selection` change signature, and **four** test/seed sites
+move together in one commit: `test_orchestration.py` (`test_run_session_closes_one_cycle`'s "a fresh next
+was queued" → "the decision was logged"), **`test_dry_run.py`** (a second `open_ended` `run_session` test
+asserting the now-removed queue invariant), **`test_cli.py`** + `cli.build_store` (stop seeding the dead
+`open_ended` queue row) and `cli.main` (pass `regime=open_ended` + the default `decide`).
+
+### 17.3 Propose / decide / receipt
+
+- `policy.select_next` is refactored to return the **full ranked** `list[(NextExperienceSpec,
+  SelectionReceipt)]` — it already scores every `(frame, experience)` (`policy.py:80-85`) and discards all
+  but the argmax; now `ranked[0]` is the proposal and the tail backs the menu. `schedule_next`'s
+  `open_ended` branch returns the ranking; the cs branch is unchanged (single spec). The sole production
+  caller (`scheduler.py:33`) plus `test_policy`/`test_scheduler` are updated in the same commit (L-10).
+- `decide: Callable[[Proposal], Selection]` is a new injected seam with a default (like `present`). The
+  default CLI impl prints the **problem-level** proposal + a numbered menu of the top-N **owned problems**
+  (no frame/drive text — §17.1); blank/`1` = **accept**, a number = **redirect** to that problem; the impl
+  validates the input (out-of-range / non-numeric re-prompts). Tests + the L-11 dogfood stepper inject a
+  fixture decider.
+- A redirect is **honored** (the chosen problem's best `(f,e)` runs) and **logged**; **nothing consumes it**
+  (§2/§8).
+- **`format_receipt(receipt) -> str` is author/log-facing** (not shown pre-experience). It names the winning
+  drive + the **runner-up drive and margin**, where **runner-up = the best candidate of a *different* drive**
+  (not the second drive *within* the winning candidate, which `policy.py:86-89` currently computes and which
+  says nothing when the top two share a drive) and **margin = V(winner) − V(that runner-up)** — a
+  contested-intent signal. It reads sensibly at **margin ≈ 0 / no runner-up** (the cold-start common case:
+  every `V ≈ 0.5`), not implying a decisive pick. No I/O; conclusion-agnostic (renders only drive/score
+  data). This refinement touches `policy.py` + `test_policy.py`; the argmax winner is unchanged.
+
+### 17.4 Core promote/demote (advisory + logged; exogenous signal; mutates nothing — L-1)
+
+A thin end-of-session pass `crystallization_candidates(state, core, ledger, experiences, now) ->
+list[CoreCandidate]`. **The signature takes `experiences` (the gated library), like `select_next`** — rubric
+frames live on `Experience` (`types.py:134`), not on `LedgerEntry`, so the predicates cannot be computed
+without it. Both predicates key to the **experience library's `ledger_ref` back-pointer**, *not* the dead
+`LedgerEntry.links_to_experiences` field (which `cli.py:28-30` and `veldra_ingest.py:49` leave empty in
+production — keying to it would be a vacuous L-9 dead path), and *not* `breadth` (which is endogenous — built
+only from experiences the tool *served*, so "surfaces across problems" would collapse to "the scheduler
+deployed it"). Define **ledger-referenced(f)** ≜ *some experience `e` with `e.ledger_ref ∈ active owned
+problems` (the ledger) has `f ∈ e.rubric.frames`* — exogenous (the authored content ↔ owned-problem graph),
+populated, computable, and symmetric across both rules:
+
+- **Demote candidate:** a core `process_frame` with `evidence_count == 0` **and** **not** ledger-referenced
+  (no active-problem experience carries it) — an orphan.
+- **Promote candidate:** a frame that **has decayed** — precisely `retention_due(f) > 0` on the
+  storage-keyed clock (§6), reusing the *built* `frame_interval_days` / retention machinery, no new staleness
+  config — **and** ledger-referenced across **≥ θ distinct active problems** (count of distinct
+  `e.ledger_ref` among active-problem experiences carrying `f`). **Named conservatism:** because the interval
+  is keyed to the storage tier, a well-earned (high-evidence) frame resists going stale, so "decayed AND
+  broadly-referenced" fires *rarely* and only after long dormancy — intended, not a bug.
+- Surfaced as receipts via an injected `decide_core` seam (default + test fixtures); the verdict is
+  **logged** to `core_decision_log`; **unconsumed** (parallel to redirect). No `Core` mutation — the
+  candidate routes to the author (the same content-effort the content gaps route to), never a runtime edit of
+  `content/maps/`. Empty candidate set → no-op (no surface shown).
+
+### 17.5 Data model & schema (guarded migrations, L-8)
+
+- `selection_log` gains `outcome TEXT` (`accepted`|`redirected`), `chosen_frame TEXT`,
+  `chosen_problem TEXT`, `chosen_experience_id TEXT` (PRAGMA-guarded `ADD COLUMN`; old rows `outcome=NULL`).
+  `log_selection` changes signature to record the proposed receipt **+** outcome + chosen (same commit, L-10).
+  **`selection_log` is `open_ended`-only** — `schedule_next(cs)` returns `receipt=None` and `run_session`
+  only logs when non-`None` (`orchestration.py:44`), so cs never writes it. Therefore the §16 read-caveat is
+  lifted **totally**: every row now records *live* (session-start) reasoning — there are no queue-time rows
+  and no mixed timing semantics.
+- New `core_decision_log` (`created_at`, `kind` = promote|demote, `target`, `rationale`, `outcome` =
+  accepted|rejected).
+- `types.py`: `Proposal` (the ranked list + `ranked[0]` accessor + the problem-level projection for the
+  menu), `Selection` (chosen spec + `outcome` + chosen index), `CoreCandidate` (`kind`, `target`,
+  `rationale`). `SelectionReceipt` / `FrameStrength` internals unchanged.
+- Fresh-DB **and** old-DB regression for **both** migrations (`selection_log` columns, `core_decision_log`).
+
+### 17.6 Config, standing debt, testing
+
+**Config.** `progression.yaml` gains only **`theta_ledger_refs`** (the promote count threshold θ), loaded via
+`load_progression`; the top-N menu size is a presentation constant, not doctrine. **Correction to §16:** §16
+L435 claims `_INTERVAL_DAYS` moved to `progression.yaml` — it did **not** (P2 deliberately kept it in
+`state.py:23` per the DEVLOG, "to avoid churning the P1 derive_* core path"; `load_progression` loads no
+staleness keys). P3 does **not** depend on that migration (the promote "decayed" predicate reuses the built
+clock), so the hardcoded-interval **L-1 debt is a named standing item, not folded into P3** — flagged here so
+it is not silently inherited.
+
+**Testing (TDD).** propose-from-live → accept → run; redirect → the chosen problem's `(f,e)` runs **and** the
+decision is logged with correct proposed vs. chosen; **regression guard: the learner-facing decide string
+contains no `frame_code`** (the structural check the conclusion-agnostic invariant misses — §17.1);
+`format_receipt` decomposition + cross-drive runner-up/margin + the **margin-≈0 / no-runner-up** branch on
+crafted receipts; demote candidate on a crafted orphan core frame (zero-evidence + no active-problem
+experience); promote candidate on a crafted `retention_due>0` frame referenced across ≥ θ active problems;
+both logged, **nothing mutated**, empty-set no-op; cs behavior byte-stable (`test_cs_dry_run`, explicit
+`regime=`); `build_store` no longer seeds the `open_ended` queue; both migrations on fresh + old DB.
+Invariants: conclusion-agnostic, judgment loop + cs byte-stable, `data/` untracked, no `Co-Authored-By`.
+
+**Status: P3 scope pinned (§17), plan-ready — awaiting user review of the spec before writing-plans.**

@@ -1,5 +1,34 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — Project 3 scope pinned (§17) — the interactive surface
+- Brainstormed P3 (spec §8/§10.3) to plan-ready and appended **§17** to the diagnostic-progression spec.
+  Two user forks: redirect = ranked menu; core promote/demote = advisory + logged, in P3. Then two
+  adversarial reviews (an external design review + a 5-lens internal review against the merged code)
+  reshaped the draft:
+  - **Gating fix (§17.1):** the receipt must NOT name the frame to the learner pre-experience — it
+    re-attaches the label and contaminates `reasoned_unprompted`/`evidence_count` (the P1 rev.3 signal).
+    Split audiences: learner sees the problem/scenario level only; full frame-level decomposition →
+    `selection_log` + post-assessment. (`push.md` already forbids naming the frame at the model layer.)
+  - **Explicit `regime` param (§17.2):** removes the need for a nonexistent `queue_peek` AND the cs
+    one-way-door lock; open_ended ignores the queue, cs stays queue-driven (behavior byte-stable).
+  - **Promote/demote re-keyed (§17.4)** to the experience library's `ledger_ref` back-pointer (exogenous,
+    symmetric, populated) — NOT the dead `links_to_experiences` field (vacuous, L-9) nor endogenous
+    `breadth`. Signature gains `experiences`. "Decayed" = `retention_due>0` on the built clock (no new
+    staleness config); only `theta_ledger_refs` is new.
+  - **§16 correction (§17.6):** §16's claim that `_INTERVAL_DAYS` moved to progression.yaml is false vs
+    merged code (it stays in `state.py` per the P2 refinement); the hardcoded-interval L-1 debt is named,
+    not folded into P3.
+  - L-10 atomic task expanded to `test_dry_run.py` + `test_cli.py` + `cli.build_store`/`main` +
+    `log_selection` signature. Push-back kept: cs never writes `selection_log` (`receipt=None`), so the §16
+    read-caveat lift is total.
+- New lessons **L-12** (spec sections inherit stale claims — verify vs merged code) and **L-13**
+  (conclusion-agnostic ≠ leak-proof — a frame-naming surface contaminates the unprompted signal; guard with
+  a no-`frame_code` check; medium-independent → carries to the future UI).
+- Captured the **UI/UX-as-selling-surface** directive as a first-class future thread (own brainstorm +
+  market research): the invisible engine must be made FELT; not a chatbox; P3's injectable seams +
+  structured types mean a rich UI plugs in later with no backend rework. (Memory: `retnovation-ui-ux-vision`.)
+- Spec written; suite still 150/3 (docs-only). NEXT: writing-plans for the P3 implementation plan.
+
 ## 2026-06-24 — SESSION CLOSE + HANDOFF
 - Three features shipped + merged to main (unpushed, 70 ahead, HEAD c8bb565, 150/3, clean): commitment-frame
   stress probe; diagnostic-progression **Project 1** (learner-model substrate); **Project 2**

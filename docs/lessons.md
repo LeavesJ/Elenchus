@@ -75,3 +75,22 @@ Read this checklist before every code change. Update it after every correction o
   `reply` → classify_response + continue), faithfully porting `assess()`'s control flow (the real
   `_select_target`/`_converged`/stress logic, `update_state`, `audit_sharper`) rather than reimplementing
   it loosely.
+- **L-12 A spec section inherits stale claims from earlier sections — verify against the MERGED CODE, not
+  the prior prose.** §17 (Project 3) leaned on §16's claim that `_INTERVAL_DAYS` "moves to
+  `content/cadence/progression.yaml`, loaded via `load_progression()`." Against the merged P2 code that was
+  false — P2 deliberately kept the constant in `state.py` (a DEVLOG-recorded refinement) and
+  `load_progression` loads no staleness keys, so a P3 promote-threshold plan built on it would have rested
+  on an unfinished L-1 migration. A 5-lens adversarial review caught it before writing-plans. Prevention:
+  when a new spec section depends on a factual claim an earlier section makes about already-built code,
+  re-verify that claim against the code/tests before building on it — prior spec text drifts from what was
+  actually shipped (the spec-level cousin of L-9).
+- **L-13 Conclusion-agnostic is not leak-proof — a surface that names the FRAME (not the conclusion) still
+  contaminates the unprompted signal.** The first P3 receipt draft showed the learner the target frame
+  ("serving `lead_with_what_you_refuse_to_do` … aims it at licensing") *before* the experience. Naming a
+  frame is not naming a conclusion, so the conclusion-agnostic invariant passed it — yet it re-attaches the
+  label `content/prompts/push.md` exists to strip and turns an unprompted deployment into a prompted one,
+  corrupting `reasoned_unprompted`/`evidence_count` (the hard-won P1 rev.3 signal). Prevention: any
+  learner-facing surface, in any medium, must withhold the move — surface the problem/scenario/trajectory,
+  never the frame or drive; guard it with an explicit "no `frame_code` in the learner-facing string"
+  assertion, and keep frame-level decomposition to the async author log. Medium-independent — carries to the
+  future UI.
