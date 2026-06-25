@@ -188,6 +188,7 @@ class Assessment(BaseModel):
     hard_wrong_flags: list[str]
     stop_reason: StopReason
     sharper_audit: list[SharperAuditItem] = Field(default_factory=list)
+    reasoned_unprompted: list[str] = Field(default_factory=list)
 
 
 class FrameStrength(BaseModel):

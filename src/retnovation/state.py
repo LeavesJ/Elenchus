@@ -76,22 +76,26 @@ def update_state(
     state: LearnerState, assessment: Assessment, now: datetime, experience_id: str, ledger_ref: str
 ) -> LearnerState:
     closed = set(assessment.frames_closed_under_pressure)
+    unprompted = set(assessment.reasoned_unprompted)
+    engaged = closed | unprompted
     final_state: dict[str, FrameState] = {d.code: d.after for d in assessment.frame_deltas}
-
     seen_frame_targets = {p.target_code for p in assessment.trajectory if p.kind == "frame"}
 
-    for code in seen_frame_targets | set(final_state):
+    for code in seen_frame_targets | set(final_state) | unprompted:
         prev = state.frames.get(code)
         evidence_count = prev.evidence_count if prev else 0
         breadth = set(prev.breadth) if prev else set()
         unprompted_breadth = set(prev.unprompted_breadth) if prev else set()
-        fstate = final_state.get(code)
-        if fstate is FrameState.present_reasoned:
+        if code in engaged:
             evidence_count += 1
             breadth.add(ledger_ref)
-            if code not in closed:
-                unprompted_breadth.add(ledger_ref)  # reasoned WITHOUT a closing push → strong-grade
-        evidence = fstate.value if fstate is not None else "unmoved"
+            if code in unprompted:
+                unprompted_breadth.add(ledger_ref)
+        if code in unprompted:
+            evidence = "reasoned_unprompted"
+        else:
+            fstate = final_state.get(code)
+            evidence = fstate.value if fstate is not None else "unmoved"
         state.frames[code] = FrameStrength(
             strength=derive_strength(evidence_count, unprompted_breadth, now, now),
             last_seen=now,

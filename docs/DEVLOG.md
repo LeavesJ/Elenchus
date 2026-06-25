@@ -1,5 +1,8 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — P1 Task 3b: reasoned_unprompted signal from assess(); estimator reads it; strong reachable in production (rev.3)
+- P1 Task 3b — reasoned_unprompted signal from assess(); estimator reads it; strong reachable in production (rev.3); 132/3.
+
 ## 2026-06-24 — Diagnostic-progression spec rev. 3: the unprompted signal (mid-impl correction)
 - PT3 review surfaced (via a fixture-inconsistency thread, traced to root) that `strong` was UNREACHABLE
   in production: the estimator inferred unprompted from "present_reasoned NOT in frames_closed_under_pressure",

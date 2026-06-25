@@ -199,10 +199,7 @@ def test_strong_reachable_across_two_problems():
     from retnovation.state import update_state
     from retnovation.types import (
         Assessment,
-        FrameDelta,
-        FrameState,
         LearnerState,
-        Push,
         StopReason,
         Strength,
     )
@@ -210,23 +207,13 @@ def test_strong_reachable_across_two_problems():
     now = datetime(2026, 6, 24, tzinfo=timezone.utc)
 
     def _unprompted(code):
-        # an unprompted present_reasoned: a delta to present_reasoned, NOT in frames_closed_under_pressure
         return Assessment(
-            trajectory=[
-                Push(
-                    target_code=code,
-                    kind="frame",
-                    text="t",
-                    response_classification="closed",
-                    response="r",
-                )
-            ],
-            frame_deltas=[
-                FrameDelta(code=code, before=FrameState.absent, after=FrameState.present_reasoned)
-            ],
+            trajectory=[],
+            frame_deltas=[],
             frames_closed_under_pressure=[],
             hard_wrong_flags=[],
             stop_reason=StopReason.converged,
+            reasoned_unprompted=[code],
         )
 
     st = LearnerState()

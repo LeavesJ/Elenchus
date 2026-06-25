@@ -362,3 +362,22 @@ def test_no_decision_frame_all_reasoned_still_converges_at_intake():
     a = judgment_loop.assess(_exp(), _work(), FakeModel(intake, {}))
     assert a.stop_reason is StopReason.converged
     assert a.trajectory == []
+
+
+def test_assess_reports_reasoned_unprompted_for_held_intake_frames():
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.present_reasoned,  # reasoned unprompted, never pushed
+            "protect_the_core_lane": FrameState.present_reasoned,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+        },
+    )
+    a = judgment_loop.assess(_exp(), _work(), FakeModel(intake, {}))
+    assert a.stop_reason is StopReason.converged
+    assert set(a.reasoned_unprompted) == {
+        "lead_with_what_you_refuse_to_do",
+        "protect_the_core_lane",
+    }

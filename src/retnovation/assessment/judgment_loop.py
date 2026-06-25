@@ -167,11 +167,18 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
         )
         recent.append((code, moved))
 
+    reasoned_unprompted = [
+        code
+        for code, s0 in intake.frame_states.items()
+        if s0 is FrameState.present_reasoned
+        and frame_states.get(code) is FrameState.present_reasoned
+    ]
     assessment = Assessment(
         trajectory=trajectory,
         frame_deltas=deltas,
         frames_closed_under_pressure=closed,
         hard_wrong_flags=hard_wrong,
         stop_reason=stop_reason or StopReason.budget,
+        reasoned_unprompted=reasoned_unprompted,
     )
     return audit_sharper(exp, assessment, model)
