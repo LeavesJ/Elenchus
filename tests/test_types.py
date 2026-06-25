@@ -319,3 +319,39 @@ def test_frame_strength_storage_fields_default_empty():
     )
     assert fs2.evidence_count == 3 and fs2.breadth == {"veldra:a", "veldra:b"}
     assert fs2.unprompted_breadth == {"veldra:a", "veldra:b"}
+
+
+def test_next_experience_spec_carries_experience_id_default_none():
+    from retnovation.types import NextExperienceSpec, Regime
+
+    s = NextExperienceSpec(target_frames=["f"], ledger_ref="veldra:x", regime=Regime.open_ended)
+    assert s.experience_id is None
+    s2 = NextExperienceSpec(
+        target_frames=["f"],
+        ledger_ref="veldra:x",
+        regime=Regime.open_ended,
+        experience_id="license_continuity",
+    )
+    assert s2.experience_id == "license_continuity"
+
+
+def test_selection_receipt_shape():
+    from datetime import datetime, timezone
+    from retnovation.types import SelectionReceipt
+
+    r = SelectionReceipt(
+        frame="lead_with_what_you_refuse_to_do",
+        problem="veldra:license_fork_risk",
+        experience_id="license_continuity",
+        drive="diagnose",
+        scores={"uncertainty": 1.0, "retention": 0.0, "transfer": 0.0, "penalty": 1.0, "V": 0.5},
+        runner_up_drive=None,
+        margin=0.5,
+        content_gaps=["commit_under_the_deadline"],
+        created_at=datetime(2026, 6, 24, tzinfo=timezone.utc),
+    )
+    assert (
+        r.drive == "diagnose"
+        and r.scores["V"] == 0.5
+        and r.content_gaps == ["commit_under_the_deadline"]
+    )

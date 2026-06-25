@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — P2 Task 1 — NextExperienceSpec.experience_id + SelectionReceipt; 139/3.
+
 ## 2026-06-24 — Project 2 plan written (value-function policy)
 - `docs/superpowers/plans/2026-06-24-diagnostic-progression-p2-policy.md` — 6 implementer TDD tasks +
   controller review: (1) types (NextExperienceSpec.experience_id + SelectionReceipt); (2) progression.yaml

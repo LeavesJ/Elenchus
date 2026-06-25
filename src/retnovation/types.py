@@ -250,6 +250,21 @@ class NextExperienceSpec(BaseModel):
     target_frames: list[str]
     ledger_ref: str
     regime: Regime
+    experience_id: str | None = (
+        None  # the exact (frame, experience) the policy scored; None for the legacy seed
+    )
+
+
+class SelectionReceipt(BaseModel):
+    frame: str
+    problem: str
+    experience_id: str
+    drive: str
+    scores: dict[str, float]
+    runner_up_drive: str | None
+    margin: float
+    content_gaps: list[str]
+    created_at: datetime
 
 
 @dataclass
