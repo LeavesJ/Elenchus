@@ -153,3 +153,11 @@ def test_load_progression_returns_weights_and_threshold():
     p = load_progression()
     assert p["wU"] == 1.0 and p["wR"] == 1.0 and p["wT"] == 1.5 and p["wL"] == 0.5
     assert p["theta_located"] == 0.5
+
+
+def test_load_progression_has_theta_ledger_refs():
+    from retnovation.content_loader import load_progression
+
+    cfg = load_progression()
+    assert cfg["theta_ledger_refs"] == 2
+    assert isinstance(cfg["theta_ledger_refs"], int)

@@ -5,3 +5,4 @@ weights:
   wT: 1.5   # deploy (transfer) — preempts consolidate by design (the signature move)
   wL: 0.5   # cold-start integration-readiness penalty (< wU so cold start still serves)
 theta_located: 0.5   # a frame g is "located" when uncertainty(g) <= this
+theta_ledger_refs: 2   # promote candidate: a decayed frame referenced across >= this many active problems

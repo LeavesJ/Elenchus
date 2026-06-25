@@ -116,6 +116,7 @@ def load_progression(root: Path | None = None) -> dict:
         "wT": float(w["wT"]),
         "wL": float(w["wL"]),
         "theta_located": float(data["theta_located"]),
+        "theta_ledger_refs": int(data["theta_ledger_refs"]),
     }
 
 
