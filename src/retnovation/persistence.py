@@ -14,6 +14,7 @@ from .types import (
     Regime,
     Scene,
     SpacedItem,
+    TrapOccurrence,
 )
 
 _SCHEMA = """
@@ -32,6 +33,8 @@ CREATE TABLE IF NOT EXISTS corpus (
   scene_json TEXT);
 CREATE TABLE IF NOT EXISTS concepts (
   concept TEXT PRIMARY KEY, due TEXT NOT NULL, interval_days INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS trap_gallery (
+  trap_code TEXT NOT NULL, experience_id TEXT NOT NULL, occurred_at TEXT NOT NULL, detail TEXT NOT NULL);
 """
 
 
@@ -87,6 +90,14 @@ class Store:
                 due=datetime.fromisoformat(r["due"]),
                 interval_days=r["interval_days"],
             )
+        for r in self._db.execute("SELECT * FROM trap_gallery ORDER BY occurred_at, experience_id"):
+            st.trap_gallery.setdefault(r["trap_code"], []).append(
+                TrapOccurrence(
+                    experience_id=r["experience_id"],
+                    occurred_at=datetime.fromisoformat(r["occurred_at"]),
+                    detail=r["detail"],
+                )
+            )
         return st
 
     def save_state(self, state: LearnerState) -> None:
@@ -116,6 +127,14 @@ class Store:
                 "interval_days=excluded.interval_days",
                 (concept, si.due.isoformat(), si.interval_days),
             )
+        self._db.execute("DELETE FROM trap_gallery")
+        for trap_code, occurrences in state.trap_gallery.items():
+            for o in occurrences:
+                self._db.execute(
+                    "INSERT INTO trap_gallery(trap_code,experience_id,occurred_at,detail) "
+                    "VALUES(?,?,?,?)",
+                    (trap_code, o.experience_id, o.occurred_at.isoformat(), o.detail),
+                )
         self._db.commit()
 
     def add_ledger_entry(self, entry: LedgerEntry) -> None:

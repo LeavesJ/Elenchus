@@ -196,3 +196,24 @@ def test_decay_frame_is_gone(tmp_path):
     from retnovation.persistence import Store
 
     assert not hasattr(Store(tmp_path / "x.db"), "decay_frame")
+
+
+def test_trap_gallery_round_trips_and_is_idempotent(tmp_path):
+    from datetime import datetime, timezone
+    from retnovation.persistence import Store
+    from retnovation.types import LearnerState, TrapOccurrence
+
+    t0 = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    s = Store(tmp_path / "tg.db")
+    st = LearnerState()
+    st.trap_gallery["scope_creep_to_please"] = [
+        TrapOccurrence(experience_id="exp1", occurred_at=t0, detail="unchanged"),
+        TrapOccurrence(experience_id="exp2", occurred_at=t0, detail="regressed"),
+    ]
+    s.save_state(st)
+    s.save_state(st)  # second save must not duplicate
+    loaded = Store(tmp_path / "tg.db").load_state(t0)
+    occ = loaded.trap_gallery["scope_creep_to_please"]
+    assert len(occ) == 2
+    assert {o.experience_id for o in occ} == {"exp1", "exp2"}
+    assert {o.detail for o in occ} == {"unchanged", "regressed"}
