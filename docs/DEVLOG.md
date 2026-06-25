@@ -1,5 +1,8 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — P1 Task 2: storage-keyed staleness clock derivation functions
+- P1 Task 2 — derive_strength/derive_due/frame_uncertainty on the storage-keyed clock; 129/3.
+
 ## 2026-06-24 — P1 Task 1: FrameStrength storage fields
 - P1 Task 1 — FrameStrength storage fields (evidence_count, breadth, unprompted_breadth); 125/3.
 

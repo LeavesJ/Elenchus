@@ -17,6 +17,61 @@ from .types import (
 )
 
 
+# Storage-keyed staleness clock. The interval is a function of the persistent STORAGE tier
+# (evidence_count / unprompted_breadth), never the displayed/decayed bucket — acyclic and §5-faithful.
+# Moves to content/cadence/progression.yaml in Project 2.
+_INTERVAL_DAYS: dict[Strength, int] = {Strength.weak: 1, Strength.forming: 7, Strength.strong: 30}
+_STEP_DOWN: dict[Strength, Strength] = {
+    Strength.strong: Strength.forming,
+    Strength.forming: Strength.weak,
+    Strength.weak: Strength.weak,
+}
+
+
+def _storage_tier(evidence_count: int, unprompted_breadth: set[str]) -> Strength:
+    if len(unprompted_breadth) >= 2:
+        return Strength.strong  # unprompted on >=2 distinct problems: repeated AND cross-context
+    if evidence_count >= 1:
+        return (
+            Strength.forming
+        )  # engaged with a mechanism at least once (incl. closed-under-pressure)
+    return Strength.weak
+
+
+def _staleness_days(last_seen: datetime, now: datetime) -> float:
+    return max(0.0, (now - last_seen).total_seconds() / 86400.0)
+
+
+def derive_strength(
+    evidence_count: int, unprompted_breadth: set[str], last_seen: datetime, now: datetime
+) -> Strength:
+    tier = _storage_tier(evidence_count, unprompted_breadth)
+    if _staleness_days(last_seen, now) <= _INTERVAL_DAYS[tier]:
+        return tier
+    return _STEP_DOWN[
+        tier
+    ]  # decayed one bucket; the interval below stays keyed to `tier` (storage)
+
+
+def derive_due(evidence_count: int, unprompted_breadth: set[str], last_seen: datetime) -> datetime:
+    tier = _storage_tier(evidence_count, unprompted_breadth)
+    return last_seen + timedelta(days=_INTERVAL_DAYS[tier])
+
+
+def frame_uncertainty(
+    evidence_count: int,
+    breadth: set[str],
+    unprompted_breadth: set[str],
+    last_seen: datetime,
+    now: datetime,
+) -> float:
+    tier = _storage_tier(evidence_count, unprompted_breadth)
+    evidence_term = 1.0 / (1.0 + evidence_count)
+    breadth_term = 0.0 if len(breadth) >= 2 else 1.0
+    staleness_term = min(1.0, _staleness_days(last_seen, now) / _INTERVAL_DAYS[tier])
+    return max(0.0, min(1.0, (evidence_term + breadth_term + staleness_term) / 3.0))
+
+
 def update_state(
     state: LearnerState, assessment: Assessment, now: datetime, experience_id: str
 ) -> LearnerState:
