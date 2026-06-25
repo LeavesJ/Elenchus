@@ -12,6 +12,9 @@ Retnovation_LiftTest*.md
 Retnovation_Loop*.md
 Retnovation_MVP_Scope*.md
 
+# Private cross-session baton (local-only; overwritten each handoff).
+docs/SESSION_HANDOFF.md
+
 # === Runtime state (confidential: owned problems + learner state) ===
 /data/
 *.db

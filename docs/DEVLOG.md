@@ -1,5 +1,18 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — SESSION CLOSE + HANDOFF
+- Three features shipped + merged to main (unpushed, 70 ahead, HEAD c8bb565, 150/3, clean): commitment-frame
+  stress probe; diagnostic-progression **Project 1** (learner-model substrate); **Project 2**
+  (value-function policy). Live re-dogfood of the escrow scene confirmed the stress probe fires once (not
+  silence) end-to-end. **Project 3** (interactive propose/accept/redirect surface + core promote/demote;
+  orchestration → propose-from-live-state) is the only remaining piece — no spec yet, start with
+  brainstorming. The real unlock is authored content (isolated diagnostic experiences — the content-gap
+  predicate flags none exist; + the mined case library).
+- Handoff written to `docs/SESSION_HANDOFF.md` (gitignored, local-only — read it first next session, after
+  `docs/lessons.md`). lessons.md gained L-9 (synthetic test hid a dead production path), L-10 (return-type
+  change → atomic caller update, every commit green), L-11 (checkpointed stepper for interactive
+  dogfooding). Memory `retnovation-commitment-frame-gap` updated through P2.
+
 ## 2026-06-24 — P2 Final-review fixes — empty-candidates guard (ValueError) + receipt margin/runner-up consistency + type annotations on select_next/_content_gaps + log round-trip coverage extended to JSON columns and margin. 150/3.
 
 ## 2026-06-24 — P2 Task 6 — schedule_next dispatches open_ended to the value function (returns (spec, receipt)); run_session logs the receipt + queues the spec; cs byte-stable; placeholder removed; suite green. Project 2 policy complete. 149/3.

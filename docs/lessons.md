@@ -51,3 +51,27 @@ Read this checklist before every code change. Update it after every correction o
   point that seeds state, add a fresh-DB end-to-end regression test that exercises the real gated
   path (build state → select → assert no raise), so fixtures and a pre-seeded local DB cannot hide
   a broken shipped seed.
+- **L-9 A green test over a SYNTHETIC fixture can hide a dead production path.** In Project 1 the
+  estimator's `strong` path read `unprompted_breadth`, populated only when a frame is reasoned
+  *unprompted*. The test hand-built an `Assessment` with that shape and passed — but the judgment loop
+  *never emits* it (it co-populates the `present_reasoned` delta with `frames_closed_under_pressure`, and
+  intake-reasoned frames make no delta), so `strong` was unreachable in production. The pre-existing code
+  even documented the unreachability and the test still "passed." Prevention: for any signal the engine
+  *consumes*, add a test that a real PRODUCTION path *produces* it (e.g. run `assess()` and assert the
+  field is populated), not only a hand-built fixture. Extends L-8: a fixture that can't occur is a worse
+  lie than a pre-seeded DB. The whole-branch review then caught a second-order bug (the
+  `reasoned_unprompted` signal over-credited stress-probed decision frames and bypassed the sharper
+  veto) → fixed with `code not in probed`.
+- **L-10 A return-type change updates every caller in the SAME commit.** When `schedule_next` went from
+  returning a spec to `(spec, receipt)`, splitting "change the function" and "fix the callers" into two
+  tasks would leave a red suite between them, which breaks the SDD per-task green gate and poisons the
+  next task's baseline. Order the plan so the signature swap is one atomic task after the additive pieces
+  land; every commit leaves `pytest` green. (Caught in plan self-review, not execution.)
+- **L-11 Background processes don't survive agent turn boundaries — use a checkpointed stepper for
+  interactive dogfooding.** A long-running `run_session` driver that blocked on file-IPC for the human's
+  reply was reaped at the turn boundary (twice). For a multi-turn, human-in-the-loop live dogfood, drive
+  the loop as discrete synchronous steps that each run to completion within one turn and persist loop
+  state to a checkpoint file (`/tmp/dogfood/step.py`: `opening` → classify_intake + first push;
+  `reply` → classify_response + continue), faithfully porting `assess()`'s control flow (the real
+  `_select_target`/`_converged`/stress logic, `update_state`, `audit_sharper`) rather than reimplementing
+  it loosely.
