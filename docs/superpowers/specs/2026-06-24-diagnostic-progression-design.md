@@ -1,7 +1,7 @@
 # Diagnostic Progression — Locating the Learner, Not Ramping Difficulty
 
 Date: 2026-06-24
-Status: design — rev. 1 (post external review); awaiting user approval before plans
+Status: design — rev. 2 (post external review, round 2); awaiting user approval before plans
 Origin: the second open thread from the commitment-frame work (memory `retnovation-commitment-frame-gap`)
 and the "escrow scene is a max-difficulty cold-start capstone" note. The user's reframe: progression
 must **serve a purpose so the system actually understands where the learner is** — a diagnostic
@@ -13,6 +13,11 @@ layer. Post-MVP; the MVP harness and the commitment-frame feature are complete.
 > gate is per-experience *max* constituent uncertainty (not a mean × frame-load); and the content-thinness
 > reality, the authoring-order dependency, the endogenous-demand gap, and a richer receipt are stated
 > honestly.
+> **Rev. 2** (see §14) pinned the one call that sets inside Project 1: the staleness clock (the `due`
+> interval, the displayed-bucket decay, and the uncertainty staleness-term) keys to the persistent
+> **storage tier** (`evidence_count`+`breadth`), never the displayed bucket — acyclic and §5-faithful.
+> Plus: incoherent states are unreachable via the *served* paths (not "impossible" — direct construction
+> stays open), and the sole-content-frame case surfaces as a content gap, not a scorer special-case.
 
 ## 1. Goal
 
@@ -126,10 +131,19 @@ load state (derive strength/uncertainty from storage + now) ─▶ policy propos
   - `forming` = engaged with a real mechanism (≥1 evidence) but single-context / single-observation /
     only-closed-under-pressure — **or** a higher bucket that has gone stale one step.
   - `weak` = no evidence, or a frame decayed past the forming threshold.
-  Decay is the staleness term inside this function: as `now − last_seen` crosses strength-scaled
-  thresholds, the derived bucket steps down. Re-exposure sets `last_seen = now` → staleness 0 → the bucket
-  springs back to whatever the (unchanged) `evidence_count`/`breadth` support. No mutation, no
-  `decay_frame` (deleted), no sweep.
+  **Decay is the staleness term, on a storage-keyed clock.** The interval before the displayed bucket
+  steps down (and before `retention_due` fires) is a function of the persistent storage tier
+  (`evidence_count` + `breadth`) — **never of the displayed/decayed bucket.** This is the one wiring that
+  is both *acyclic* (the bucket can't be defined by comparing staleness against a `due` that is itself
+  defined from the bucket) and §5-faithful: a frame earned to `strong` keeps its *long* interval even
+  after its displayed bucket falls, so it resurfaces *rarely* and springs back on one correct re-exposure
+  (`last_seen = now` → staleness 0, `evidence_count`/`breadth` unchanged). Keying the interval to the
+  decayed bucket would do the opposite — a stale `strong`→`forming` frame would inherit `forming`'s
+  *shorter* interval and get reviewed *more* as it decays, which is the continuous review §5 says loses to
+  relearning. The **uncertainty staleness-term rides the same storage-keyed clock**, so a well-earned
+  frame's uncertainty also rises slowly (one spaced re-check, not a fast diagnose-driven resurfacing that
+  would re-introduce the pathology through the back door). No mutation, no `decay_frame` (deleted), no
+  sweep.
 - **uncertainty(now)** ∈ [0,1] — monotone-high when `evidence_count` is low, `breadth < 2`, or the frame
   is stale. The diagnostic signal.
 
@@ -162,11 +176,18 @@ V(f,p) =  wU · uncertainty(f)                         # DIAGNOSE  — dominant 
 - **argmax** with a deterministic tie-break (frame id) — no randomness; reproducible tests.
 - The winning term names the **drive**; the full decomposition **plus the runner-up drive and its
   margin** becomes the **receipt**.
+- **`retention_due(f)`** fires off the **storage-keyed clock** (§6): a frame is due when its staleness
+  reaches the interval its storage tier earns — well-earned frames come due rarely, never more often as
+  they decay.
 
-**Cold-start edge (Project 2 detail, named now):** a frame whose *only* content is a high-load experience
-must not be starved by the penalty — the `wU · uncertainty(f)` diagnose term on that constituent must
-still pull it through. Resolve in the Project 2 plan by excluding the primarily-diagnosed frame from the
-max, or flooring `wU` above the penalty for an unlocated frame.
+**Sole-content-frame → a content gap, not a policy special-case.** A frame whose *only* home is a
+high-load (gated capstone) experience can't be cleanly located while that experience's other constituents
+are still unlocated (the max-uncertainty penalty defers it, and serving it would yield an uninterpretable
+read anyway). Rather than an escape hatch in the scorer, this **surfaces as a content gap** — "this frame
+has no isolated experience to locate it" — exactly like transfer-blocked-content-gap. It routes the fix
+to authored content (the same effort that unblocks `strong` and transfer) and keeps the policy
+principled. Once the capstone's other frames *are* located, the penalty releases and it serves the frame
+as the integration test, with no special case.
 
 Weights `wU/wR/wT/wL` and the uncertainty/staleness thresholds live in `content/cadence/progression.yaml`.
 
@@ -226,13 +247,18 @@ This spec captures the whole architecture; **writing-plans produces the Project 
 - **Substrate:** evidence accumulates; `strong` needs 2 unprompted × 2 problems (and is reachable);
   `derive_strength` steps the bucket down as staleness crosses thresholds and **restores it on
   re-exposure** (the savings effect — same evidence, `last_seen=now` → bucket back) *without* changing
-  `evidence_count`/`breadth`; `frame_uncertainty` monotone in evidence/breadth/staleness; migration on
-  fresh AND old DB; `trap_gallery` round-trips; the legacy shim keeps the current state/scheduler/
-  orchestration tests green at staleness 0.
+  `evidence_count`/`breadth`; **the staleness clock keys to the storage tier** — a well-earned frame that
+  has decayed keeps its long interval and comes due *no sooner* than (in fact later than) a thin frame at
+  the same staleness, i.e. it is reviewed *less* as it decays, not more (the explicit anti-continuous-
+  review test); `frame_uncertainty` monotone in evidence/breadth/staleness and its staleness-rise is
+  slower for higher storage tiers; migration on fresh AND old DB; `trap_gallery` round-trips; the legacy
+  shim keeps the current state/scheduler/orchestration tests green at staleness 0.
 - **Policy:** each drive in isolation; the max-constituent-uncertainty penalty defers an experience while
-  any constituent is unlocated and releases it once all are located; the cold-start edge (sole-content
-  frame still reachable); transfer fires only on forming + new-problem + content-exists; content-gap
-  surfaces; deterministic tie-break; the policy picks the expected `(frame, problem)` on crafted states.
+  any constituent is unlocated and releases it once all are located; a frame whose only home is a
+  multi-frame experience with other unlocated constituents surfaces as a **content gap** (not forced into
+  service, not silently deadlocked); transfer fires only on forming + new-problem + content-exists;
+  transfer-content-gap surfaces; deterministic tie-break; the policy picks the expected `(frame, problem)`
+  on crafted states.
 - **Surface:** propose→accept→run; redirect honored + logged (and nothing consumes it); receipt
   decomposition + runner-up/margin correct; promote/demote candidate surfaced on crafted evidence.
 - **Invariants throughout:** conclusion-agnostic (no drive reads a conclusion); the judgment loop and the
@@ -271,9 +297,11 @@ This spec captures the whole architecture; **writing-plans produces the Project 
 1. **Strength: stored → derived.** §6/§9 originally treated `strength` as both a persisted field and a
    derived value, with decay mutating the stored bucket — a contradiction. Now strength (and `due`) are
    pure functions of persistent `{evidence_count, breadth, last_seen}` + `now`, computed on read. This
-   deletes `decay_frame`, removes the planned decay-sweep mutation, eliminates a class of incoherent
-   states (stored bucket disagreeing with its own evidence), and gives the Berkeley §5 savings effect for
-   free. Project 1 shrinks.
+   deletes `decay_frame`, removes the planned decay-sweep mutation, makes incoherent states unreachable
+   **through the served paths** (`load_state` derives, `update_state` writes only storage) — direct
+   `FrameStrength(strength=…)` construction stays open for tests, the seam the shim leans on, so the
+   served path must never set strength directly — and gives the Berkeley §5 savings effect for free.
+   Project 1 shrinks.
 2. **Cold start: mean × frame-load → per-experience max constituent uncertainty.** A mean conflated
    "uniformly half-known" with "half located, half blank"; the integration test needs *its own* frames
    located. Max-constituent-uncertainty states that directly and subsumes the global scalar and the
@@ -284,3 +312,26 @@ This spec captures the whole architecture; **writing-plans produces the Project 
 4. **Smaller seams.** Named the cold-start-order = authoring-order dependency; named the endogenous-
    revealed-demand gap (with the ledger as the latent external signal); enriched the receipt with the
    runner-up drive + margin; stated plainly that redirect evidence is logged but unconsumed.
+
+## 14. Revision 2 — the Project-1 pin and two tightenings
+
+1. **The staleness clock keys to the persistent storage tier, never the displayed bucket** (§6, §7). Rev. 1
+   left "derived from `{evidence_count, breadth, last_seen}`" true under two wirings. Keying the `due`
+   interval / decay thresholds to the *displayed* (decayed) bucket is circular (bucket ← staleness-vs-`due`
+   ← bucket) and produces continuous review (a stale `strong`→`forming` frame inherits the shorter
+   interval and is reviewed *more* as it decays — exactly what §5 says loses to relearning). Keying them to
+   the **storage tier** (`evidence_count`+`breadth`) is acyclic and is the savings effect: a well-earned
+   frame keeps its long interval as its display falls, resurfaces rarely, springs back on one re-exposure.
+   The **uncertainty staleness-term rides the same storage-keyed clock** (else the diagnose drive would
+   resurface well-earned stale frames on a fast clock and re-introduce the pathology). This is the one open
+   call that sets inside Project 1; it is now pinned.
+2. **"Incoherent state impossible" → "unreachable via the served paths."** Accurate boundary: `load_state`
+   derives and `update_state` writes only storage, so the served path can't produce an incoherent
+   `FrameStrength`; but `test_scheduler` constructs `FrameStrength(strength=…)` directly on purpose (the
+   shim seam), so the field stays settable. The Project 1 plan states this boundary and the rule: the
+   served path never sets strength directly.
+3. **Sole-content-frame → a content gap, not a scorer special-case** (§7). A frame whose only home is a
+   gated capstone (with other unlocated constituents) surfaces as a content gap — "no isolated experience
+   to locate this frame" — the same mechanism as transfer-blocked, routing the fix to authored content,
+   instead of an exclude-from-max / floor-`wU` escape hatch in the policy. Once the capstone's other frames
+   are located, the penalty releases and it serves the frame as the integration test, no special case.

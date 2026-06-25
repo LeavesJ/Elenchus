@@ -992,5 +992,14 @@ verify `git ls-files` after any content work). Core-path changes get an independ
   deliver plumbing, the unlock is authored content (mined case library). (4) named the
   authoring-order=cold-start-curriculum dependency, the endogenous-revealed-demand gap (ledger as latent
   external signal), runner-up+margin in the receipt, and that redirect evidence is logged-but-unconsumed.
-  **Status: design rev. 1, awaiting user approval before the Project 1 plan.** No code changed; 124/3.
-  `main` ~48 commits ahead of origin, unpushed (ask before pushing).
+- **Rev. 2 (external review, round 2).** One substantive pin (sets inside Project 1) + two tightenings,
+  all verified and accepted: (1) **the staleness clock keys to the persistent storage tier
+  (`evidence_count`+`breadth`), never the displayed bucket** — keying to the decayed bucket is circular and
+  causes continuous review (decays→shorter interval→reviewed more); storage-keyed is acyclic + the §5
+  savings effect. My extension: the uncertainty staleness-term rides the same clock (else diagnose
+  resurfaces well-earned stale frames and re-introduces the pathology). (2) "incoherent state impossible"
+  → **unreachable via the served paths** (load_state/update_state); direct `FrameStrength(strength=…)`
+  stays open for tests (the shim seam) and the served path must never set strength directly. (3) the
+  **sole-content-frame surfaces as a content gap**, not a scorer special-case (drops the exclude-from-max/
+  floor-wU escape hatch). Spec → rev. 2 (§14 added). **Status: design rev. 2, awaiting approval before the
+  Project 1 plan.** No code changed; 124/3. `main` ~48 commits ahead of origin, unpushed.
