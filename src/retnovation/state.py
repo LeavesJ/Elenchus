@@ -38,6 +38,10 @@ def _storage_tier(evidence_count: int, unprompted_breadth: set[str]) -> Strength
     return Strength.weak
 
 
+def frame_interval_days(evidence_count: int, unprompted_breadth: set[str]) -> int:
+    return _INTERVAL_DAYS[_storage_tier(evidence_count, unprompted_breadth)]
+
+
 def _staleness_days(last_seen: datetime, now: datetime) -> float:
     return max(0.0, (now - last_seen).total_seconds() / 86400.0)
 

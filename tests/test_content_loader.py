@@ -145,3 +145,11 @@ def test_license_continuity_declares_the_commitment_decision_frame():
     assert rub.decision_frame == "commit_under_the_deadline"
     assert any(f.frame_code == "commit_under_the_deadline" for f in rub.frames)
     assert any(t.trap_code == "commit_without_a_tripwire" for t in rub.traps)
+
+
+def test_load_progression_returns_weights_and_threshold():
+    from retnovation.content_loader import load_progression
+
+    p = load_progression()
+    assert p["wU"] == 1.0 and p["wR"] == 1.0 and p["wT"] == 1.5 and p["wL"] == 0.5
+    assert p["theta_located"] == 0.5

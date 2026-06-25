@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — P2 Task 2 — progression.yaml + load_progression + state.frame_interval_days; 141/3.
+
 ## 2026-06-24 — P2 Task 1 — NextExperienceSpec.experience_id + SelectionReceipt; 139/3.
 
 ## 2026-06-24 — Project 2 plan written (value-function policy)

@@ -1,0 +1,7 @@
+# Diagnostic-progression value-function config (doctrine-as-data). Dogfood-tunable.
+weights:
+  wU: 1.0   # diagnose (reduce uncertainty)
+  wR: 1.0   # consolidate (retention due)
+  wT: 1.5   # deploy (transfer) — preempts consolidate by design (the signature move)
+  wL: 0.5   # cold-start integration-readiness penalty (< wU so cold start still serves)
+theta_located: 0.5   # a frame g is "located" when uncertainty(g) <= this

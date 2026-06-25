@@ -107,6 +107,18 @@ def load_spacing(root: Path | None = None) -> dict:
     }
 
 
+def load_progression(root: Path | None = None) -> dict:
+    data = yaml.safe_load((_root(root) / "cadence" / "progression.yaml").read_text())
+    w = data["weights"]
+    return {
+        "wU": float(w["wU"]),
+        "wR": float(w["wR"]),
+        "wT": float(w["wT"]),
+        "wL": float(w["wL"]),
+        "theta_located": float(data["theta_located"]),
+    }
+
+
 def load_checkable_experience(name: str, root: Path | None = None) -> Experience:
     data = yaml.safe_load((_root(root) / "checkables" / f"{name}.yaml").read_text())
     questions = [CheckableQuestion(**q) for q in data["checkable"]["questions"]]

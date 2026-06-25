@@ -224,6 +224,14 @@ def test_strong_reachable_across_two_problems():
     assert st.frames["f"].strength is Strength.strong  # two distinct problems, unprompted
 
 
+def test_frame_interval_days_keys_to_storage_tier():
+    from retnovation.state import frame_interval_days
+
+    assert frame_interval_days(0, set()) == 1  # weak
+    assert frame_interval_days(1, set()) == 7  # forming
+    assert frame_interval_days(2, {"a", "b"}) == 30  # strong (2 unprompted problems)
+
+
 def test_closed_under_pressure_is_forming_not_strong():
     from datetime import datetime, timezone
     from retnovation.state import update_state
