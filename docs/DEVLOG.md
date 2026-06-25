@@ -1,5 +1,27 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — Project 3 implementation plan written (8 TDD tasks) + adversarial review
+- `docs/superpowers/plans/2026-06-25-diagnostic-progression-p3-interactive-surface.md` — 8 tasks ordered so
+  Tasks 1–7 are additive (suite green at each commit) and Task 8 is the single atomic L-10 seam swap
+  (run_session restructure + schedule_next/log_selection removal + six test/seed-site rewrites in one
+  commit). Inline self-review passed (spec §17.1–§17.6 coverage, no placeholders, type-thread consistency).
+- A 5-lens adversarial review ran against the merged source and **empirically reproduced two blockers**
+  (it actually ran `select_next` over the real library):
+  - **F1 (blocker):** removing the queue seed means open_ended proposes from cold-start live state, whose
+    deterministic winner is `decision_under_stakes`/`choose_the_failure_default_deliberately` — unscripted
+    in the test `FakeModel`s → `KeyError`. Fix: every rewritten open_ended test **steers to
+    `license_continuity`** via a redirect `decide` fixture (doubles as the redirect-path test).
+  - **F2 (blocker):** Task 8 deleted `Store.log_selection` but omitted `tests/test_persistence.py`
+    (`test_log_selection_round_trips` calls it) → red commit. Fix: added it to Task 8's edit/stage set.
+  - Refinements folded in: F4 crystallization signature aligned to spec order `(state, core, …)` + `config`;
+    F5 deterministic per-file import cleanup (notably KEEP `Regime` in cli.py — removing it is a NameError,
+    not F401); F6 dry_run dead-helper/assertion removal made explicit; F7 `cli.main` passes
+    `regime=open_ended` explicitly; F8 guard the cs empty-queue → open_ended crossover. F3 was downgraded to
+    a nit by verification (the test stays green) but tidied anyway.
+- New lesson **L-14** (a selection-policy change alters WHICH item is served → re-steer dependent test
+  fixtures; an adversarial reviewer that runs code beats one that only reads it). NEXT: choose execution
+  mode (subagent-driven vs inline) and implement.
+
 ## 2026-06-25 — Project 3 scope pinned (§17) — the interactive surface
 - Brainstormed P3 (spec §8/§10.3) to plan-ready and appended **§17** to the diagnostic-progression spec.
   Two user forks: redirect = ranked menu; core promote/demote = advisory + logged, in P3. Then two

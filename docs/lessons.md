@@ -94,3 +94,14 @@ Read this checklist before every code change. Update it after every correction o
   never the frame or drive; guard it with an explicit "no `frame_code` in the learner-facing string"
   assertion, and keep frame-level decomposition to the async author log. Medium-independent — carries to the
   future UI.
+- **L-14 Moving selection from queue-time to live-propose changes WHICH item is served — re-verify every
+  test fixture that implicitly depended on the old selection.** The P3 plan removed the `build_store` queue
+  seed that had steered selection to `license_continuity`; under cold-start propose-from-live the value
+  function instead ranks `decision_under_stakes` (frame `choose_the_failure_default_deliberately`) first,
+  whose frames the test `FakeModel`s don't script → `KeyError` at the single atomic L-10 commit. The plan's
+  own self-review missed it; an adversarial review that *actually ran* `select_next` over the real library
+  reproduced it. Prevention: when a change alters a selection policy, enumerate the tests whose model/data
+  fixtures assume a specific selected item and re-steer them (e.g. via the redirect seam) or broaden the
+  fixture — and don't claim "green at every commit" for the seam-swap commit without running the rewritten
+  suite against real content. (Corollary: an adversarial reviewer that runs code beats one that only reads
+  it — for selection/ranking claims, have the review execute the function.)
