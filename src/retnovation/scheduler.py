@@ -30,4 +30,4 @@ def schedule_next(
         return NextExperienceSpec(target_frames=targets, ledger_ref=ledger_ref, regime=regime), None
 
     experiences = [e for e in load_library(root) if e.regime is Regime.open_ended]
-    return select_next(state, experiences, load_progression(root), now)
+    return select_next(state, experiences, load_progression(root), now)[0]

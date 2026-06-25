@@ -15,7 +15,7 @@ def _uncertainty(state: LearnerState, code: str, now: datetime) -> float:
     )
 
 
-def _retention_due(state: LearnerState, code: str, now: datetime) -> float:
+def retention_due(state: LearnerState, code: str, now: datetime) -> float:
     fs = state.frames.get(code)
     if fs is None or fs.evidence_count == 0:
         return 0.0
@@ -58,11 +58,12 @@ def _content_gaps(
 
 def select_next(
     state: LearnerState, experiences: list[Experience], config: dict, now: datetime
-) -> tuple[NextExperienceSpec, SelectionReceipt]:
+) -> list[tuple[NextExperienceSpec, SelectionReceipt]]:
     wU, wR, wT, wL = config["wU"], config["wR"], config["wT"], config["wL"]
     theta = config["theta_located"]
+    gaps = _content_gaps(state, experiences, now, theta)
 
-    best = None  # (sort_key, frame, exp, terms, V, penalty)
+    scored = []  # each: dict with sort_key, frame, exp, drive, V, terms, penalty
     for e in experiences:
         penalty = max(
             (_uncertainty(state, g.frame_code, now) for g in e.rubric.frames), default=0.0
@@ -72,43 +73,59 @@ def select_next(
             f = fr.frame_code
             terms = {
                 "diagnose": wU * _uncertainty(state, f, now),
-                "consolidate": wR * _retention_due(state, f, now),
+                "consolidate": wR * retention_due(state, f, now),
                 "deploy": wT * _transfer(state, f, e.ledger_ref),
             }
             V = terms["diagnose"] + terms["consolidate"] + terms["deploy"] - wL * penalty
-            sort_key = (-V, load, f, e.ledger_ref, e.experience_id)
-            if best is None or sort_key < best[0]:
-                best = (sort_key, f, e, terms, V, penalty)
+            drive = max(terms.items(), key=lambda kv: kv[1])[0]
+            scored.append(
+                {
+                    "sort_key": (-V, load, f, e.ledger_ref, e.experience_id),
+                    "frame": f,
+                    "exp": e,
+                    "drive": drive,
+                    "V": V,
+                    "terms": terms,
+                    "penalty": penalty,
+                }
+            )
 
-    if best is None:
+    if not scored:
         raise ValueError("no (frame, experience) candidates to score")
-    _, frame, exp, terms, V, penalty = best
-    ranked = sorted(terms.items(), key=lambda kv: -kv[1])
-    drive = ranked[0][0]
-    runner_up_drive = ranked[1][0] if len(ranked) > 1 and ranked[1][1] > 0 else None
-    margin = ranked[0][1] - ranked[1][1] if runner_up_drive is not None else 0.0
+    scored.sort(key=lambda c: c["sort_key"])
 
-    spec = NextExperienceSpec(
-        target_frames=[frame],
-        ledger_ref=exp.ledger_ref,
-        regime=Regime.open_ended,
-        experience_id=exp.experience_id,
-    )
-    receipt = SelectionReceipt(
-        frame=frame,
-        problem=exp.ledger_ref,
-        experience_id=exp.experience_id,
-        drive=drive,
-        scores={
-            "uncertainty": terms["diagnose"] / wU if wU else 0.0,
-            "retention": terms["consolidate"] / wR if wR else 0.0,
-            "transfer": terms["deploy"] / wT if wT else 0.0,
-            "penalty": penalty,
-            "V": V,
-        },
-        runner_up_drive=runner_up_drive,
-        margin=margin,
-        content_gaps=_content_gaps(state, experiences, now, theta),
-        created_at=now,
-    )
-    return spec, receipt
+    ranked: list[tuple[NextExperienceSpec, SelectionReceipt]] = []
+    for c in scored:
+        others = [o for o in scored if o["drive"] != c["drive"]]
+        if others:
+            best_other = max(others, key=lambda o: o["V"])
+            runner_up_drive = best_other["drive"]
+            margin = c["V"] - best_other["V"]
+        else:
+            runner_up_drive, margin = None, 0.0
+        e, f, terms = c["exp"], c["frame"], c["terms"]
+        spec = NextExperienceSpec(
+            target_frames=[f],
+            ledger_ref=e.ledger_ref,
+            regime=Regime.open_ended,
+            experience_id=e.experience_id,
+        )
+        receipt = SelectionReceipt(
+            frame=f,
+            problem=e.ledger_ref,
+            experience_id=e.experience_id,
+            drive=c["drive"],
+            scores={
+                "uncertainty": terms["diagnose"] / wU if wU else 0.0,
+                "retention": terms["consolidate"] / wR if wR else 0.0,
+                "transfer": terms["deploy"] / wT if wT else 0.0,
+                "penalty": c["penalty"],
+                "V": c["V"],
+            },
+            runner_up_drive=runner_up_drive,
+            margin=margin,
+            content_gaps=gaps,
+            created_at=now,
+        )
+        ranked.append((spec, receipt))
+    return ranked
