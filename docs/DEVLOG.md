@@ -1,5 +1,21 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — Project 2 scope rev (external review r2): candidate = (frame, experience)
+- External review of §16 (analyzed via receiving-code-review, verified vs content). 4 points, all sound,
+  applied: (1) **candidate (frame,problem) → (frame, experience)** [gates the plan] — the penalty (max over
+  frames(e)) and the served artifact are per-experience, so a (f,p) with 2 homes (capstone / transfer)
+  makes the score ambiguous and the selector could run a different e than the penalty scored (attribution
+  break); keying to (frame,experience) keeps per-frame attribution, unambiguous penalty, selector =
+  lookup; selection_log stores experience_id. (2) **tie-break (constituent_count asc, frame_id, problem,
+  experience_id)** — at cold start all V≈0.5 uniform, so the intro-arc + determinism rest on the tie-break;
+  count term makes lowest-load-first true at the FIRST pick (capstone last), experience_id totalizes.
+  (3) **content-gap as a static predicate** — "no experience containing f has all its OTHER frames located
+  (single-frame = trivial home; located = uncertainty ≤ θ_located)" replaces the vague runtime
+  "dominated by penalty"; deterministic + testable; current content has no single-frame experiences so
+  cold-start flags every frame (accurate: author isolated experiences). (4) notes: wT>wR is a deliberate
+  default (transfer preempts consolidate, decisive on thick content); selection_log is queue-time, not
+  live (propose-from-live is P3). §16 amended. **Status: P2 scope plan-ready, awaiting user validation.**
+
 ## 2026-06-24 — Live re-dogfood (full pipeline) + Project 2 scoping
 - **Live re-dogfood** of the escrow license_continuity scene through the real Opus instructor + the full
   new pipeline (resumable checkpointed stepper /tmp/dogfood/step.py, since background processes don't

@@ -383,50 +383,72 @@ policy, spec §7/§10.2) to plan-ready, decided in a scoping pass. **Scope:** th
 the user-facing receipt, and core promote/demote remain **Project 3** — orchestration stays queue-based
 in P2.
 
-**Candidates + content-graph read.** `schedule_next`'s `open_ended` branch is rewritten; its signature
-gains the corpus so it loads the gated open_ended library. Candidates = every `(frame f, problem p)`
-where `p = e.ledger_ref` for an open_ended experience `e` and `f ∈ e.rubric.frames`. The `cs_technical`
-branch (SM2-lite) is untouched.
+**Candidate = `(frame, experience)`, problem derived** (external review r2). The candidate keys to a
+specific experience `e`, with `problem = e.ledger_ref` *derived*. This refines §4.5/§7's
+`(frame × problem)` because two of the four terms — the cold-start penalty (`max` over `frames(e)`) and
+the served artifact (`e` itself) — are irreducibly per-experience, not per-`(f,p)`. Once a `(f,p)` has
+two homes (a capstone is several experiences sharing a `ledger_ref`; transfer aims a frame at a second
+problem), `(f,p)` scoring is ambiguous and the selector could re-derive a *different* `e` than the
+penalty scored — an attribution break in the surface this project exists to make trustworthy. Keying to
+`(frame, experience)` keeps per-frame attribution (still scoring per frame, not whole-experience), makes
+the penalty unambiguous, and collapses the selector to a lookup of the exact scored `e`. `schedule_next`'s
+`open_ended` branch gains the corpus so it loads the gated open_ended library; candidates = every
+`(f, e)` with `f ∈ e.rubric.frames`. The `cs_technical` branch (SM2-lite) is untouched.
 
 **Drive formulas** (reuse the built `state.frame_uncertainty`):
 - `uncertainty(f)` = `frame_uncertainty(...)` for `f` in state; **`1.0` for a never-seen frame** (cold start).
 - `retention_due(f)` = `clamp((staleness − interval)/interval, 0, 1)` on the storage-keyed clock (§6) —
   `0` until due, rising after; `0` for weak/unseen frames.
-- `transfer_opportunity(f, p)` = `1.0` iff `f` is `forming` **and** `p ∉ breadth(f)`; else `0`.
-- cold-start penalty = `max(uncertainty(g) for g ∈ frames(e))` (integration readiness).
+- `transfer_opportunity(f, e)` = `1.0` iff `f` is `forming` **and** `e.ledger_ref ∉ breadth(f)`; else `0`.
+- cold-start penalty = `max(uncertainty(g) for g ∈ e.rubric.frames)` (integration readiness).
 
-**Score:** `V(f,p) = wU·uncertainty(f) + wR·retention_due(f) + wT·transfer_opportunity(f,p) −
-wL·max_constituent_uncertainty(e)`. `argmax`, deterministic tie-break by `(frame_id, problem)`.
-**Default weights** (`progression.yaml`, dogfood-tunable): `wU=1.0, wR=1.0, wT=1.5, wL=0.5` — `wT>wU`
-(deploy a forming frame beats diagnosing a fresh one); `wL<wU` (cold-start, all uncertainty ≈ 1, still
-scores positive and serves *something*; the penalty is uniform there so the order is the tie-break /
-authoring order — the §12 named dependency).
+**Score:** `V(f,e) = wU·uncertainty(f) + wR·retention_due(f) + wT·transfer_opportunity(f,e) −
+wL·max_constituent_uncertainty(e)`. `argmax`, deterministic tie-break
+**`(constituent_count asc, frame_id, problem, experience_id)`** — the constituent-count term re-creates
+the intro-arc *at the first pick* (lowest-load isolated reads first, the capstone last) without
+resurfacing `wL` as a score term, and `experience_id` gives a total order over two experiences sharing a
+`(frame, problem)`. (External review r2: at true cold start every `V ≈ 0.5` and uniform, so the intro-arc
+and determinism rest entirely on the tie-break; `frame_id` alone delivered neither.)
+**Default weights** (`progression.yaml`, dogfood-tunable): `wU=1.0, wR=1.0, wT=1.5, wL=0.5`. `wT>wU`:
+deploy a forming frame beats diagnosing a fresh one. `wL<wU`: cold-start (all uncertainty ≈ 1) still
+scores positive and serves *something*. **`wT>wR` is a deliberate default** — transfer (1.5) preempts a
+maximally-overdue consolidate whenever both fire; invisible on thin content, decisive on thick (the
+signature move wins). Tunable.
 
-**Cold-start edge → content gap (no escape hatch).** If a frame is uncertain but every experience
-containing it is dominated by the penalty (its only home is a high-load capstone with other unlocated
-frames), it is logged as a content gap ("`frame X` has no isolated experience to locate it") and the
-policy serves the best available candidate — same mechanism as transfer-blocked. No exclude-from-max /
-floor-`wU` special case (§7, §14.3).
+**Cold-start edge → content gap (static predicate, no escape hatch).** A frame `f` is
+**unlocatable-in-isolation** iff *no experience containing it has all of its **other** frames already
+located* — where a single-frame experience trivially qualifies as a home, and `located(g)` ≜
+`uncertainty(g) ≤ θ_located` (a `progression.yaml` threshold). This is a static, testable content/state
+predicate (not the vague runtime "dominated by the penalty"). When `f` is unlocatable-in-isolation, the
+policy **logs a content gap** ("`frame X` has no isolated experience to locate it") and still serves the
+best available candidate — same mechanism as transfer-blocked, no exclude-from-max / floor-`wU` special
+case (§7, §14.3). (Note: current content has **no single-frame experiences**, so at cold start every
+frame flags the gap — accurately telling the author that isolated diagnostic experiences don't yet
+exist, while progress still happens via the lowest-load experience.)
 
-**Selector honors `(frame, problem)`.** `generator.select_open_ended` selects the experience whose
-`ledger_ref == spec.ledger_ref` and covers the target frame (not just frame-coverage ranking) — so
-transfer aims a frame at the intended problem.
+**Selector honors `(frame, experience)`.** `generator.select_open_ended` returns the exact experience the
+policy scored (carried on the spec), not a frame-coverage re-ranking — so the penalty, the served
+artifact, and the receipt all describe the same `e`.
 
-**Config.** New `content/cadence/progression.yaml` holds `wU/wR/wT/wL` + the staleness/uncertainty
-thresholds; the `_INTERVAL_DAYS` constant Project 1 parked in `state.py` moves here, loaded via a new
-`content_loader.load_progression()` (doctrine-as-data, L-1).
+**Config.** New `content/cadence/progression.yaml` holds `wU/wR/wT/wL`, `θ_located`, and the
+staleness/uncertainty thresholds; the `_INTERVAL_DAYS` constant Project 1 parked in `state.py` moves
+here, loaded via a new `content_loader.load_progression()` (doctrine-as-data, L-1).
 
-**`selection_log` (pulled into P2).** A new table (timestamp, chosen frame/problem, drive, per-term
-scores, runner-up drive + margin, content-gaps) — written on every `schedule_next`. This is the
-validation surface: the policy's reasoning is inspectable over a series without the P3 UI.
+**`selection_log` (pulled into P2).** A new table (timestamp, chosen **frame, problem, experience_id**,
+drive, per-term scores, runner-up drive + margin, content-gaps) — written on every `schedule_next`.
+**Read caveat:** because P2 keeps queue-based orchestration, the log records *queue-time* reasoning
+(end-of-session state), not the live state at the next session; propose-from-live-state is a P3 concern.
+This is the validation surface: the policy's reasoning is inspectable over a series without the P3 UI.
 
 **Removing the shim.** The placeholder `weak>forming>strong` open_ended branch is replaced;
 `test_scheduler.py`'s open_ended assertions are rewritten to the value-function behavior. `cs_technical`
 and its tests are byte-stable.
 
-**Testing (TDD):** each drive isolated; cold-start serves something (order = tie-break, penalty uniform);
-transfer fires only on forming + new-problem; retention only when overdue on the storage clock; the
-max-constituent penalty defers a high-uncertainty-constituent experience and releases it once located;
-content-gap logged for an unlocatable / transfer-blocked frame; deterministic argmax tie-break; the
-selector picks the `(frame, problem)` experience; `progression.yaml` loads; the `selection_log`
-decomposition is correct; cs path byte-stable.
+**Testing (TDD):** each drive isolated; cold-start serves the lowest-load experience first via the
+`(constituent_count, …)` tie-break, deterministically; transfer fires only on forming + new-problem;
+retention only when overdue on the storage clock; the max-constituent penalty defers a
+high-uncertainty-constituent experience and releases it once located; the **static** content-gap
+predicate logged for an unlocatable-in-isolation / transfer-blocked frame (assertable); a `(frame, problem)`
+with two backing experiences scores each `(f, e)` distinctly and the selector runs the scored `e`;
+`progression.yaml` loads; the `selection_log` decomposition (incl. `experience_id`) is correct; cs path
+byte-stable.
