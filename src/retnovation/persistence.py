@@ -13,6 +13,7 @@ from .types import (
     NextExperienceSpec,
     Regime,
     Scene,
+    SelectionReceipt,
     SpacedItem,
     TrapOccurrence,
 )
@@ -26,7 +27,12 @@ CREATE TABLE IF NOT EXISTS ledger (
   id TEXT PRIMARY KEY, owned_problem TEXT NOT NULL, links_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS queue (
   position INTEGER PRIMARY KEY AUTOINCREMENT,
-  target_frames_json TEXT NOT NULL, ledger_ref TEXT NOT NULL, regime TEXT NOT NULL);
+  target_frames_json TEXT NOT NULL, ledger_ref TEXT NOT NULL, regime TEXT NOT NULL,
+  experience_id TEXT);
+CREATE TABLE IF NOT EXISTS selection_log (
+  created_at TEXT NOT NULL, frame TEXT NOT NULL, problem TEXT NOT NULL, experience_id TEXT NOT NULL,
+  drive TEXT NOT NULL, scores_json TEXT NOT NULL, runner_up_drive TEXT, margin REAL NOT NULL,
+  content_gaps_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS corpus (
   ledger_ref TEXT PRIMARY KEY, domain TEXT NOT NULL, why_owned TEXT NOT NULL,
   unlabeled TEXT NOT NULL, provenance TEXT NOT NULL, corpus_pointers_json TEXT NOT NULL,
@@ -57,6 +63,10 @@ class Store:
         ):
             if col not in fcols:
                 self._db.execute(f"ALTER TABLE frames ADD COLUMN {col} {decl}")
+        self._db.commit()
+        qcols = {r["name"] for r in self._db.execute("PRAGMA table_info(queue)")}
+        if "experience_id" not in qcols:
+            self._db.execute("ALTER TABLE queue ADD COLUMN experience_id TEXT")
         self._db.commit()
 
     def close(self) -> None:
@@ -203,8 +213,13 @@ class Store:
 
     def queue_push(self, spec: NextExperienceSpec) -> None:
         self._db.execute(
-            "INSERT INTO queue(target_frames_json,ledger_ref,regime) VALUES(?,?,?)",
-            (json.dumps(spec.target_frames), spec.ledger_ref, spec.regime.value),
+            "INSERT INTO queue(target_frames_json,ledger_ref,regime,experience_id) VALUES(?,?,?,?)",
+            (
+                json.dumps(spec.target_frames),
+                spec.ledger_ref,
+                spec.regime.value,
+                spec.experience_id,
+            ),
         )
         self._db.commit()
 
@@ -218,7 +233,26 @@ class Store:
             target_frames=json.loads(row["target_frames_json"]),
             ledger_ref=row["ledger_ref"],
             regime=Regime(row["regime"]),
+            experience_id=row["experience_id"],
         )
+
+    def log_selection(self, receipt: SelectionReceipt) -> None:
+        self._db.execute(
+            "INSERT INTO selection_log(created_at,frame,problem,experience_id,drive,scores_json,"
+            "runner_up_drive,margin,content_gaps_json) VALUES(?,?,?,?,?,?,?,?,?)",
+            (
+                receipt.created_at.isoformat(),
+                receipt.frame,
+                receipt.problem,
+                receipt.experience_id,
+                receipt.drive,
+                json.dumps(receipt.scores),
+                receipt.runner_up_drive,
+                receipt.margin,
+                json.dumps(receipt.content_gaps),
+            ),
+        )
+        self._db.commit()
 
     def queue_len(self) -> int:
         return self._db.execute("SELECT COUNT(*) AS n FROM queue").fetchone()["n"]

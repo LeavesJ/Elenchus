@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — P2 Task 5 — selection_log table + log_selection; queue carries experience_id (guarded migration); 149/3.
+
 ## 2026-06-24 — P2 Task 4 — select_open_ended runs the exact experience_id (legacy coverage fallback for the seed); 147/3.
 
 ## 2026-06-24 — P2 Task 3 — policy.select_next value function (drives, argmax + constituent-count tie-break, content-gap predicate, receipt); 146/3.

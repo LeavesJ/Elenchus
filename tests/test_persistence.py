@@ -218,3 +218,46 @@ def test_trap_gallery_round_trips_and_is_idempotent(tmp_path):
     assert {o.experience_id for o in occ} == {"exp1", "exp2"}
     assert {o.detail for o in occ} == {"unchanged", "regressed"}
     assert {o.occurred_at for o in occ} == {t0}
+
+
+def test_queue_round_trips_experience_id(tmp_path):
+    from retnovation.persistence import Store
+    from retnovation.types import NextExperienceSpec, Regime
+
+    s = Store(tmp_path / "q.db")
+    s.queue_push(
+        NextExperienceSpec(
+            target_frames=["f"],
+            ledger_ref="veldra:x",
+            regime=Regime.open_ended,
+            experience_id="license_continuity",
+        )
+    )
+    assert s.queue_pop().experience_id == "license_continuity"
+
+
+def test_log_selection_round_trips(tmp_path):
+    from datetime import datetime, timezone
+    from retnovation.persistence import Store
+    from retnovation.types import SelectionReceipt
+
+    s = Store(tmp_path / "log.db")
+    s.log_selection(
+        SelectionReceipt(
+            frame="lead",
+            problem="veldra:x",
+            experience_id="license_continuity",
+            drive="deploy",
+            scores={"V": 1.5},
+            runner_up_drive="diagnose",
+            margin=0.5,
+            content_gaps=["g"],
+            created_at=datetime(2026, 6, 24, tzinfo=timezone.utc),
+        )
+    )
+    rows = list(s._db.execute("SELECT frame, experience_id, drive FROM selection_log"))
+    assert (
+        rows[0]["frame"] == "lead"
+        and rows[0]["experience_id"] == "license_continuity"
+        and rows[0]["drive"] == "deploy"
+    )
