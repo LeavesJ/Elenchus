@@ -1,5 +1,24 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — Live re-dogfood (full pipeline) + Project 2 scoping
+- **Live re-dogfood** of the escrow license_continuity scene through the real Opus instructor + the full
+  new pipeline (resumable checkpointed stepper /tmp/dogfood/step.py, since background processes don't
+  survive turn boundaries). Result: all 3 frames present_reasoned at intake → OLD code converges silent
+  (0 pushes); NEW code force-stressed commit_under_the_deadline for exactly ONE stress probe (stress-mode
+  push probed the reversal tripwire), student closed it, blind sharper-grader confirmed; converged with a
+  non-empty trajectory. Substrate recorded: lead/protect forming (reasoned_unprompted, 1 problem),
+  commit forming (closed-under-pressure); `reasoned_unprompted=[lead,protect]` EXCLUDES the probed commit
+  (the final-review fix, live); none `strong` (single problem); storage-keyed due +7d; trap_gallery empty;
+  state persisted (frames 0→3). One cosmetic finding: commit's last_evidence reads "unmoved" (no delta
+  because present_reasoned at intake) though it was closed-under-pressure — label-only, strength correct.
+- **Project 2 scoped (value-function policy), §16 added to the spec.** Decided (scoping pass): P2 = the
+  value function in scheduler (4 drives: uncertainty/retention_due/transfer_opportunity − cold-start
+  max-constituent-uncertainty penalty; weights wU/wR/wT/wL in progression.yaml, defaults 1/1/1.5/0.5) +
+  selector honoring (frame,problem) + progression.yaml (moves _INTERVAL_DAYS) + a selection_log (decision
+  + logged receipt, the validation surface). Orchestration stays queue-based; the interactive
+  propose/accept/redirect surface + core promote/demote stay Project 3. Cold-start edge → content gap (no
+  scorer escape hatch). **Status: P2 scope pinned (§16), awaiting user validation before the P2 plan.**
+
 ## 2026-06-24 — final-review fix: exclude stress-probed frames from reasoned_unprompted (`and code not in probed`); 137/3.
 
 ## 2026-06-24 — P1 Task 5 — persist trap_gallery (delete+reinsert, idempotent); 135/3. Project 1 substrate complete.

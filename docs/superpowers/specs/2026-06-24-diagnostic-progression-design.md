@@ -1,7 +1,7 @@
 # Diagnostic Progression — Locating the Learner, Not Ramping Difficulty
 
 Date: 2026-06-24
-Status: design — rev. 3 (mid-implementation correction: the unprompted signal); see §15
+Status: design — rev. 3 (§15); Project 1 built+merged; §16 pins Project 2 (value-function policy) plan-ready
 Origin: the second open thread from the commitment-frame work (memory `retnovation-commitment-frame-gap`)
 and the "escrow scene is a max-difficulty cold-start capstone" note. The user's reframe: progression
 must **serve a purpose so the system actually understands where the learner is** — a diagnostic
@@ -373,3 +373,60 @@ This widens Project 1 minimally into the assessment layer — the §2 boundary i
 Considered and rejected: redefining `strong` as cross-problem closed-under-pressure (reachable without
 the signal, but drops the "unprompted" doctrine); deferring `strong` to a later project (leaves the
 headline fake in Project 1).
+
+## 16. Project 2 scope detail (plan-ready) — the value-function policy
+
+Project 1 (the substrate) is built and merged. This section pins the open details of **Project 2** (the
+policy, spec §7/§10.2) to plan-ready, decided in a scoping pass. **Scope:** the value function in
+`scheduler` + the selector honoring `(frame, problem)` + `content/cadence/progression.yaml` + a
+`selection_log` (decision **and** a logged receipt). The interactive propose/accept/redirect surface,
+the user-facing receipt, and core promote/demote remain **Project 3** — orchestration stays queue-based
+in P2.
+
+**Candidates + content-graph read.** `schedule_next`'s `open_ended` branch is rewritten; its signature
+gains the corpus so it loads the gated open_ended library. Candidates = every `(frame f, problem p)`
+where `p = e.ledger_ref` for an open_ended experience `e` and `f ∈ e.rubric.frames`. The `cs_technical`
+branch (SM2-lite) is untouched.
+
+**Drive formulas** (reuse the built `state.frame_uncertainty`):
+- `uncertainty(f)` = `frame_uncertainty(...)` for `f` in state; **`1.0` for a never-seen frame** (cold start).
+- `retention_due(f)` = `clamp((staleness − interval)/interval, 0, 1)` on the storage-keyed clock (§6) —
+  `0` until due, rising after; `0` for weak/unseen frames.
+- `transfer_opportunity(f, p)` = `1.0` iff `f` is `forming` **and** `p ∉ breadth(f)`; else `0`.
+- cold-start penalty = `max(uncertainty(g) for g ∈ frames(e))` (integration readiness).
+
+**Score:** `V(f,p) = wU·uncertainty(f) + wR·retention_due(f) + wT·transfer_opportunity(f,p) −
+wL·max_constituent_uncertainty(e)`. `argmax`, deterministic tie-break by `(frame_id, problem)`.
+**Default weights** (`progression.yaml`, dogfood-tunable): `wU=1.0, wR=1.0, wT=1.5, wL=0.5` — `wT>wU`
+(deploy a forming frame beats diagnosing a fresh one); `wL<wU` (cold-start, all uncertainty ≈ 1, still
+scores positive and serves *something*; the penalty is uniform there so the order is the tie-break /
+authoring order — the §12 named dependency).
+
+**Cold-start edge → content gap (no escape hatch).** If a frame is uncertain but every experience
+containing it is dominated by the penalty (its only home is a high-load capstone with other unlocated
+frames), it is logged as a content gap ("`frame X` has no isolated experience to locate it") and the
+policy serves the best available candidate — same mechanism as transfer-blocked. No exclude-from-max /
+floor-`wU` special case (§7, §14.3).
+
+**Selector honors `(frame, problem)`.** `generator.select_open_ended` selects the experience whose
+`ledger_ref == spec.ledger_ref` and covers the target frame (not just frame-coverage ranking) — so
+transfer aims a frame at the intended problem.
+
+**Config.** New `content/cadence/progression.yaml` holds `wU/wR/wT/wL` + the staleness/uncertainty
+thresholds; the `_INTERVAL_DAYS` constant Project 1 parked in `state.py` moves here, loaded via a new
+`content_loader.load_progression()` (doctrine-as-data, L-1).
+
+**`selection_log` (pulled into P2).** A new table (timestamp, chosen frame/problem, drive, per-term
+scores, runner-up drive + margin, content-gaps) — written on every `schedule_next`. This is the
+validation surface: the policy's reasoning is inspectable over a series without the P3 UI.
+
+**Removing the shim.** The placeholder `weak>forming>strong` open_ended branch is replaced;
+`test_scheduler.py`'s open_ended assertions are rewritten to the value-function behavior. `cs_technical`
+and its tests are byte-stable.
+
+**Testing (TDD):** each drive isolated; cold-start serves something (order = tie-break, penalty uniform);
+transfer fires only on forming + new-problem; retention only when overdue on the storage clock; the
+max-constituent penalty defers a high-uncertainty-constituent experience and releases it once located;
+content-gap logged for an unlocatable / transfer-blocked frame; deterministic argmax tie-break; the
+selector picks the `(frame, problem)` experience; `progression.yaml` loads; the `selection_log`
+decomposition is correct; cs path byte-stable.
