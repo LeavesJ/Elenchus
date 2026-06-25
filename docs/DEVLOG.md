@@ -1,5 +1,31 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — Project 3 (interactive surface) BUILT — subagent-driven, 8 tasks + final review
+- Diagnostic-progression **Project 3 complete** on branch `diagnostic-progression-surface`
+  (b45b44d..0c26f32, 9 commits). Suite **168 passed / 3 skipped**, ruff clean, confidential gate empty,
+  no Co-Authored-By. Executed subagent-driven (fresh implementer + independent reviewer per task; OPUS
+  reviewers on T4/T6/T8 + final; haiku implementers on the transcription tasks T1/T2/T5).
+- What shipped: P3 makes the engine interactive. `run_session` now takes an explicit `regime` and, on the
+  open_ended path, **proposes from live state at session start** (the queue stops being the authority),
+  surfaces a **problem-level** decide menu (the §17.1 gating fix — the learner never sees a frame/drive, so
+  the unprompted signal stays uncontaminated; the no-frame guarantee is *structural* — only `ledger_ref` is
+  rendered), logs the decision to `selection_log` (now with proposed-vs-chosen columns; open_ended-only —
+  cs never logs), and runs an **advisory promote/demote** pass (`crystallization.py`) keyed to the
+  exogenous `Experience.ledger_ref ∩ active-ledger` signal (NOT the dead `links_to_experiences`, NOT
+  endogenous `breadth`), mutating nothing. `select_next` returns the full ranking with a cross-drive
+  runner-up receipt; pure `surface.py` formatters; `propose_open_ended`/`schedule_cs` replace
+  `schedule_next`; cs stays queue-driven + byte-stable. Guarded migrations (L-8). The atomic L-10 seam swap
+  (T8) landed green in one commit.
+- Process: per-task adversarial reviews caught nothing Critical/Important across the build. The final
+  whole-branch OPUS review (verified each commit independently green via detached worktrees) returned
+  **READY TO MERGE: YES** with one worthwhile minor — a latent KeyError in the promote rationale reachable
+  only if `theta_ledger_refs` were tuned to 0 — fixed in 0c26f32 (TDD: RED KeyError → GREEN). The two prior
+  adversarial reviews (spec §17, then the plan) had already caught the real design/plan bugs before code
+  (the frame-naming leak; the cold-start-picks-decision_under_stakes test-fixture trap; the dead
+  `links_to_experiences` predicate). The diagnostic-progression engine is now real through all three
+  projects. NEXT: merge to main (user's call on push); the real unlock remains authored content (isolated
+  diagnostic experiences + the case library); UI/UX is its own future thread.
+
 ## 2026-06-25 — Project 3 implementation plan written (8 TDD tasks) + adversarial review
 - `docs/superpowers/plans/2026-06-25-diagnostic-progression-p3-interactive-surface.md` — 8 tasks ordered so
   Tasks 1–7 are additive (suite green at each commit) and Task 8 is the single atomic L-10 seam swap
