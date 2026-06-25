@@ -1,7 +1,7 @@
 # Diagnostic Progression — Locating the Learner, Not Ramping Difficulty
 
 Date: 2026-06-24
-Status: design — rev. 2 (post external review, round 2); awaiting user approval before plans
+Status: design — rev. 3 (mid-implementation correction: the unprompted signal); see §15
 Origin: the second open thread from the commitment-frame work (memory `retnovation-commitment-frame-gap`)
 and the "escrow scene is a max-difficulty cold-start capstone" note. The user's reframe: progression
 must **serve a purpose so the system actually understands where the learner is** — a diagnostic
@@ -32,9 +32,14 @@ constituent frame is located) rather than being a difficulty ramp.
 
 - **No easy→hard difficulty ladder.** "Scope" enters only as integration-readiness at cold start (an
   experience is deferred while any of its frames is still unlocated), never a global difficulty ordering.
-- **No change to the assessment layer.** The judgment loop (and the just-shipped commitment-frame /
-  stress-probe work) is the *evidence source*; it stays byte-stable. This design is about what the
-  system does with the evidence and what it serves next.
+- **Assessment layer: one additive change only (rev. 3).** The judgment loop's *behavior* — its pushes,
+  stops, classifications — stays byte-stable. The single addition: `assess()` emits an additive
+  `reasoned_unprompted: list[str]` on the `Assessment` (frames that were `present_reasoned` at intake and
+  still held at the end). This is the **only** place the unprompted-success signal exists, and `strong`
+  is unreachable without it — the loop never produces a `present_reasoned` delta that isn't also
+  closed-under-pressure (it co-populates them), and intake-reasoned frames produce no delta at all.
+  Nothing existing reads the new field; the loop's pushing is unchanged. Beyond this additive signal, the
+  assessment layer is untouched.
 - **No change to the `cs_technical` regime's scheduling.** It is checkable (correctness-scored); its
   retrieval-strength spaced repetition already answers "where are you." The value function is the
   founder/process (`open_ended`) path only. cs inherits the persisted-state plumbing, nothing more.
@@ -147,10 +152,14 @@ load state (derive strength/uncertainty from storage + now) ─▶ policy propos
 - **uncertainty(now)** ∈ [0,1] — monotone-high when `evidence_count` is low, `breadth < 2`, or the frame
   is stale. The diagnostic signal.
 
-**Estimator** (`update_state`), anchored to the experience's ledger problem `p`: unprompted
-`present_reasoned` → `evidence_count += 1`, `breadth ∪= {p}`, `last_seen = now`; closed-under-pressure →
-`breadth ∪= {p}` at forming-grade, `last_seen = now`; failure/unmoved → neither, `last_seen = now`. The
-estimator only ever *writes storage*; strength and uncertainty are computed, never written.
+**Estimator** (`update_state`), anchored to the experience's ledger problem `p`. A frame is *engaged*
+this session if it is closed-under-pressure (`frames_closed_under_pressure`) OR reasoned unprompted
+(`assessment.reasoned_unprompted`, rev. 3). For an engaged frame → `evidence_count += 1`, `breadth ∪= {p}`,
+`last_seen = now`; **only** an unprompted-engaged frame also gets `unprompted_breadth ∪= {p}` (the
+strong-grade signal). Failure/unmoved → neither, `last_seen = now`. The estimator only ever *writes
+storage*; strength and uncertainty are computed, never written. (The earlier "not in
+`frames_closed_under_pressure`" heuristic for unprompted is dropped — the loop never produces that state;
+the real signal is `reasoned_unprompted`.)
 
 This is the Berkeley §5 mapping made structural: storage strength persists and is never lost; retrieval
 strength is the derived bucket that falls with disuse and returns on re-exposure.
@@ -335,3 +344,23 @@ This spec captures the whole architecture; **writing-plans produces the Project 
    to locate this frame" — the same mechanism as transfer-blocked, routing the fix to authored content,
    instead of an exclude-from-max / floor-`wU` escape hatch in the policy. Once the capstone's other frames
    are located, the penalty releases and it serves the frame as the integration test, no special case.
+
+## 15. Revision 3 — the unprompted signal (mid-implementation correction)
+
+Surfaced during Project 1 execution (a reviewer flagged an internally-inconsistent test fixture; tracing
+it found the root): **`strong` was unreachable in production.** The estimator inferred "unprompted" as a
+`present_reasoned` frame *not* in `frames_closed_under_pressure`, but the judgment loop **co-populates**
+the `present_reasoned` delta and `frames_closed_under_pressure` together ([judgment_loop.py:135]), and a
+frame reasoned unprompted *at intake* produces no delta and no trajectory entry — and the `Assessment`
+never carried the intake classification. So `unprompted_breadth` could only be populated by a synthetic
+`Assessment` the loop never emits; the green test was papering over a dead path (the L-8 vacuous-pass
+trap, and the pre-existing code even documented the unreachability).
+
+**Fix (user-approved option A):** add an additive `reasoned_unprompted: list[str]` to `Assessment`,
+populated by `assess()` = `[code for code, s0 in intake.frame_states.items() if s0 is present_reasoned and
+final frame_states[code] is present_reasoned]`. The estimator reads it (§6). Doctrine-faithful ("applied
+unprompted is strong"), additive (the loop's pushes/stops/classifications are byte-stable; nothing
+existing reads the field). This widens Project 1 minimally into the assessment layer — the §2 boundary is
+amended accordingly. Considered and rejected: redefining `strong` as cross-problem closed-under-pressure
+(reachable without the signal, but drops the "unprompted" doctrine); deferring `strong` to a later
+project (leaves the headline fake in Project 1).

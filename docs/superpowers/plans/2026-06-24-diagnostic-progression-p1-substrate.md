@@ -435,6 +435,134 @@ Expected suite: 131 passed, 3 skipped.
 
 ---
 
+### Task 3b: the unprompted signal (rev. 3 correction)
+
+**Why:** Task 3's estimator inferred "unprompted" as `present_reasoned` NOT in `frames_closed_under_pressure`, but the judgment loop co-populates those (a `present_reasoned` delta is always closed-under-pressure), and intake-reasoned frames produce no delta — so `strong` was unreachable in production and the synthetic test hid it. Fix (spec §15, user-approved): `assess()` emits an additive `reasoned_unprompted` list; the estimator reads it.
+
+**Files:**
+- Modify: `src/retnovation/types.py` (`Assessment` — add `reasoned_unprompted`)
+- Modify: `src/retnovation/assessment/judgment_loop.py:161-167` (the `Assessment(...)` construction in `assess`)
+- Modify: `src/retnovation/state.py` (`update_state` — read the signal)
+- Test: `tests/test_judgment_loop.py` (append), `tests/test_state.py` (revise the `_unprompted` helper)
+
+**Interfaces:**
+- Produces: `Assessment.reasoned_unprompted: list[str]` (default `[]`); `assess()` populates it with frames `present_reasoned` at intake that held to the end. `update_state` treats `engaged = frames_closed_under_pressure | reasoned_unprompted`; only `reasoned_unprompted` frames earn `unprompted_breadth`.
+
+- [ ] **Step 1: Write the failing tests.**
+
+In `tests/test_judgment_loop.py`, append (uses the file's existing `_exp`, `_work`, `FakeModel`, `IntakeClassification`, `FrameState`, etc.):
+
+```python
+def test_assess_reports_reasoned_unprompted_for_held_intake_frames():
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.present_reasoned,  # reasoned unprompted, never pushed
+            "protect_the_core_lane": FrameState.present_reasoned,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+        },
+    )
+    a = judgment_loop.assess(_exp(), _work(), FakeModel(intake, {}))
+    assert a.stop_reason is StopReason.converged
+    assert set(a.reasoned_unprompted) == {"lead_with_what_you_refuse_to_do", "protect_the_core_lane"}
+```
+
+In `tests/test_state.py`, revise the `_unprompted(code)` helper inside `test_strong_reachable_across_two_problems` to the realistic shape (no contradictory push):
+
+```python
+    def _unprompted(code):
+        return Assessment(
+            trajectory=[],
+            frame_deltas=[],
+            frames_closed_under_pressure=[],
+            hard_wrong_flags=[],
+            stop_reason=StopReason.converged,
+            reasoned_unprompted=[code],
+        )
+```
+
+- [ ] **Step 2: Run RED.**
+Run: `PYTHONPATH=src .venv/bin/pytest tests/test_judgment_loop.py::test_assess_reports_reasoned_unprompted_for_held_intake_frames tests/test_state.py::test_strong_reachable_across_two_problems -q`
+Expected: FAIL — `Assessment` rejects `reasoned_unprompted` (unknown field) / `assess` doesn't populate it.
+
+- [ ] **Step 3: Add the field** — in `src/retnovation/types.py`, add to `Assessment` (after `sharper_audit`):
+```python
+    reasoned_unprompted: list[str] = Field(default_factory=list)
+```
+
+- [ ] **Step 4: Populate in `assess`** — in `src/retnovation/assessment/judgment_loop.py`, before the `Assessment(...)` construction, compute (the loop's local `frame_states` holds the final states; `intake` is in scope):
+```python
+    reasoned_unprompted = [
+        code
+        for code, s0 in intake.frame_states.items()
+        if s0 is FrameState.present_reasoned and frame_states.get(code) is FrameState.present_reasoned
+    ]
+```
+and add `reasoned_unprompted=reasoned_unprompted,` to the `Assessment(...)` kwargs. (`FrameState` is already imported in this file.)
+
+- [ ] **Step 5: Read the signal in `update_state`** — in `src/retnovation/state.py`, replace the `update_state` body's engagement logic so it reads the signal:
+```python
+def update_state(
+    state: LearnerState, assessment: Assessment, now: datetime, experience_id: str, ledger_ref: str
+) -> LearnerState:
+    closed = set(assessment.frames_closed_under_pressure)
+    unprompted = set(assessment.reasoned_unprompted)
+    engaged = closed | unprompted
+    final_state: dict[str, FrameState] = {d.code: d.after for d in assessment.frame_deltas}
+    seen_frame_targets = {p.target_code for p in assessment.trajectory if p.kind == "frame"}
+
+    for code in seen_frame_targets | set(final_state) | unprompted:
+        prev = state.frames.get(code)
+        evidence_count = prev.evidence_count if prev else 0
+        breadth = set(prev.breadth) if prev else set()
+        unprompted_breadth = set(prev.unprompted_breadth) if prev else set()
+        if code in engaged:
+            evidence_count += 1
+            breadth.add(ledger_ref)
+            if code in unprompted:
+                unprompted_breadth.add(ledger_ref)
+        if code in unprompted:
+            evidence = "reasoned_unprompted"
+        else:
+            fstate = final_state.get(code)
+            evidence = fstate.value if fstate is not None else "unmoved"
+        state.frames[code] = FrameStrength(
+            strength=derive_strength(evidence_count, unprompted_breadth, now, now),
+            last_seen=now,
+            due=derive_due(evidence_count, unprompted_breadth, now),
+            last_evidence=f"{experience_id}:{evidence}",
+            evidence_count=evidence_count,
+            breadth=breadth,
+            unprompted_breadth=unprompted_breadth,
+        )
+
+    for p in assessment.trajectory:
+        if p.kind == "trap" and p.response_classification != "closed":
+            state.trap_gallery.setdefault(p.target_code, []).append(
+                TrapOccurrence(
+                    experience_id=experience_id, occurred_at=now, detail=p.response_classification
+                )
+            )
+    return state
+```
+Shim check: closed-under-pressure (in `closed`, not `unprompted`) → engaged, evidence+1, no unprompted_breadth → `forming`; failure (in neither) → not engaged → `weak`. Both preserved.
+
+- [ ] **Step 6: Run GREEN + full suite.**
+Run: `PYTHONPATH=src .venv/bin/pytest -q`
+Expected: PASS — the two new/revised tests plus the whole suite (the `Field` import is already in types.py; `Assessment`/`FrameState` already imported in state.py).
+
+- [ ] **Step 7: Gate + commit.**
+```bash
+.venv/bin/ruff format . && .venv/bin/ruff check . && PYTHONPATH=src .venv/bin/pytest -q
+# DEVLOG: "P1 Task 3b — reasoned_unprompted signal from assess(); estimator reads it; strong reachable in production (rev.3)."
+git add src/retnovation/types.py src/retnovation/assessment/judgment_loop.py src/retnovation/state.py tests/test_judgment_loop.py tests/test_state.py docs/DEVLOG.md
+git commit -m "feat(assessment): reasoned_unprompted signal so strong is reachable in production"
+```
+
+---
+
 ### Task 4: persistence — derive on load, migrate, delete `decay_frame`
 
 **Files:**

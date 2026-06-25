@@ -1,5 +1,14 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — Diagnostic-progression spec rev. 3: the unprompted signal (mid-impl correction)
+- PT3 review surfaced (via a fixture-inconsistency thread, traced to root) that `strong` was UNREACHABLE
+  in production: the estimator inferred unprompted from "present_reasoned NOT in frames_closed_under_pressure",
+  but the judgment loop co-populates those, and intake-reasoned frames produce no delta — so unprompted_breadth
+  could only be populated by a synthetic Assessment the loop never emits (the synthetic test hid it). User chose
+  option A (doctrine-faithful): add an additive `reasoned_unprompted` list to Assessment, populated by assess()
+  (frames present_reasoned at intake that held), estimator reads it. Spec → rev. 3 (§2 boundary amended, §6
+  estimator, §15 added); plan gains Task 3b. Assessment-layer change is additive; loop behavior byte-stable.
+
 ## 2026-06-24 — P1 Task 3: estimator writes storage anchored to ledger_ref
 - P1 Task 3 — estimator writes evidence/breadth anchored to the problem; strong reachable across 2 problems; 131/3.
 
