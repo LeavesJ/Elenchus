@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — P2 Task 6 — schedule_next dispatches open_ended to the value function (returns (spec, receipt)); run_session logs the receipt + queues the spec; cs byte-stable; placeholder removed; suite green. Project 2 policy complete. 149/3.
+
 ## 2026-06-24 — P2 Task 5 — selection_log table + log_selection; queue carries experience_id (guarded migration); 149/3.
 
 ## 2026-06-24 — P2 Task 4 — select_open_ended runs the exact experience_id (legacy coverage fallback for the seed); 147/3.

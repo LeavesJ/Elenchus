@@ -40,5 +40,8 @@ def run_session(
     assessment = get_assessor(exp.regime)(exp, work, model)
     state = STATE_UPDATERS[exp.regime](state, assessment, now, exp.experience_id, exp.ledger_ref)
     store.save_state(state)
-    store.queue_push(schedule_next(state, ledger, now, exp.regime))
+    next_spec, receipt = schedule_next(state, ledger, now, exp.regime)
+    if receipt is not None:
+        store.log_selection(receipt)
+    store.queue_push(next_spec)
     return state, assessment

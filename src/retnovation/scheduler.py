@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from .types import LearnerState, LedgerEntry, NextExperienceSpec, Regime, Strength
+from .content_loader import load_library, load_progression
+from .policy import select_next
+from .types import LearnerState, LedgerEntry, NextExperienceSpec, Regime, SelectionReceipt
 
 
 def schedule_next(
@@ -10,10 +12,11 @@ def schedule_next(
     ledger: list[LedgerEntry],
     now: datetime,
     regime: Regime = Regime.open_ended,
-) -> NextExperienceSpec:
-    ledger_ref = ledger[0].id if ledger else ""
-
+    *,
+    root=None,
+) -> tuple[NextExperienceSpec, SelectionReceipt | None]:
     if regime is Regime.cs_technical:
+        ledger_ref = ledger[0].id if ledger else ""
         items = state.declarative_seed
         due = sorted(
             (c for c, si in items.items() if si.due <= now), key=lambda c: (items[c].due, c)
@@ -24,15 +27,7 @@ def schedule_next(
             targets = [min(items.items(), key=lambda kv: (kv[1].due, kv[0]))[0]]
         else:
             targets = []
-        return NextExperienceSpec(target_frames=targets, ledger_ref=ledger_ref, regime=regime)
+        return NextExperienceSpec(target_frames=targets, ledger_ref=ledger_ref, regime=regime), None
 
-    weak = [c for c, fs in state.frames.items() if fs.strength is Strength.weak]
-    forming = [c for c, fs in state.frames.items() if fs.strength is Strength.forming]
-    if weak:
-        targets = sorted(weak)
-    elif forming:
-        targets = sorted(forming)
-    else:
-        strong = sorted(state.frames.items(), key=lambda kv: kv[1].due)
-        targets = [strong[0][0]] if strong else []
-    return NextExperienceSpec(target_frames=targets, ledger_ref=ledger_ref, regime=regime)
+    experiences = [e for e in load_library(root) if e.regime is Regime.open_ended]
+    return select_next(state, experiences, load_progression(root), now)

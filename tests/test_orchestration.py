@@ -96,3 +96,53 @@ def test_run_session_closes_one_cycle(tmp_path):
     assert state.frames  # state moved
     assert store.queue_pop() is not None  # a fresh next was queued
     assert any("license_continuity" in fs.last_evidence for fs in state.frames.values())
+
+
+def test_run_session_logs_selection_receipt(tmp_path):
+    store = Store(tmp_path / "t2.db")
+    store.add_ledger_entry(LedgerEntry(id="veldra:license_fork_risk", owned_problem="..."))
+    store.upsert_corpus(
+        CorpusEntry(
+            ledger_ref="veldra:license_fork_risk",
+            domain="founder_ceo",
+            why_owned="stakes",
+            unlabeled="unlabeled",
+            provenance="synthetic-test",
+            corpus_pointers=[],
+        )
+    )
+    store.upsert_corpus(
+        CorpusEntry(
+            ledger_ref="veldra:concentrated_market_pricing_power",
+            domain="founder_ceo",
+            why_owned="stakes",
+            unlabeled="unlabeled",
+            provenance="synthetic-test",
+            corpus_pointers=[],
+        )
+    )
+    store.upsert_corpus(
+        CorpusEntry(
+            ledger_ref="veldra:first_customer_proof_loop",
+            domain="founder_ceo",
+            why_owned="stakes",
+            unlabeled="unlabeled",
+            provenance="synthetic-test",
+            corpus_pointers=[],
+        )
+    )
+    store.queue_push(
+        NextExperienceSpec(
+            target_frames=["protect_the_core_lane"],
+            ledger_ref="veldra:license_fork_risk",
+            regime=Regime.open_ended,
+        )
+    )
+    core = derive_core(aim())
+
+    def fixture(exp):
+        return Work(opening="my reasoning", respond=lambda push: "reply")  # noqa: E731
+
+    run_session(store, core, _fake_model(), _now(), present=fixture)
+    rows = list(store._db.execute("SELECT * FROM selection_log"))
+    assert len(rows) == 1
