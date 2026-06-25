@@ -37,7 +37,7 @@ def test_closed_under_pressure_becomes_forming():
         ],
         closed=["protect_the_core_lane"],
     )
-    st = update_state(LearnerState(), a, _now(), "exp1")
+    st = update_state(LearnerState(), a, _now(), "exp1", "veldra:p1")
     assert st.frames["protect_the_core_lane"].strength is Strength.forming
 
 
@@ -52,7 +52,7 @@ def test_unmoved_absent_frame_becomes_weak():
             response_classification="unchanged",
         )
     )
-    st = update_state(LearnerState(), a, _now(), "exp1")
+    st = update_state(LearnerState(), a, _now(), "exp1", "veldra:p1")
     assert st.frames["lead_with_what_you_refuse_to_do"].strength is Strength.weak
 
 
@@ -66,7 +66,7 @@ def test_tripped_trap_recorded_in_gallery():
             response_classification="unchanged",
         )
     )
-    st = update_state(LearnerState(), a, _now(), "exp1")
+    st = update_state(LearnerState(), a, _now(), "exp1", "veldra:p1")
     assert "erode_core_for_one_customer" in st.trap_gallery
     assert st.trap_gallery["erode_core_for_one_customer"][0].experience_id == "exp1"
 
@@ -91,15 +91,15 @@ def test_checkable_recall_grows_interval_miss_resets():
     sp = {"initial_interval_days": 1, "ease_factor": 2.0, "min_interval_days": 1}
     st = LearnerState()
     st = update_state_checkable(
-        st, _casmt([("safety_vs_liveness", True)]), _now(), "cs", spacing=sp
+        st, _casmt([("safety_vs_liveness", True)]), _now(), "cs", "veldra:p1", spacing=sp
     )
     assert st.declarative_seed["safety_vs_liveness"].interval_days == 1  # initial
     st = update_state_checkable(
-        st, _casmt([("safety_vs_liveness", True)]), _now(), "cs", spacing=sp
+        st, _casmt([("safety_vs_liveness", True)]), _now(), "cs", "veldra:p1", spacing=sp
     )
     assert st.declarative_seed["safety_vs_liveness"].interval_days == 2  # grew by ease
     st = update_state_checkable(
-        st, _casmt([("safety_vs_liveness", False)]), _now(), "cs", spacing=sp
+        st, _casmt([("safety_vs_liveness", False)]), _now(), "cs", "veldra:p1", spacing=sp
     )
     assert st.declarative_seed["safety_vs_liveness"].interval_days == 1  # reset, not deleted
     assert "safety_vs_liveness" in st.declarative_seed
@@ -111,7 +111,7 @@ def test_checkable_concept_recalled_only_if_all_questions_correct():
 
     sp = {"initial_interval_days": 1, "ease_factor": 2.0, "min_interval_days": 1}
     a = _casmt([("c", True), ("c", False)])  # same concept, one miss
-    st = update_state_checkable(LearnerState(), a, _now(), "cs", spacing=sp)
+    st = update_state_checkable(LearnerState(), a, _now(), "cs", "veldra:p1", spacing=sp)
     assert st.declarative_seed["c"].interval_days == 1  # treated as missed
 
 
@@ -191,3 +191,86 @@ def test_frame_uncertainty_monotone():
     )
     u = frame_uncertainty(1, {"a"}, set(), t0, t0)
     assert 0.0 <= u <= 1.0
+
+
+def test_strong_reachable_across_two_problems():
+    from datetime import datetime, timezone
+    from retnovation.model import IntakeClassification, ResponseClassification  # noqa: F401
+    from retnovation.state import update_state
+    from retnovation.types import (
+        Assessment,
+        FrameDelta,
+        FrameState,
+        LearnerState,
+        Push,
+        StopReason,
+        Strength,
+    )
+
+    now = datetime(2026, 6, 24, tzinfo=timezone.utc)
+
+    def _unprompted(code):
+        # an unprompted present_reasoned: a delta to present_reasoned, NOT in frames_closed_under_pressure
+        return Assessment(
+            trajectory=[
+                Push(
+                    target_code=code,
+                    kind="frame",
+                    text="t",
+                    response_classification="closed",
+                    response="r",
+                )
+            ],
+            frame_deltas=[
+                FrameDelta(code=code, before=FrameState.absent, after=FrameState.present_reasoned)
+            ],
+            frames_closed_under_pressure=[],
+            hard_wrong_flags=[],
+            stop_reason=StopReason.converged,
+        )
+
+    st = LearnerState()
+    st = update_state(st, _unprompted("f"), now, "exp1", "veldra:p1")
+    assert st.frames["f"].strength is Strength.forming  # one problem only
+    st = update_state(st, _unprompted("f"), now, "exp2", "veldra:p2")
+    assert st.frames["f"].unprompted_breadth == {"veldra:p1", "veldra:p2"}
+    assert st.frames["f"].strength is Strength.strong  # two distinct problems, unprompted
+
+
+def test_closed_under_pressure_is_forming_not_strong():
+    from datetime import datetime, timezone
+    from retnovation.state import update_state
+    from retnovation.types import (
+        Assessment,
+        FrameDelta,
+        FrameState,
+        LearnerState,
+        Push,
+        StopReason,
+        Strength,
+    )
+
+    now = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    a = Assessment(
+        trajectory=[
+            Push(
+                target_code="f",
+                kind="frame",
+                text="t",
+                response_classification="closed",
+                response="r",
+            )
+        ],
+        frame_deltas=[
+            FrameDelta(code="f", before=FrameState.absent, after=FrameState.present_reasoned)
+        ],
+        frames_closed_under_pressure=["f"],  # needed the push
+        hard_wrong_flags=[],
+        stop_reason=StopReason.converged,
+    )
+    st = update_state(LearnerState(), a, now, "exp1", "veldra:p1")
+    assert st.frames["f"].strength is Strength.forming
+    assert st.frames["f"].breadth == {"veldra:p1"}
+    assert (
+        st.frames["f"].unprompted_breadth == set()
+    )  # closed-under-pressure does NOT earn strong-grade

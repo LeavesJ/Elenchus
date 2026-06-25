@@ -83,5 +83,7 @@ def test_grader_dispute_demotes_reverts_then_state_is_weak():
     assert audited.frame_deltas == []  # delta reverted
     assert audited.sharper_audit[0].confirmed is False
     # and update_state then scores it weak — guards the strong-misclassification trap
-    st = update_state(LearnerState(), audited, datetime(2026, 6, 23, tzinfo=timezone.utc), "x")
+    st = update_state(
+        LearnerState(), audited, datetime(2026, 6, 23, tzinfo=timezone.utc), "x", "veldra:p"
+    )
     assert st.frames["protect_the_core_lane"].strength is Strength.weak

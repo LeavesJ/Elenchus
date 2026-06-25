@@ -38,7 +38,7 @@ def run_session(
     exp = select_experience(core, state, ledger, corpus, spec)
     work = present(exp)
     assessment = get_assessor(exp.regime)(exp, work, model)
-    state = STATE_UPDATERS[exp.regime](state, assessment, now, exp.experience_id)
+    state = STATE_UPDATERS[exp.regime](state, assessment, now, exp.experience_id, exp.ledger_ref)
     store.save_state(state)
     store.queue_push(schedule_next(state, ledger, now, exp.regime))
     return state, assessment

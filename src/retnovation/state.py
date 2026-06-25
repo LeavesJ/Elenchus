@@ -73,33 +73,33 @@ def frame_uncertainty(
 
 
 def update_state(
-    state: LearnerState, assessment: Assessment, now: datetime, experience_id: str
+    state: LearnerState, assessment: Assessment, now: datetime, experience_id: str, ledger_ref: str
 ) -> LearnerState:
     closed = set(assessment.frames_closed_under_pressure)
-
-    # Frame strengths move on rigor/trajectory evidence only (never correctness).
-    final_state: dict[str, FrameState] = {}
-    for d in assessment.frame_deltas:
-        final_state[d.code] = d.after
+    final_state: dict[str, FrameState] = {d.code: d.after for d in assessment.frame_deltas}
 
     seen_frame_targets = {p.target_code for p in assessment.trajectory if p.kind == "frame"}
+
     for code in seen_frame_targets | set(final_state):
-        if code in closed and final_state.get(code) is FrameState.present_reasoned:
-            strength = Strength.forming
-        elif final_state.get(code) is FrameState.present_reasoned:
-            # NOTE: currently unreachable from the judgment loop — the loop co-populates deltas and
-            # frames_closed_under_pressure, so a loop-driven present_reasoned is always "forming".
-            # "strong" is the documented, not-yet-calibrated sharp edge from spec section 7.
-            strength = Strength.strong  # reasoned without needing the closing push
-        else:
-            strength = Strength.weak
+        prev = state.frames.get(code)
+        evidence_count = prev.evidence_count if prev else 0
+        breadth = set(prev.breadth) if prev else set()
+        unprompted_breadth = set(prev.unprompted_breadth) if prev else set()
         fstate = final_state.get(code)
+        if fstate is FrameState.present_reasoned:
+            evidence_count += 1
+            breadth.add(ledger_ref)
+            if code not in closed:
+                unprompted_breadth.add(ledger_ref)  # reasoned WITHOUT a closing push → strong-grade
         evidence = fstate.value if fstate is not None else "unmoved"
         state.frames[code] = FrameStrength(
-            strength=strength,
+            strength=derive_strength(evidence_count, unprompted_breadth, now, now),
             last_seen=now,
-            due=now,
+            due=derive_due(evidence_count, unprompted_breadth, now),
             last_evidence=f"{experience_id}:{evidence}",
+            evidence_count=evidence_count,
+            breadth=breadth,
+            unprompted_breadth=unprompted_breadth,
         )
 
     # Trap gallery: any trap target that was pushed and not repaired is logged.
@@ -118,6 +118,7 @@ def update_state_checkable(
     assessment: CheckableAssessment,
     now: datetime,
     experience_id: str,
+    ledger_ref: str,
     spacing: dict | None = None,
 ) -> LearnerState:
     if spacing is None:
