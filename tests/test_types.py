@@ -297,3 +297,25 @@ def test_decision_frame_naming_a_missing_frame_raises():
             mode=Mode.genuinely_open,
             decision_frame="not_a_frame",
         )
+
+
+def test_frame_strength_storage_fields_default_empty():
+    from datetime import datetime, timezone
+    from retnovation.types import FrameStrength, Strength
+
+    now = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    fs = FrameStrength(strength=Strength.weak, last_seen=now, due=now, last_evidence="")
+    assert fs.evidence_count == 0
+    assert fs.breadth == set()
+    assert fs.unprompted_breadth == set()
+    fs2 = FrameStrength(
+        strength=Strength.strong,
+        last_seen=now,
+        due=now,
+        last_evidence="x",
+        evidence_count=3,
+        breadth={"veldra:a", "veldra:b"},
+        unprompted_breadth={"veldra:a", "veldra:b"},
+    )
+    assert fs2.evidence_count == 3 and fs2.breadth == {"veldra:a", "veldra:b"}
+    assert fs2.unprompted_breadth == {"veldra:a", "veldra:b"}

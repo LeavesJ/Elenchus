@@ -1,5 +1,8 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — P1 Task 1: FrameStrength storage fields
+- P1 Task 1 — FrameStrength storage fields (evidence_count, breadth, unprompted_breadth); 125/3.
+
 ## 2026-06-22 — Repo init
 - Created the **separate** Retnovation git repo at `~/Documents/Retnovation` (Python, src
   layout, branch `main`). The home dir is an inert git repo (0 tracked files, no remote);

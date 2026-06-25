@@ -191,10 +191,17 @@ class Assessment(BaseModel):
 
 
 class FrameStrength(BaseModel):
-    strength: Strength
+    strength: Strength  # DERIVED on read (storage-keyed clock); kept settable for tests/back-compat
     last_seen: datetime
-    due: datetime
+    due: datetime  # DERIVED on read
     last_evidence: str
+    evidence_count: int = 0  # total mechanism-engagements (unprompted OR closed-under-pressure)
+    breadth: set[str] = Field(
+        default_factory=set
+    )  # problems engaged with a mechanism (forming+; transfer uses this)
+    unprompted_breadth: set[str] = Field(
+        default_factory=set
+    )  # subset: problems with an UNPROMPTED present_reasoned (the strong bar)
 
 
 class TrapOccurrence(BaseModel):
