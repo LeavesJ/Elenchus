@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — P2 Task 3 — policy.select_next value function (drives, argmax + constituent-count tie-break, content-gap predicate, receipt); 146/3.
+
 ## 2026-06-24 — P2 Task 2 — progression.yaml + load_progression + state.frame_interval_days; 141/3.
 
 ## 2026-06-24 — P2 Task 1 — NextExperienceSpec.experience_id + SelectionReceipt; 139/3.
