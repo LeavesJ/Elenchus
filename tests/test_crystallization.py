@@ -118,3 +118,32 @@ def test_empty_when_nothing_qualifies():
         core=_core([]), state=LearnerState(), ledger=[], experiences=[], now=NOW, config=CFG
     )
     assert cands == []
+
+
+def test_promote_no_crash_with_theta_zero_and_zero_refs():
+    """theta_ledger_refs=0: a decayed frame with zero active-problem refs passes the guard
+    (0 >= 0) and must not raise KeyError when building the rationale."""
+    st = LearnerState()
+    # forming (interval 7d), last seen 10d ago -> retention_due > 0 (decayed)
+    st.frames["lead"] = FrameStrength(
+        strength=Strength.forming,
+        last_seen=NOW - timedelta(days=10),
+        due=NOW,
+        last_evidence="x",
+        evidence_count=1,
+        breadth=set(),
+        unprompted_breadth=set(),
+    )
+    # No ledger entries, no experiences -> refs is empty -> refs.get("lead", set()) == set()
+    cands = crystallization_candidates(
+        core=_core([]),
+        state=st,
+        ledger=[],
+        experiences=[],
+        now=NOW,
+        config={"theta_ledger_refs": 0},
+    )
+    promotes = [c for c in cands if c.kind is CoreKind.promote]
+    assert len(promotes) == 1
+    assert promotes[0].target == "lead"
+    assert "0" in promotes[0].rationale

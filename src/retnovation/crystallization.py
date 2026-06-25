@@ -49,12 +49,13 @@ def crystallization_candidates(
 
     # Promote: a frame that has decayed AND keeps surfacing across active problems.
     for f, fs in state.frames.items():
-        if retention_due(state, f, now) > 0.0 and len(refs.get(f, set())) >= theta:
+        ref_count = len(refs.get(f, set()))
+        if retention_due(state, f, now) > 0.0 and ref_count >= theta:
             out.append(
                 CoreCandidate(
                     kind=CoreKind.promote,
                     target=f,
-                    rationale=f"decayed and referenced across {len(refs[f])} active problems",
+                    rationale=f"decayed and referenced across {ref_count} active problems",
                 )
             )
     return out
