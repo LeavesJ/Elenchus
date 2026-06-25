@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — P2 Final-review fixes — empty-candidates guard (ValueError) + receipt margin/runner-up consistency + type annotations on select_next/_content_gaps + log round-trip coverage extended to JSON columns and margin. 150/3.
+
 ## 2026-06-24 — P2 Task 6 — schedule_next dispatches open_ended to the value function (returns (spec, receipt)); run_session logs the receipt + queues the spec; cs byte-stable; placeholder removed; suite green. Project 2 policy complete. 149/3.
 
 ## 2026-06-24 — P2 Task 5 — selection_log table + log_selection; queue carries experience_id (guarded migration); 149/3.

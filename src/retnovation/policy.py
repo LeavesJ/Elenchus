@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from .state import frame_interval_days, frame_uncertainty
-from .types import LearnerState, NextExperienceSpec, Regime, SelectionReceipt, Strength
+from .types import Experience, LearnerState, NextExperienceSpec, Regime, SelectionReceipt, Strength
 
 
 def _uncertainty(state: LearnerState, code: str, now: datetime) -> float:
@@ -35,7 +35,9 @@ def _located(state: LearnerState, code: str, now: datetime, theta: float) -> boo
     return _uncertainty(state, code, now) <= theta
 
 
-def _content_gaps(state, experiences, now, theta):
+def _content_gaps(
+    state: LearnerState, experiences: list[Experience], now: datetime, theta: float
+) -> list[str]:
     all_frames = set()
     for e in experiences:
         all_frames.update(f.frame_code for f in e.rubric.frames)
@@ -54,7 +56,9 @@ def _content_gaps(state, experiences, now, theta):
     return gaps
 
 
-def select_next(state, experiences, config, now):
+def select_next(
+    state: LearnerState, experiences: list[Experience], config: dict, now: datetime
+) -> tuple[NextExperienceSpec, SelectionReceipt]:
     wU, wR, wT, wL = config["wU"], config["wR"], config["wT"], config["wL"]
     theta = config["theta_located"]
 
@@ -76,11 +80,13 @@ def select_next(state, experiences, config, now):
             if best is None or sort_key < best[0]:
                 best = (sort_key, f, e, terms, V, penalty)
 
+    if best is None:
+        raise ValueError("no (frame, experience) candidates to score")
     _, frame, exp, terms, V, penalty = best
     ranked = sorted(terms.items(), key=lambda kv: -kv[1])
     drive = ranked[0][0]
     runner_up_drive = ranked[1][0] if len(ranked) > 1 and ranked[1][1] > 0 else None
-    margin = ranked[0][1] - (ranked[1][1] if len(ranked) > 1 else 0.0)
+    margin = ranked[0][1] - ranked[1][1] if runner_up_drive is not None else 0.0
 
     spec = NextExperienceSpec(
         target_frames=[frame],

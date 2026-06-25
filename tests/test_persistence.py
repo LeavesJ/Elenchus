@@ -255,9 +255,18 @@ def test_log_selection_round_trips(tmp_path):
             created_at=datetime(2026, 6, 24, tzinfo=timezone.utc),
         )
     )
-    rows = list(s._db.execute("SELECT frame, experience_id, drive FROM selection_log"))
+    import json
+
+    rows = list(
+        s._db.execute(
+            "SELECT frame, experience_id, drive, scores_json, content_gaps_json, margin, runner_up_drive FROM selection_log"
+        )
+    )
     assert (
         rows[0]["frame"] == "lead"
         and rows[0]["experience_id"] == "license_continuity"
         and rows[0]["drive"] == "deploy"
     )
+    assert json.loads(rows[0]["scores_json"]) == {"V": 1.5}
+    assert json.loads(rows[0]["content_gaps_json"]) == ["g"]
+    assert rows[0]["margin"] == 0.5 and rows[0]["runner_up_drive"] == "diagnose"

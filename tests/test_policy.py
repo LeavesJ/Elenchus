@@ -80,3 +80,10 @@ def test_two_experiences_sharing_a_pair_pick_lower_load():
     e_cap = _exp("e_cap", "veldra:p1", ["lead", "x", "y"])
     spec, receipt = select_next(LearnerState(), [e_cap, e_iso], CFG, NOW)
     assert receipt.experience_id == "e_iso"  # lower constituent_count breaks the V tie
+
+
+def test_select_next_raises_on_empty_experiences():
+    import pytest
+
+    with pytest.raises(ValueError):
+        select_next(LearnerState(), [], CFG, NOW)
