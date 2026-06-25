@@ -447,3 +447,17 @@ def test_anti_label_gate_sees_through_markdown_emphasis():
         _exp(prompt="**Lead** with what you refuse to do, then decide."), _corpus(), **GATE_KW
     )
     assert GateCode.pre_named_framework in res.rejects
+
+
+def test_select_open_ended_honors_experience_id():
+    from retnovation.generator import select_open_ended
+    from retnovation.types import NextExperienceSpec, Regime
+
+    spec = NextExperienceSpec(
+        target_frames=["commit_under_the_deadline"],
+        ledger_ref="veldra:license_fork_risk",
+        regime=Regime.open_ended,
+        experience_id="license_continuity",
+    )
+    exp = select_open_ended(None, None, [], [], spec)
+    assert exp.experience_id == "license_continuity"

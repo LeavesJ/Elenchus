@@ -5,6 +5,7 @@ import re
 from .content_loader import (
     load_checkable_library,
     load_denylist,
+    load_experience,
     load_library,
     load_min_angle_count,
 )
@@ -163,6 +164,10 @@ def _coverage(exp: Experience, target_frames: list[str]) -> int:
 
 
 def select_open_ended(core, state, ledger, corpus, spec, root=None) -> Experience:
+    if spec is not None and spec.experience_id is not None:
+        return load_experience(
+            spec.experience_id, root
+        )  # the exact (frame, experience) the policy scored
     gated = [(e, r) for (e, r) in load_gated_library(corpus, root) if e.regime is Regime.open_ended]
     if not gated:
         raise GateError("no shippable open_ended experience in the library")
