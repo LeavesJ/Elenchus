@@ -1,5 +1,28 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — Frame-mining (spine expansion) design + Sub-project 1 (blind-lift harness) spec
+- New thread after P3: expand the founder spine by **mining new counter-intuitive frames** (where the base
+  Opus is wrong by default) and validating each against `marginal_lift` via an automated **blind-lift
+  screen** + human adjudication, then authoring isolated experiences (the engine-lighting payoff). Mine is
+  **source-agnostic** — Veldra's owned record now, public cases (books/blogs/speeches/biographies) later;
+  provenance source-typed. Decomposed (one design, 3 sub-projects): (1) the harness; (2) mine+admit; (3)
+  author experiences. Spec: `docs/superpowers/specs/2026-06-25-frame-mining-spine-expansion-design.md`,
+  §4 pins Sub-project 1 plan-ready.
+- Brainstormed the harness + 2 reviews. Forks decided: mine new spine frames (vs subframes/assessment-only);
+  hybrid lift test (auto screen + human final call); same-model rater. The harness **automates the kill,
+  not the verdict** — `LiftResult` carries verbatim framed/control outputs + the rater's key-difference for
+  the human. Two-axis result (distinguishability + signed preference), `lift`/`verdict`/`status` **derived**
+  not stored; manipulation check is a **gating precondition** via a separate **primed** checker; refusals
+  are **captured as signal** (EXP-002 B2's control refusal IS the lift), not raised.
+- A five-lens adversarial review found real fixes (folded in): pydantic wire models (no bare tuple/bool);
+  the `{A,B,tie}` cell; a **total** verdict precedence (all-lift→lift, some-lift→mixed, neg→negative_lift,
+  neutral, null) + screen `auto_kill` only on {null,negative_lift}; checker false-pass bias named; n=2
+  validation vs the min-3 advisory floor; and a **confidentiality blocker** — `content/lift/scenarios.yaml`
+  is NOT gitignored and the lessons grep omits it (the SP1 plan must add the scoped ignore + the
+  `scenarios.example.yaml` split + extend the grep). The review's headline ("EXP-001 is a null mislabeled
+  as negative") was **refuted on verification** (EXP-001 is `negative` — distinguishable + dispreferred);
+  lesson **L-15** added. NEXT: user reviews the spec → writing-plans for SP1.
+
 ## 2026-06-25 — Project 3 (interactive surface) BUILT — subagent-driven, 8 tasks + final review
 - Diagnostic-progression **Project 3 complete** on branch `diagnostic-progression-surface`
   (b45b44d..0c26f32, 9 commits). Suite **168 passed / 3 skipped**, ruff clean, confidential gate empty,

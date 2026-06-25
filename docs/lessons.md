@@ -105,3 +105,14 @@ Read this checklist before every code change. Update it after every correction o
   fixture — and don't claim "green at every commit" for the seam-swap commit without running the rewritten
   suite against real content. (Corollary: an adversarial reviewer that runs code beats one that only reads
   it — for selection/ranking claims, have the review execute the function.)
+- **L-15 An adversarial review's *synthesis* can be confidently wrong — trust the per-finding VERIFY stage,
+  and check terminology against the source before acting.** The lift-harness spec review's headline
+  ("dominant, load-bearing defect: EXP-001 mislabeled as `negative_lift`, it's a NULL") was **refuted on
+  verification**: the doctrine's phrase "true null *of value*" means null-of-*preference* (the frame landed
+  but didn't win), NOT the spec's two-axis dist-0 `null` cell ("the model can't see it") — EXP-001 was
+  distinguishable (dist 1) + dispreferred = `negative`, exactly as written. Acting on the synthesis would
+  have injected a doctrine error (scripting EXP-001 as indistinguishable, contradicting its documented
+  dist=1). Prevention: when a review flags a "dominant defect," read the cited source span yourself before
+  changing anything; a confident synthesis built on a terminology conflation is more dangerous than no
+  review. (This is why the review harness keeps a separate verify stage — and why a near-tie of opposite
+  conclusions gets escalated to the human, not silently resolved.)
