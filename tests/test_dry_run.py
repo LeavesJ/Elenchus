@@ -129,7 +129,7 @@ def test_dry_run_closes_the_loop(tmp_path):
         for d in assessment.frame_deltas
     )
     # 3) at least one frame strength moved (not the `weak` default) in persisted state
-    reloaded = Store(tmp_path / "dryrun.db").load_state()
+    reloaded = Store(tmp_path / "dryrun.db").load_state(_now())
     assert reloaded.frames  # persisted
     assert any(fs.strength != Strength.weak for fs in reloaded.frames.values())
     # 4) the queue holds a fresh NextExperienceSpec

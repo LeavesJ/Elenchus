@@ -14,13 +14,13 @@ from .types import (
     Regime,
     Scene,
     SpacedItem,
-    Strength,
 )
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS frames (
   frame_code TEXT PRIMARY KEY, strength TEXT NOT NULL,
-  last_seen TEXT NOT NULL, due TEXT NOT NULL, last_evidence TEXT NOT NULL);
+  last_seen TEXT NOT NULL, due TEXT NOT NULL, last_evidence TEXT NOT NULL,
+  evidence_count INTEGER NOT NULL DEFAULT 0, breadth_json TEXT, unprompted_breadth_json TEXT);
 CREATE TABLE IF NOT EXISTS ledger (
   id TEXT PRIMARY KEY, owned_problem TEXT NOT NULL, links_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS queue (
@@ -46,18 +46,40 @@ class Store:
         if "scene_json" not in cols:
             self._db.execute("ALTER TABLE corpus ADD COLUMN scene_json TEXT")
             self._db.commit()
+        fcols = {r["name"] for r in self._db.execute("PRAGMA table_info(frames)")}
+        for col, decl in (
+            ("evidence_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("breadth_json", "TEXT"),
+            ("unprompted_breadth_json", "TEXT"),
+        ):
+            if col not in fcols:
+                self._db.execute(f"ALTER TABLE frames ADD COLUMN {col} {decl}")
+        self._db.commit()
 
     def close(self) -> None:
         self._db.close()
 
-    def load_state(self) -> LearnerState:
+    def load_state(self, now: datetime) -> LearnerState:
+        from .state import derive_due, derive_strength
+
         st = LearnerState()
         for r in self._db.execute("SELECT * FROM frames"):
+            breadth = set(json.loads(r["breadth_json"])) if r["breadth_json"] else set()
+            unprompted = (
+                set(json.loads(r["unprompted_breadth_json"]))
+                if r["unprompted_breadth_json"]
+                else set()
+            )
+            evidence_count = r["evidence_count"] or 0
+            last_seen = datetime.fromisoformat(r["last_seen"])
             st.frames[r["frame_code"]] = FrameStrength(
-                strength=Strength(r["strength"]),
-                last_seen=datetime.fromisoformat(r["last_seen"]),
-                due=datetime.fromisoformat(r["due"]),
+                strength=derive_strength(evidence_count, unprompted, last_seen, now),
+                last_seen=last_seen,
+                due=derive_due(evidence_count, unprompted, last_seen),
                 last_evidence=r["last_evidence"],
+                evidence_count=evidence_count,
+                breadth=breadth,
+                unprompted_breadth=unprompted,
             )
         for r in self._db.execute("SELECT * FROM concepts"):
             st.declarative_seed[r["concept"]] = SpacedItem(
@@ -70,16 +92,21 @@ class Store:
     def save_state(self, state: LearnerState) -> None:
         for code, fs in state.frames.items():
             self._db.execute(
-                "INSERT INTO frames(frame_code,strength,last_seen,due,last_evidence) "
-                "VALUES(?,?,?,?,?) ON CONFLICT(frame_code) DO UPDATE SET "
-                "strength=excluded.strength,last_seen=excluded.last_seen,"
-                "due=excluded.due,last_evidence=excluded.last_evidence",
+                "INSERT INTO frames(frame_code,strength,last_seen,due,last_evidence,"
+                "evidence_count,breadth_json,unprompted_breadth_json) VALUES(?,?,?,?,?,?,?,?) "
+                "ON CONFLICT(frame_code) DO UPDATE SET strength=excluded.strength,"
+                "last_seen=excluded.last_seen,due=excluded.due,last_evidence=excluded.last_evidence,"
+                "evidence_count=excluded.evidence_count,breadth_json=excluded.breadth_json,"
+                "unprompted_breadth_json=excluded.unprompted_breadth_json",
                 (
                     code,
-                    fs.strength.value,
+                    fs.strength.value,  # snapshot only — load_state re-derives; never read back as authority
                     fs.last_seen.isoformat(),
                     fs.due.isoformat(),
                     fs.last_evidence,
+                    fs.evidence_count,
+                    json.dumps(sorted(fs.breadth)),
+                    json.dumps(sorted(fs.unprompted_breadth)),
                 ),
             )
         for concept, si in state.declarative_seed.items():
@@ -89,13 +116,6 @@ class Store:
                 "interval_days=excluded.interval_days",
                 (concept, si.due.isoformat(), si.interval_days),
             )
-        self._db.commit()
-
-    def decay_frame(self, frame_code: str, new_strength: Strength, new_due: datetime) -> None:
-        self._db.execute(
-            "UPDATE frames SET strength=?, due=? WHERE frame_code=?",
-            (new_strength.value, new_due.isoformat(), frame_code),
-        )
         self._db.commit()
 
     def add_ledger_entry(self, entry: LedgerEntry) -> None:

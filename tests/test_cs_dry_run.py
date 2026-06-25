@@ -42,7 +42,7 @@ def test_cs_dry_run_closes_the_loop(tmp_path):
     assert isinstance(assessment, CheckableAssessment)
     assert assessment.results and all(r.correct for r in assessment.results)
     # 2) the concept spaced-index moved and persisted
-    reloaded = Store(tmp_path / "cs.db").load_state()
+    reloaded = Store(tmp_path / "cs.db").load_state(_now())
     assert "safety_vs_liveness" in reloaded.declarative_seed
     assert reloaded.declarative_seed["safety_vs_liveness"].interval_days >= 1
     # 3) a fresh cs_technical next experience is queued (cadence closed the loop)

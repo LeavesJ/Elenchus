@@ -31,7 +31,7 @@ def run_session(
     now: datetime,
     present: Callable[[Experience], Work] = present_and_collect,
 ) -> tuple[LearnerState, Assessment | CheckableAssessment]:
-    state = store.load_state()
+    state = store.load_state(now)
     ledger = store.load_ledger()
     corpus = store.load_corpus()
     spec = store.queue_pop()

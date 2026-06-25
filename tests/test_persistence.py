@@ -23,23 +23,11 @@ def test_state_roundtrip(tmp_path):
         last_seen=_now(),
         due=_now(),
         last_evidence="closed under pressure",
+        evidence_count=1,  # evidence_count=1 → storage tier forming; staleness 0 → derives forming
     )
     s.save_state(st)
-    loaded = Store(tmp_path / "t.db").load_state()
+    loaded = Store(tmp_path / "t.db").load_state(_now())
     assert loaded.frames["protect_the_core_lane"].strength is Strength.forming
-
-
-def test_decay_updates_never_deletes(tmp_path):
-    s = Store(tmp_path / "t.db")
-    st = LearnerState()
-    st.frames["f"] = FrameStrength(
-        strength=Strength.strong, last_seen=_now(), due=_now(), last_evidence="x"
-    )
-    s.save_state(st)
-    s.decay_frame("f", Strength.forming, _now())
-    loaded = s.load_state()
-    assert set(loaded.frames) == {"f"}  # row still present
-    assert loaded.frames["f"].strength is Strength.forming
 
 
 def test_ledger_and_queue_fifo(tmp_path):
@@ -75,7 +63,7 @@ def test_concepts_roundtrip_and_never_deleted(tmp_path):
         concept="safety_vs_liveness", due=_now(), interval_days=4
     )
     s.save_state(st)
-    loaded = Store(tmp_path / "c.db").load_state()
+    loaded = Store(tmp_path / "c.db").load_state(_now())
     assert loaded.declarative_seed["safety_vs_liveness"].interval_days == 4
 
     # demote (shorter interval) — row stays present
@@ -83,7 +71,7 @@ def test_concepts_roundtrip_and_never_deleted(tmp_path):
         concept="safety_vs_liveness", due=_now(), interval_days=1
     )
     s.save_state(st)
-    re2 = Store(tmp_path / "c.db").load_state()
+    re2 = Store(tmp_path / "c.db").load_state(_now())
     assert set(re2.declarative_seed) == {"safety_vs_liveness"}
     assert re2.declarative_seed["safety_vs_liveness"].interval_days == 1
 
@@ -148,3 +136,63 @@ def test_corpus_scene_column_is_migrated_onto_an_old_table(tmp_path):
         )
     )
     assert Store(db).get_corpus("veldra:a").scene.prompt == "c"
+
+
+def test_storage_fields_round_trip_and_strength_derives(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from retnovation.persistence import Store
+    from retnovation.types import FrameStrength, LearnerState, Strength
+
+    t0 = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    s = Store(tmp_path / "p.db")
+    st = LearnerState()
+    st.frames["f"] = FrameStrength(
+        strength=Strength.strong,
+        last_seen=t0,
+        due=t0 + timedelta(days=30),
+        last_evidence="exp:reasoned",
+        evidence_count=2,
+        breadth={"veldra:a", "veldra:b"},
+        unprompted_breadth={"veldra:a", "veldra:b"},
+    )
+    s.save_state(st)
+    # fresh read at t0 → strong (staleness 0); read 40d later → decayed to forming, storage intact
+    fresh = Store(tmp_path / "p.db").load_state(t0)
+    assert fresh.frames["f"].strength is Strength.strong
+    assert fresh.frames["f"].unprompted_breadth == {"veldra:a", "veldra:b"}
+    decayed = Store(tmp_path / "p.db").load_state(t0 + timedelta(days=40))
+    assert decayed.frames["f"].strength is Strength.forming
+    assert decayed.frames["f"].evidence_count == 2  # storage never lost
+
+
+def test_old_db_without_new_columns_migrates(tmp_path):
+    import sqlite3
+    from datetime import datetime, timezone
+    from retnovation.persistence import Store
+
+    t0 = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    # simulate a pre-migration frames table (no evidence_count/breadth columns)
+    db = tmp_path / "old.db"
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "CREATE TABLE frames (frame_code TEXT PRIMARY KEY, strength TEXT NOT NULL, "
+        "last_seen TEXT NOT NULL, due TEXT NOT NULL, last_evidence TEXT NOT NULL)"
+    )
+    con.execute(
+        "INSERT INTO frames VALUES ('f','forming',?,?,'old')",
+        (t0.isoformat(), t0.isoformat()),
+    )
+    con.commit()
+    con.close()
+    loaded = Store(db).load_state(t0)  # __init__ migrates, load derives
+    assert loaded.frames["f"].evidence_count == 0  # old row → no storage evidence
+    assert loaded.frames["f"].breadth == set()
+    from retnovation.types import Strength
+
+    assert loaded.frames["f"].strength is Strength.weak  # derived from zero evidence
+
+
+def test_decay_frame_is_gone(tmp_path):
+    from retnovation.persistence import Store
+
+    assert not hasattr(Store(tmp_path / "x.db"), "decay_frame")

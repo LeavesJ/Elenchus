@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — P1 Task 4 — persistence: load_state(now) derives, storage columns + guarded migration, decay_frame deleted; 134/3.
+
 ## 2026-06-24 — P1 Task 3b: reasoned_unprompted signal from assess(); estimator reads it; strong reachable in production (rev.3)
 - P1 Task 3b — reasoned_unprompted signal from assess(); estimator reads it; strong reachable in production (rev.3); 132/3.
 
