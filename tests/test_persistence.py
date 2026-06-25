@@ -236,6 +236,87 @@ def test_queue_round_trips_experience_id(tmp_path):
     assert s.queue_pop().experience_id == "license_continuity"
 
 
+def test_selection_log_decision_columns_fresh_and_old_db(tmp_path):
+    import sqlite3
+    from datetime import datetime, timezone
+    from retnovation.persistence import Store
+    from retnovation.types import (
+        NextExperienceSpec,
+        Outcome,
+        Regime,
+        SelectionReceipt,
+        Selection,
+    )
+
+    # old DB: selection_log WITHOUT the new columns
+    old = tmp_path / "old.db"
+    con = sqlite3.connect(old)
+    con.executescript(
+        "CREATE TABLE selection_log (created_at TEXT NOT NULL, frame TEXT NOT NULL, "
+        "problem TEXT NOT NULL, experience_id TEXT NOT NULL, drive TEXT NOT NULL, "
+        "scores_json TEXT NOT NULL, runner_up_drive TEXT, margin REAL NOT NULL, "
+        "content_gaps_json TEXT NOT NULL);"
+    )
+    con.commit()
+    con.close()
+
+    now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+    for path in (old, tmp_path / "fresh.db"):
+        store = Store(path)  # migration must not raise
+        cols = {r["name"] for r in store._db.execute("PRAGMA table_info(selection_log)")}
+        assert {"outcome", "chosen_frame", "chosen_problem", "chosen_experience_id"} <= cols
+
+        def rc(frame, ref, eid):
+            return SelectionReceipt(
+                frame=frame,
+                problem=ref,
+                experience_id=eid,
+                drive="deploy",
+                scores={"V": 0.7},
+                runner_up_drive="diagnose",
+                margin=0.2,
+                content_gaps=[],
+                created_at=now,
+            )
+
+        sel = Selection(
+            proposed_receipt=rc("lead", "veldra:p1", "e1"),
+            chosen_spec=NextExperienceSpec(
+                target_frames=["lead"],
+                ledger_ref="veldra:p2",
+                regime=Regime.open_ended,
+                experience_id="e2",
+            ),
+            chosen_receipt=rc("lead", "veldra:p2", "e2"),
+            outcome=Outcome.redirected,
+        )
+        store.log_decision(sel)
+        row = store._db.execute("SELECT * FROM selection_log").fetchone()
+        assert row["frame"] == "lead" and row["experience_id"] == "e1"  # proposed
+        assert row["outcome"] == "redirected"
+        assert row["chosen_problem"] == "veldra:p2" and row["chosen_experience_id"] == "e2"
+        store.close()
+
+
+def test_core_decision_log_roundtrip(tmp_path):
+    from datetime import datetime, timezone
+    from retnovation.persistence import Store
+    from retnovation.types import CoreCandidate, CoreKind, CoreVerdict
+
+    now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+    store = Store(tmp_path / "c.db")
+    v = CoreVerdict(
+        candidate=CoreCandidate(
+            kind=CoreKind.promote, target="protect", rationale="decayed, broad"
+        ),
+        outcome="accepted",
+    )
+    store.log_core_decision(v, now)
+    row = store._db.execute("SELECT * FROM core_decision_log").fetchone()
+    assert row["kind"] == "promote" and row["target"] == "protect" and row["outcome"] == "accepted"
+    store.close()
+
+
 def test_log_selection_round_trips(tmp_path):
     from datetime import datetime, timezone
     from retnovation.persistence import Store

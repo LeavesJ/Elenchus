@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .types import (
+    CoreVerdict,
     CorpusEntry,
     FrameStrength,
     LearnerState,
@@ -13,6 +14,7 @@ from .types import (
     NextExperienceSpec,
     Regime,
     Scene,
+    Selection,
     SelectionReceipt,
     SpacedItem,
     TrapOccurrence,
@@ -41,6 +43,9 @@ CREATE TABLE IF NOT EXISTS concepts (
   concept TEXT PRIMARY KEY, due TEXT NOT NULL, interval_days INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS trap_gallery (
   trap_code TEXT NOT NULL, experience_id TEXT NOT NULL, occurred_at TEXT NOT NULL, detail TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS core_decision_log (
+  created_at TEXT NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL,
+  rationale TEXT NOT NULL, outcome TEXT NOT NULL);
 """
 
 
@@ -67,6 +72,11 @@ class Store:
         qcols = {r["name"] for r in self._db.execute("PRAGMA table_info(queue)")}
         if "experience_id" not in qcols:
             self._db.execute("ALTER TABLE queue ADD COLUMN experience_id TEXT")
+        self._db.commit()
+        scols = {r["name"] for r in self._db.execute("PRAGMA table_info(selection_log)")}
+        for col in ("outcome", "chosen_frame", "chosen_problem", "chosen_experience_id"):
+            if col not in scols:
+                self._db.execute(f"ALTER TABLE selection_log ADD COLUMN {col} TEXT")
         self._db.commit()
 
     def close(self) -> None:
@@ -250,6 +260,45 @@ class Store:
                 receipt.runner_up_drive,
                 receipt.margin,
                 json.dumps(receipt.content_gaps),
+            ),
+        )
+        self._db.commit()
+
+    def log_decision(self, selection: Selection) -> None:
+        p = selection.proposed_receipt
+        c = selection.chosen_receipt
+        self._db.execute(
+            "INSERT INTO selection_log(created_at,frame,problem,experience_id,drive,scores_json,"
+            "runner_up_drive,margin,content_gaps_json,outcome,chosen_frame,chosen_problem,"
+            "chosen_experience_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                p.created_at.isoformat(),
+                p.frame,
+                p.problem,
+                p.experience_id,
+                p.drive,
+                json.dumps(p.scores),
+                p.runner_up_drive,
+                p.margin,
+                json.dumps(p.content_gaps),
+                selection.outcome.value,
+                c.frame,
+                c.problem,
+                c.experience_id,
+            ),
+        )
+        self._db.commit()
+
+    def log_core_decision(self, verdict: CoreVerdict, now: datetime) -> None:
+        self._db.execute(
+            "INSERT INTO core_decision_log(created_at,kind,target,rationale,outcome) "
+            "VALUES(?,?,?,?,?)",
+            (
+                now.isoformat(),
+                verdict.candidate.kind.value,
+                verdict.candidate.target,
+                verdict.candidate.rationale,
+                verdict.outcome,
             ),
         )
         self._db.commit()
