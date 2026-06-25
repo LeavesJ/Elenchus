@@ -1001,5 +1001,13 @@ verify `git ls-files` after any content work). Core-path changes get an independ
   → **unreachable via the served paths** (load_state/update_state); direct `FrameStrength(strength=…)`
   stays open for tests (the shim seam) and the served path must never set strength directly. (3) the
   **sole-content-frame surfaces as a content gap**, not a scorer special-case (drops the exclude-from-max/
-  floor-wU escape hatch). Spec → rev. 2 (§14 added). **Status: design rev. 2, awaiting approval before the
-  Project 1 plan.** No code changed; 124/3. `main` ~48 commits ahead of origin, unpushed.
+  floor-wU escape hatch). Spec → rev. 2 (§14 added). No code changed; 124/3.
+- **Project 1 plan written + self-reviewed:**
+  `docs/superpowers/plans/2026-06-24-diagnostic-progression-p1-substrate.md` — 5 implementer TDD tasks
+  (FrameStrength storage fields → derive_strength/derive_due/frame_uncertainty on the storage-keyed clock
+  → estimator writes storage anchored to ledger_ref, strong reachable across 2 problems → persistence
+  derives on load + migration + delete decay_frame → persist trap_gallery) + a controller review/finish.
+  Full code per step, per-commit gate, expected suite 124→134. Decided in the plan: the strong bar needs
+  an `unprompted_breadth` storage field (subset of breadth) to distinguish unprompted from
+  closed-under-pressure — a faithful refinement of spec §6's "≥2 unprompted × ≥2 problems." **Status: plan
+  ready; awaiting execution-mode choice.** `main` ~48 commits ahead of origin, unpushed.
