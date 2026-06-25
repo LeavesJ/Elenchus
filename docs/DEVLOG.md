@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — final-review fix: exclude stress-probed frames from reasoned_unprompted (`and code not in probed`); 137/3.
+
 ## 2026-06-24 — P1 Task 5 — persist trap_gallery (delete+reinsert, idempotent); 135/3. Project 1 substrate complete.
 
 ## 2026-06-24 — P1 Task 4 — persistence: load_state(now) derives, storage columns + guarded migration, decay_frame deleted; 134/3.

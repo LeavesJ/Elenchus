@@ -161,6 +161,11 @@ storage*; strength and uncertainty are computed, never written. (The earlier "no
 `frames_closed_under_pressure`" heuristic for unprompted is dropped — the loop never produces that state;
 the real signal is `reasoned_unprompted`.)
 
+Note: `reasoned_unprompted` **excludes stress-probed frames** (`code not in probed`). A frame that was
+`present_reasoned` at intake but was then force-stressed by the probe-gated convergence rule (e.g. the
+`decision_frame`) and closed under that push goes through the audited `frames_closed_under_pressure`
+channel only — it was not genuinely unprompted (doctrine: "applied unprompted is strong").
+
 This is the Berkeley §5 mapping made structural: storage strength persists and is never lost; retrieval
 strength is the derived bucket that falls with disuse and returns on re-exposure.
 
@@ -358,9 +363,13 @@ trap, and the pre-existing code even documented the unreachability).
 
 **Fix (user-approved option A):** add an additive `reasoned_unprompted: list[str]` to `Assessment`,
 populated by `assess()` = `[code for code, s0 in intake.frame_states.items() if s0 is present_reasoned and
-final frame_states[code] is present_reasoned]`. The estimator reads it (§6). Doctrine-faithful ("applied
-unprompted is strong"), additive (the loop's pushes/stops/classifications are byte-stable; nothing
-existing reads the field). This widens Project 1 minimally into the assessment layer — the §2 boundary is
-amended accordingly. Considered and rejected: redefining `strong` as cross-problem closed-under-pressure
-(reachable without the signal, but drops the "unprompted" doctrine); deferring `strong` to a later
-project (leaves the headline fake in Project 1).
+final frame_states[code] is present_reasoned and code not in probed]`. The signal **excludes
+stress-probed frames** (`code not in probed`): a frame that was `present_reasoned` at intake but received
+a force-stress push (e.g. the `decision_frame` probe-gated convergence rule) and closed under that push
+goes through the audited `frames_closed_under_pressure` channel only — it was not genuinely unprompted.
+The estimator reads `reasoned_unprompted` (§6). Doctrine-faithful ("applied unprompted is strong"),
+additive (the loop's pushes/stops/classifications are byte-stable; nothing existing reads the field).
+This widens Project 1 minimally into the assessment layer — the §2 boundary is amended accordingly.
+Considered and rejected: redefining `strong` as cross-problem closed-under-pressure (reachable without
+the signal, but drops the "unprompted" doctrine); deferring `strong` to a later project (leaves the
+headline fake in Project 1).

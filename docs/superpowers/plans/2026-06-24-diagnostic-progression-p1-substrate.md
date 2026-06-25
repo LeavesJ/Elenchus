@@ -492,15 +492,17 @@ Expected: FAIL — `Assessment` rejects `reasoned_unprompted` (unknown field) / 
     reasoned_unprompted: list[str] = Field(default_factory=list)
 ```
 
-- [ ] **Step 4: Populate in `assess`** — in `src/retnovation/assessment/judgment_loop.py`, before the `Assessment(...)` construction, compute (the loop's local `frame_states` holds the final states; `intake` is in scope):
+- [ ] **Step 4: Populate in `assess`** — in `src/retnovation/assessment/judgment_loop.py`, before the `Assessment(...)` construction, compute (the loop's local `frame_states` holds the final states; `intake` and `probed` are in scope):
 ```python
     reasoned_unprompted = [
         code
         for code, s0 in intake.frame_states.items()
-        if s0 is FrameState.present_reasoned and frame_states.get(code) is FrameState.present_reasoned
+        if s0 is FrameState.present_reasoned
+        and frame_states.get(code) is FrameState.present_reasoned
+        and code not in probed
     ]
 ```
-and add `reasoned_unprompted=reasoned_unprompted,` to the `Assessment(...)` kwargs. (`FrameState` is already imported in this file.)
+and add `reasoned_unprompted=reasoned_unprompted,` to the `Assessment(...)` kwargs. (`FrameState` is already imported in this file.) The `and code not in probed` guard is critical: a frame that was `present_reasoned` at intake but received a force-stress push (e.g. the `decision_frame` probe-gated convergence rule) is NOT genuinely unprompted — it must go through `frames_closed_under_pressure` only.
 
 - [ ] **Step 5: Read the signal in `update_state`** — in `src/retnovation/state.py`, replace the `update_state` body's engagement logic so it reads the signal:
 ```python

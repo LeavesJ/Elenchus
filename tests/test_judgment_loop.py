@@ -381,3 +381,58 @@ def test_assess_reports_reasoned_unprompted_for_held_intake_frames():
         "lead_with_what_you_refuse_to_do",
         "protect_the_core_lane",
     }
+
+
+def test_stress_probed_frame_excluded_from_reasoned_unprompted():
+    # A decision_frame that is present_reasoned at intake gets force-stress-probed.
+    # If the student supplies a mechanism (outcome="closed"), it lands in
+    # frames_closed_under_pressure — but must NOT also appear in reasoned_unprompted,
+    # because it was pushed (not genuinely unprompted).  The two non-probed intake-
+    # reasoned frames MUST still appear in reasoned_unprompted.
+    m = FakeModel(
+        _all_reasoned_intake(),
+        {
+            "commit_under_the_deadline": [
+                ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+            ]
+        },
+    )
+    a = judgment_loop.assess(_exp_decision(), _work(), m)
+    assert a.stop_reason is StopReason.converged
+    # The probed frame must NOT appear in reasoned_unprompted.
+    assert "commit_under_the_deadline" not in a.reasoned_unprompted
+    # The two non-probed intake-reasoned frames MUST appear.
+    assert "lead_with_what_you_refuse_to_do" in a.reasoned_unprompted
+    assert "protect_the_core_lane" in a.reasoned_unprompted
+
+
+def test_regressed_under_stress_probe_excluded_from_reasoned_unprompted():
+    # A decision_frame that is present_reasoned at intake then regresses under the
+    # stress probe is excluded from reasoned_unprompted because its final state is
+    # no longer present_reasoned (the existing final-state guard covers this; lock it).
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.present_reasoned,
+            "protect_the_core_lane": FrameState.present_reasoned,
+            "commit_under_the_deadline": FrameState.present_reasoned,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+            "commit_without_a_tripwire": TrapState.not_tripped,
+        },
+    )
+    m = FakeModel(
+        intake,
+        {
+            "commit_under_the_deadline": [
+                ResponseClassification(
+                    outcome="regressed", mechanism_supplied=False, hard_wrong=False
+                )
+            ]
+        },
+    )
+    a = judgment_loop.assess(_exp_decision(), _work(), m)
+    assert a.stop_reason is StopReason.regression
+    # Regressed frame dropped from final state — excluded by the final-state guard.
+    assert "commit_under_the_deadline" not in a.reasoned_unprompted

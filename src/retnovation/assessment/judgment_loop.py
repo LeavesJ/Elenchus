@@ -172,6 +172,7 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
         for code, s0 in intake.frame_states.items()
         if s0 is FrameState.present_reasoned
         and frame_states.get(code) is FrameState.present_reasoned
+        and code not in probed
     ]
     assessment = Assessment(
         trajectory=trajectory,

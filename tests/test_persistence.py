@@ -217,3 +217,4 @@ def test_trap_gallery_round_trips_and_is_idempotent(tmp_path):
     assert len(occ) == 2
     assert {o.experience_id for o in occ} == {"exp1", "exp2"}
     assert {o.detail for o in occ} == {"unchanged", "regressed"}
+    assert {o.occurred_at for o in occ} == {t0}
