@@ -1,5 +1,18 @@
 # Retnovation — DEVLOG
 
+## 2026-06-24 — Project 2 plan written (value-function policy)
+- `docs/superpowers/plans/2026-06-24-diagnostic-progression-p2-policy.md` — 6 implementer TDD tasks +
+  controller review: (1) types (NextExperienceSpec.experience_id + SelectionReceipt); (2) progression.yaml
+  + load_progression + state.frame_interval_days (`_INTERVAL_DAYS` stays in state.py — refines §16 to avoid
+  churning the P1 derive_* core path); (3) **policy.select_next** — the pure value function (4 drives over
+  the built frame_uncertainty, argmax with the (constituent_count asc, frame_id, problem, experience_id)
+  tie-break, static content-gap predicate, the receipt); (4) select_open_ended honors experience_id;
+  (5) selection_log + queue experience_id (guarded migration); (6) the single ATOMIC integration task
+  (schedule_next → policy tuple-return + run_session logs the receipt + all callers updated at once, so no
+  commit ever leaves the suite red). Self-review caught + fixed a red-commit ordering bug (reordered so the
+  return-type swap is one task after selector+persistence land). Expected suite 137→~151. **Status: plan
+  ready; awaiting execution-mode choice.**
+
 ## 2026-06-24 — Project 2 scope rev (external review r2): candidate = (frame, experience)
 - External review of §16 (analyzed via receiving-code-review, verified vs content). 4 points, all sound,
   applied: (1) **candidate (frame,problem) → (frame, experience)** [gates the plan] — the penalty (max over
