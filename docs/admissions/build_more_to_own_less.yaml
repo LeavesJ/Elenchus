@@ -1,0 +1,25 @@
+frame_code: build_more_to_own_less
+posture: founder_ceo
+provenance:
+  source_type: owned
+  pointer: EXECLOG EX-028
+screen:
+  verdict: mixed
+  screen_action: surface
+  mean_distinguishability: 2.6666666666666665
+  mean_preference: -0.3333333333333333
+  framed_preferred_count: 1
+  data_ref: data/lift/screen_build_more_to_own_less.json
+gates: null
+nearest_sibling: protect_the_core_lane
+separating_artifact: A recommendation whose justification is dominated by a "what
+  this removes" ledger (deleted subsystems counted as the primary win) outweighing
+  the "what this adds" list — versus output that picks the smaller option and only
+  tallies added cost, never removable complexity.
+decision: reject
+rationale: mixed but net-dispreferred (1/3, mean_pref -0.33); the move is distinguishable
+  and wins one cell (counting what a build removes) but the control is preferred 2/3
+  — once on more concrete trade-offs, once because the framed output ran long/hedged.
+  Insufficient marginal_lift necessity for spine.
+admitted_as: null
+marginal_lift: pass

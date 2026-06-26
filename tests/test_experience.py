@@ -7,6 +7,7 @@ SEED_REFS = (
     "veldra:license_fork_risk",
     "veldra:concentrated_market_pricing_power",
     "veldra:first_customer_proof_loop",
+    "veldra:embedded_anchor_lock_in",  # SP2 admit: irreversible_anchor experience
 )
 
 

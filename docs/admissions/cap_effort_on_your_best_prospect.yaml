@@ -1,0 +1,24 @@
+frame_code: cap_effort_on_your_best_prospect
+posture: founder_ceo
+provenance:
+  source_type: owned
+  pointer: BIZLOG 2026-05-28
+screen:
+  verdict: mixed
+  screen_action: surface
+  mean_distinguishability: 2.0
+  mean_preference: -0.3333333333333333
+  framed_preferred_count: 1
+  data_ref: data/lift/screen_cap_effort_on_your_best_prospect.json
+gates: null
+nearest_sibling: commit_under_the_deadline
+separating_artifact: A plan that, before any outcome is known, fixes a numeric attempt-cap,
+  a calendar decision-date, AND a pre-named successor target — pre-committing the
+  abandonment trigger — versus open-ended "follow up persistently, vary the channel,
+  re-engage later" guidance with no terminal condition.
+decision: reject
+rationale: mixed, net-dispreferred (1/3, -0.33); the pre-committed surrender discipline
+  wins the marquee cell, but the control is preferred where it reads more finished
+  and actionable. Not a net lift.
+admitted_as: null
+marginal_lift: pass

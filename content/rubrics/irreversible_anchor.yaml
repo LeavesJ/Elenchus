@@ -1,0 +1,24 @@
+experience_id: irreversible_anchor
+ledger_ref: "veldra:embedded_anchor_lock_in"
+regime: open_ended
+mode: genuinely_open
+binding_constraint: null
+prompt: >
+  You are about to ship something to customers that, once it is out in the field, you cannot
+  reliably reach or change. It needs one fixed anchor of trust, decided now at build time, and a
+  single value covers everything you need today. The shape you commit to now is the shape every
+  deployed copy is stuck with. Decide how to represent that anchor in what you ship, and account
+  for what you are committing to and how it fails if that one value ever has to change.
+  (No framework is named for you on purpose.)
+frames:
+  - frame_code: embed_credentials_as_a_list
+    frame_detail: When the choice cannot be amended after it ships, provision the cheap optionality now; the option to add it later will not exist.
+    paired_trap: deferred_the_one_time_choice
+  - frame_code: choose_the_failure_default_deliberately
+    frame_detail: State which way it fails if you are wrong, and justify defaulting to the reversible direction.
+    paired_trap: assumed_the_happy_path
+traps:
+  - trap_code: deferred_the_one_time_choice
+    trap_detail: Took the minimal single-value option and assumed the generalization could be added later, when the shipped choice admits no later change.
+  - trap_code: assumed_the_happy_path
+    trap_detail: Failure direction left unstated, or defaulted to whatever was cheapest.

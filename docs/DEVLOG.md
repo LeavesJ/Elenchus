@@ -1,5 +1,38 @@
 # Retnovation — DEVLOG
 
+## 2026-06-26 — Frame-mining SP2 Phase 2 (mine + admit) RUN: first new spine frame admitted
+- **`embed_credentials_as_a_list` admitted as a provisional founder-CEO spine frame** — the first frame
+  mined + lift-screened + human-adjudicated through the SP2 machinery. On branch
+  `frame-mining-sp2-phase2-admit` (off main `7e68c8f`). Suite **217 passed / 4 skipped**, ruff clean, both
+  confidentiality gates empty.
+- **The mine:** 6 candidates authored into the gitignored `content/lift/{candidates,scenarios}.yaml` (3 blind
+  scenarios each), reviewed by an OPUS adversarial pass (3 must-fix de-spotlight edits folded — would have
+  manufactured false nulls). **@live screen** (real Opus, ~72 high-effort calls; order alternated AB/BA to
+  break rater position bias) → `data/lift/` (gitignored). Result: **embed = LIFT 3/3 +1.0** (the only clean
+  lift; 2 genuine substance wins where the control over-built a remote-update channel / accepted a stranding
+  scalar — the immutability-after-ship gap); scope_the_fail_closed = mixed +0.33 (borderline);
+  build_more / cap_effort / manufacture / withhold = mixed −0.33 (move registers but doesn't net-lift;
+  withhold's predicted-null held). Read at the substance level (not just the verdict): several "lift" cells
+  won on 180-word discipline, several "negative" cells lost on execution — the harness automates the kill,
+  not the verdict.
+- **Adjudication (with the user):** marginal_lift [AUTO] + 4 human gates assessed; the swing gate
+  `surface_independence` (founder-spine-or-engineering?) was the user's call → **PASS** (transfers to any
+  lock-in-now-or-never decision). Admitted: frame added to `content/maps/founder_ceo.yaml`; minimal
+  experience `content/rubrics/irreversible_anchor.yaml` (2 frames + 2 traps = 8 angles, clears the
+  anti-label gate at the floor); new owned problem `embedded_anchor_lock_in` in the gitignored seed
+  (ADR-001/R-149), ingested. 6 committable abstracted `AdmissionRecord`s in `docs/admissions/` (1
+  admit_provisional + 5 reject), each carrying both screen axes; admit-time content-graph integrity check
+  green.
+- **Production-path regression** (`tests/test_admission_regression.py`, L-8/L-9): the admitted frame is
+  reachable through the real `build_store → propose → select → assess → persist` path, **steered to the
+  experience via a custom `decide`, not `proposal.top`** (L-14). Adding the experience re-fired the L-8
+  cascade (4 test failures: the live DB needed the seed ingested; `test_experience.py`'s synthetic-corpus
+  list needed the new ref) — caught by the suite, fixed.
+- **Tooling refinement (L-16, dogfood finding):** made `AdmissionRecord.gates` optional so a screen-reject
+  doesn't force 5 invented human-gate verdicts into a committable audit record (the validator requires gates
+  for admit/subframe, allows None for reject). NEXT: OPUS whole-branch review of the Phase-2 branch →
+  finishing-a-development-branch. (Then SP3: author isolated + cross-problem experiences for the admitted frame.)
+
 ## 2026-06-25 — SP2 post-review hardening: 4 new tests (axis-value pins, 2 integrity edges, screen_candidate order-dict boundary guard); suite 213 passed 4 skipped
 
 ## 2026-06-25 — SP2 T5: `check_content_graph_integrity` + `candidates.yaml` confidentiality wiring (`admission.py` + `.gitignore` + `docs/lessons.md` + `docs/admissions/_TEMPLATE.example.yaml`; 5 new integrity-check tests; suite 210 passed 4 skipped)
