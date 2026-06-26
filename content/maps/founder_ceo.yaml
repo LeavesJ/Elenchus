@@ -4,7 +4,7 @@ process_frames:
   - choose_the_failure_default_deliberately
   - lead_with_what_you_refuse_to_do
   - protect_the_core_lane
-  - embed_credentials_as_a_list  # SP2 provisional admit (2026-06-26); marginal_lift LIFT 3/3, ADR-001/R-149
+  - embed_credentials_as_a_list  # SP2 provisional admit (2026-06-26) — see docs/admissions/embed_credentials_as_a_list.yaml
 declarative_seed:
   - reversible_vs_irreversible
   - build_vs_buy

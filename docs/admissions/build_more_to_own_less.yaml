@@ -6,8 +6,8 @@ provenance:
 screen:
   verdict: mixed
   screen_action: surface
-  mean_distinguishability: 2.6666666666666665
-  mean_preference: -0.3333333333333333
+  mean_distinguishability: 2.67
+  mean_preference: -0.33
   framed_preferred_count: 1
   data_ref: data/lift/screen_build_more_to_own_less.json
 gates: null

@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 
 class Strength(str, Enum):
@@ -423,6 +423,12 @@ class ScreenSummary(BaseModel):
     mean_preference: float
     framed_preferred_count: int
     data_ref: str = ""
+
+    @field_validator("mean_distinguishability", "mean_preference")
+    @classmethod
+    def _round_2dp(cls, v: float) -> float:
+        # clean 2dp in the committable audit record; the raw LiftResult under data/lift/ keeps full precision
+        return round(v, 2)
 
     @classmethod
     def from_result(cls, result: "LiftResult", data_ref: str = "") -> "ScreenSummary":

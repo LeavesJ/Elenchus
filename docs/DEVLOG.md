@@ -1,5 +1,13 @@
 # Retnovation — DEVLOG
 
+## 2026-06-26 — SP2 cosmetic cleanup (post-review minors)
+- `ScreenSummary` now rounds `mean_distinguishability`/`mean_preference` to 2dp via a `field_validator`
+  (clean committable audit records; the raw `LiftResult` under gitignored `data/lift/` keeps full precision).
+  Regenerated the 6 `docs/admissions/*.yaml` records (load -> validator rounds -> re-dump; rationales/gates
+  untouched; integrity check re-verified). Map comment for the admitted frame now points to its record
+  instead of duplicating the screen fact (no drift). Suite 218/4, ruff clean. Closes the two Minor items
+  from the Phase-2 whole-branch review.
+
 ## 2026-06-26 — Frame-mining SP2 Phase 2 (mine + admit) RUN: first new spine frame admitted
 - **`embed_credentials_as_a_list` admitted as a provisional founder-CEO spine frame** — the first frame
   mined + lift-screened + human-adjudicated through the SP2 machinery. On branch

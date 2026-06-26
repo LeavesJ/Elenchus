@@ -7,7 +7,7 @@ screen:
   verdict: mixed
   screen_action: surface
   mean_distinguishability: 2.0
-  mean_preference: 0.3333333333333333
+  mean_preference: 0.33
   framed_preferred_count: 2
   data_ref: data/lift/screen_scope_the_fail_closed_instinct.json
 gates: null

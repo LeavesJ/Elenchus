@@ -155,6 +155,20 @@ def test_subframe_requires_subframe_orthogonality_and_sibling():
     assert ok.gates.orthogonality == "subframe"
 
 
+def test_screen_summary_rounds_means_to_2dp():
+    # n=3 means are thirds; the committable audit record should carry clean 2dp, not float noise.
+    s = ScreenSummary(
+        verdict="lift",
+        screen_action="surface",
+        mean_distinguishability=2.3333333333333335,
+        mean_preference=-0.3333333333333333,
+        framed_preferred_count=3,
+        data_ref="x",
+    )
+    assert s.mean_distinguishability == 2.33
+    assert s.mean_preference == -0.33
+
+
 def test_reject_allows_omitted_gates():
     # A screen-reject whose human gates were never walked may omit gates entirely.
     rec = AdmissionRecord(
