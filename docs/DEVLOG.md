@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — SP2 T1: admission types landed (`Provenance`, `MinedCandidate`, `ScreenSummary`, `Gates`, `AdmittedAs`, `AdmissionRecord` with `@computed_field marginal_lift` + coherence validator; 6 new tests; suite 200 passed 4 skipped)
+
 ## 2026-06-25 — Frame-mining SP2 (mine + admit) plan written
 - `docs/superpowers/plans/2026-06-25-frame-mining-sp2-mine-admit.md` — 5 additive Phase-1 TDD tasks
   (admission types + coherence validator; `load_lift_candidates` + candidate-tagged scenarios;

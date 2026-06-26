@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
 
 
 class Strength(str, Enum):
@@ -392,6 +392,116 @@ class LiftResult(BaseModel):
     @property
     def below_floor(self) -> bool:
         return len(self._valid()) < self.min_scenarios
+
+
+class Provenance(BaseModel):
+    source_type: Literal["owned", "public"] = "owned"  # public = forward-room, untested this arc
+    pointer: str
+
+
+class MinedCandidate(BaseModel):
+    frame_code: str
+    frame_detail: str
+    injection: str
+    posture: str
+    hypothesis: str  # why base Opus is wrong by default
+    nearest_sibling: str | None = None
+    separating_artifact: str = ""
+    provenance: Provenance
+
+    def to_candidate_frame(self) -> "CandidateFrame":
+        return CandidateFrame(
+            frame_code=self.frame_code, frame_detail=self.frame_detail, injection=self.injection
+        )
+
+
+class ScreenSummary(BaseModel):
+    verdict: str
+    screen_action: str
+    mean_distinguishability: float
+    mean_preference: float
+    framed_preferred_count: int
+    data_ref: str = ""
+
+    @classmethod
+    def from_result(cls, result: "LiftResult", data_ref: str = "") -> "ScreenSummary":
+        return cls(
+            verdict=result.verdict,
+            screen_action=result.screen_action,
+            mean_distinguishability=result.mean_distinguishability,
+            mean_preference=result.mean_preference,
+            framed_preferred_count=result.framed_preferred_count,
+            data_ref=data_ref,
+        )
+
+
+class Gates(BaseModel):
+    surface_independence: Literal["pass", "fail"]
+    atomicity: Literal["pass", "fail"]
+    orthogonality: Literal["pass", "fail", "subframe"]
+    falsifiable_application: Literal["pass", "fail"]
+    trainable_cognition: Literal["pass", "fail"]
+
+
+class AdmittedAs(BaseModel):
+    experience_id: str = Field(min_length=1)
+    ledger_ref: str = Field(min_length=1)
+
+
+class AdmissionRecord(BaseModel):
+    model_config = ConfigDict(extra="ignore")  # drop the derived marginal_lift on reload
+
+    frame_code: str
+    posture: str
+    provenance: Provenance
+    screen: ScreenSummary
+    gates: Gates
+    nearest_sibling: str | None = None
+    separating_artifact: str = ""
+    decision: Literal["admit_provisional", "reject", "file_as_subframe"]
+    rationale: str = ""
+    admitted_as: AdmittedAs | None = None
+
+    @computed_field  # DERIVED VIEW (spec §2, seam 1): not stored truth
+    @property
+    def marginal_lift(self) -> str:
+        return "pass" if self.screen.verdict in ("lift", "mixed") else "fail"
+
+    @model_validator(mode="after")
+    def _coherence(self) -> "AdmissionRecord":
+        if self.screen.screen_action == "auto_kill" and self.decision != "reject":
+            raise ValueError("auto_kill screen requires decision == reject")
+        if self.decision == "reject":
+            if not self.screen.verdict or not self.rationale:
+                raise ValueError("reject requires a screen verdict and a rationale")
+        elif self.decision == "admit_provisional":
+            if self.marginal_lift != "pass":
+                raise ValueError(
+                    "admit_provisional requires marginal_lift pass (verdict lift|mixed)"
+                )
+            human = (
+                self.gates.surface_independence,
+                self.gates.atomicity,
+                self.gates.orthogonality,
+                self.gates.falsifiable_application,
+                self.gates.trainable_cognition,
+            )
+            if any(g != "pass" for g in human):
+                raise ValueError("admit_provisional requires all human gates pass")
+            if self.admitted_as is None:
+                raise ValueError("admit_provisional requires admitted_as")
+            if not self.separating_artifact:
+                raise ValueError("admit_provisional requires a separating_artifact")
+            if self.nearest_sibling is None:
+                raise ValueError("admit_provisional requires nearest_sibling")
+        elif self.decision == "file_as_subframe":
+            if self.gates.orthogonality != "subframe":
+                raise ValueError("file_as_subframe requires orthogonality == subframe")
+            if self.nearest_sibling is None:
+                raise ValueError("file_as_subframe requires nearest_sibling")
+            if not self.separating_artifact:
+                raise ValueError("file_as_subframe requires a separating_artifact")
+        return self
 
 
 class CoreCandidate(BaseModel):
