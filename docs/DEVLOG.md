@@ -1,5 +1,27 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — Frame-mining SP2 (mine + admit) spec written + adversarial review folded
+- `docs/superpowers/specs/2026-06-25-frame-mining-sp2-mine-admit-design.md` — SP2 admits the first new
+  spine frame(s) end-to-end: mine the Veldra ore (6 candidates surfaced via parallel recon), screen each
+  with the SP1 harness as the auto-screen, apply the rest of the v0.2 gate by hand, admit survivors as
+  provisional. **Architecture C (hybrid):** a thin layer over the untouched harness — `screen_candidate`
+  (persists each @live `LiftResult`), a pure adjudication-packet formatter (both axes + framed/control
+  outputs), and a structured committable **`AdmissionRecord`** that turns the v0.2 gate into a
+  coherence-validated artifact a commit can enforce. Decisions settled in brainstorming: end-to-end, all 6
+  candidates, hybrid.
+- **One external adversarial design review folded in (4 seams):** (1) **schema-gating** — the record now
+  carries **both** screen axes (`mean_distinguishability` + `mean_preference`) with `marginal_lift` a
+  *derived view*, honoring the umbrella spec's "the verdict must carry both axes; lift is a derived view" so
+  the `surface_independence` gate one line down reads distinguishable-but-dispreferred (native cognition /
+  style-not-substance) directly instead of blind; (2) the **coherence validator** now constrains all three
+  exits (reject needs a screen verdict + rationale; admit needs `separating_artifact`; subframe needs a
+  named sibling; `auto_kill ⇒ reject`); (3) a **content-graph integrity check** at admit
+  (`ledger_ref`/`experience_id` referential cross-check) distinct from the e2e regression; (4) per-gate
+  **referent** annotation, `public` provenance marked untested-this-arc, a concrete **abstraction rule** for
+  committable records, and the arc's success criterion = **completes on whatever survives** (~1–2; a high
+  kill rate is the screen working). Verified the review's §-citation (depreciation is §4 + §11–§12, not §12)
+  and the `LiftResult` axis field names before folding (L-12/L-15). NEXT: user reviews spec → writing-plans.
+
 ## 2026-06-25 — Frame-mining SP1 (blind-lift harness) BUILT — subagent-driven, 5 tasks + final review
 - **Sub-project 1 of the frame-mining architecture complete** on branch `frame-mining-lift-harness`
   (7457eae..bfa6a0c, 6 commits). Suite **194 passed / 4 skipped** (the 4th skip = the new `@live` lift
