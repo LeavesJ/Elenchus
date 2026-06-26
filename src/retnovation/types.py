@@ -296,10 +296,18 @@ class GeneratedOutput(BaseModel):
 
 
 class PreferenceRating(BaseModel):
-    distinguishability: int  # 0..3
+    distinguishability: int = Field(ge=0, le=3)  # 0..3
     preferred: Literal["A", "B", "tie"]
-    magnitude: int  # 0..2; 0 iff tie
+    magnitude: int = Field(ge=0, le=2)  # 0..2; 0 iff tie
     key_difference: str
+
+    @model_validator(mode="after")
+    def _magnitude_iff_tie(self) -> "PreferenceRating":
+        if self.preferred == "tie" and self.magnitude != 0:
+            raise ValueError("magnitude must be 0 when preferred is 'tie'")
+        if self.preferred != "tie" and self.magnitude == 0:
+            raise ValueError("magnitude must be >= 1 when preferred is not 'tie'")
+        return self
 
 
 class InjectionExpressed(BaseModel):

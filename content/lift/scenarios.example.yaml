@@ -12,3 +12,8 @@ scenarios:
     prompt: >
       Write a 180-word public announcement of a feature that uses customers'
       sensitive data to automate a workflow.
+  - scenario_id: example_advisory
+    posture: founder_ceo
+    prompt: >
+      Write a 180-word advisory to a board member asking whether to expand into
+      a market where you have a structural cost disadvantage.

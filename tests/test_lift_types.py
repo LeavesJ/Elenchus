@@ -1,4 +1,7 @@
-from retnovation.types import LiftResult, ScenarioVerdict
+import pytest
+from pydantic import ValidationError
+
+from retnovation.types import LiftResult, PreferenceRating, ScenarioVerdict
 
 
 def _sv(sid, expressed=True, dist=2, pref=1):
@@ -49,3 +52,42 @@ def test_screen_action_and_aggregates():
     assert r.inconclusive_count == 1
     assert r.mean_preference == 1.0  # (2 + 0) / 2 valid
     assert r.below_floor is True  # 2 valid < min_scenarios 3
+
+
+def test_mean_distinguishability():
+    r = _result(_sv("a", dist=2, pref=1), _sv("b", dist=3, pref=2), _sv("c", expressed=False))
+    assert r.mean_distinguishability == 2.5  # (2 + 3) / 2 valid; inconclusive excluded
+
+
+def test_preference_rating_valid():
+    pr = PreferenceRating(
+        distinguishability=2, preferred="A", magnitude=1, key_difference="concrete"
+    )
+    assert pr.preferred == "A" and pr.magnitude == 1 and pr.distinguishability == 2
+
+
+def test_preference_rating_tie_zero_magnitude_valid():
+    pr = PreferenceRating(
+        distinguishability=1, preferred="tie", magnitude=0, key_difference="equal"
+    )
+    assert pr.preferred == "tie" and pr.magnitude == 0
+
+
+def test_preference_rating_distinguishability_out_of_range_raises():
+    with pytest.raises(ValidationError):
+        PreferenceRating(distinguishability=7, preferred="A", magnitude=1, key_difference="x")
+
+
+def test_preference_rating_magnitude_out_of_range_raises():
+    with pytest.raises(ValidationError):
+        PreferenceRating(distinguishability=2, preferred="A", magnitude=3, key_difference="x")
+
+
+def test_preference_rating_non_tie_zero_magnitude_raises():
+    with pytest.raises(ValidationError):
+        PreferenceRating(distinguishability=2, preferred="A", magnitude=0, key_difference="x")
+
+
+def test_preference_rating_tie_nonzero_magnitude_raises():
+    with pytest.raises(ValidationError):
+        PreferenceRating(distinguishability=1, preferred="tie", magnitude=1, key_difference="x")

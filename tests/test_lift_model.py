@@ -101,6 +101,12 @@ def test_rate_preference_refusal_raises():
         AnthropicModel(client=client).rate_preference("t", "a", "b")
 
 
+def test_check_injection_expressed_refusal_raises():
+    client = _Client(parse_result=_Resp(parsed_output=None, stop_reason="refusal"))
+    with pytest.raises(ModelError):
+        AnthropicModel(client=client).check_injection_expressed("some injection", "some output")
+
+
 def test_fake_lift_model_scripts_the_three_methods():
     from retnovation.model import FakeLiftModel
 
