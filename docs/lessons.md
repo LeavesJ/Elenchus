@@ -11,8 +11,8 @@ Read this checklist before every code change. Update it after every correction o
 6. No confidential docs tracked:
    `git ls-files | grep -iE 'berkeley|guidebook|blueprint|brief|founderceo|judgmentloop|lifttest|mvp_scope|\.pdf'`
    must be empty.
-   Also `git ls-files | grep -E 'content/lift/scenarios\.yaml$'` must be empty
-   (the real lift bank is gitignored; only scenarios.example.yaml is tracked).
+   Also `git ls-files | grep -E 'content/lift/scenarios\.yaml$|content/lift/candidates\.yaml$'` must be empty
+   (the real lift banks are gitignored; only the *.example.yaml stubs are tracked).
 7. Inversion check: `git status --short | grep -v '^??'` empty, or every Modified file
    has a written hold reason in DEVLOG.
 8. Stage explicit paths only (no `git add -A`).

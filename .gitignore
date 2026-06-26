@@ -23,6 +23,7 @@ docs/SESSION_HANDOFF.md
 
 # === Lift-test scenario bank (Veldra-derived generations stay local) ===
 /content/lift/scenarios.yaml
+/content/lift/candidates.yaml
 
 # === Secrets ===
 .env

@@ -6,7 +6,7 @@ from pathlib import Path
 import yaml
 
 from .lift_test import run_lift_test
-from .types import AdmissionRecord, LiftResult, MinedCandidate
+from .types import AdmissionRecord, Experience, LiftResult, MinedCandidate
 
 
 def screen_candidate(
@@ -72,3 +72,45 @@ def format_adjudication_packet(candidate: MinedCandidate, result: LiftResult) ->
 def format_admission_record(record: AdmissionRecord) -> str:
     """Serialize an AdmissionRecord to committable YAML (derived marginal_lift included)."""
     return yaml.safe_dump(record.model_dump(mode="json"), sort_keys=False, allow_unicode=True)
+
+
+def check_content_graph_integrity(
+    experiences: list[Experience],
+    process_frames: list[str],
+    valid_ledger_refs: set[str],
+    records: list[AdmissionRecord],
+) -> None:
+    """Assert the three-file admit edit is referentially intact BEFORE the gated path runs.
+
+    A ledger_ref typo or duplicate experience_id surfaces here as a named assertion, not as an
+    opaque failure deep in select/assess (spec §8, seam 3).
+    """
+    ids = [e.experience_id for e in experiences]
+    dupes = sorted({i for i in ids if ids.count(i) > 1})
+    if dupes:
+        raise ValueError(f"duplicate experience_id: {dupes}")
+    by_id = {e.experience_id: e for e in experiences}
+    for e in experiences:
+        if e.ledger_ref not in valid_ledger_refs:
+            raise ValueError(
+                f"experience {e.experience_id!r} ledger_ref {e.ledger_ref!r} does not resolve"
+            )
+    pf = set(process_frames)
+    for r in records:
+        if r.decision != "admit_provisional" or r.admitted_as is None:
+            continue
+        aa = r.admitted_as
+        if aa.experience_id not in by_id:
+            raise ValueError(
+                f"admission {r.frame_code!r}: admitted_as.experience_id does not resolve"
+            )
+        exp = by_id[aa.experience_id]
+        if aa.ledger_ref != exp.ledger_ref:
+            raise ValueError(f"admission {r.frame_code!r}: admitted_as.ledger_ref mismatch")
+        if r.frame_code not in pf:
+            raise ValueError(f"admitted frame {r.frame_code!r} not in process_frames")
+        rubric_frames = {f.frame_code for f in (exp.rubric.frames if exp.rubric else [])}
+        if r.frame_code not in rubric_frames:
+            raise ValueError(
+                f"admitted frame {r.frame_code!r} not in rubric of {exp.experience_id!r}"
+            )
