@@ -118,3 +118,15 @@ Read this checklist before every code change. Update it after every correction o
   changing anything; a confident synthesis built on a terminology conflation is more dangerous than no
   review. (This is why the review harness keeps a separate verify stage — and why a near-tie of opposite
   conclusions gets escalated to the human, not silently resolved.)
+- **L-16 An audit/decision record must not force a verdict its author never made.** SP2's `AdmissionRecord`
+  required `gates: Gates` (5 non-optional human-gate verdicts), but a *screen-reject* (a candidate killed on
+  the marginal_lift necessity result) never reaches the human gate-walk — so writing its record forced 5
+  invented `pass`/`fail` verdicts into a committable provenance artifact whose entire purpose is honest
+  audit. Surfaced only by **dogfooding the tool for real** (writing the 5 reject records during the Phase-2
+  mine), not by any test. Fix: made `gates` optional (`Gates | None`), with the coherence validator
+  requiring it for `admit_provisional`/`file_as_subframe` and allowing `None` for `reject`. Prevention: when
+  a record models a multi-stage decision, make the later-stage fields optional for the exits that short-circuit
+  before those stages — a required field that some valid path can't honestly fill is a latent lie in the
+  record. (The spec's own §6 said "human gates left unevaluated" for rejects; the implemented type didn't
+  encode it — a spec/impl drift the test suite couldn't catch because no test constructed a reject without
+  gates.)

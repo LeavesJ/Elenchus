@@ -456,7 +456,7 @@ class AdmissionRecord(BaseModel):
     posture: str
     provenance: Provenance
     screen: ScreenSummary
-    gates: Gates
+    gates: Gates | None = None  # None for a screen-reject whose human gates were never walked
     nearest_sibling: str | None = None
     separating_artifact: str = ""
     decision: Literal["admit_provisional", "reject", "file_as_subframe"]
@@ -480,6 +480,8 @@ class AdmissionRecord(BaseModel):
                 raise ValueError(
                     "admit_provisional requires marginal_lift pass (verdict lift|mixed)"
                 )
+            if self.gates is None:
+                raise ValueError("admit_provisional requires the human gates")
             human = (
                 self.gates.surface_independence,
                 self.gates.atomicity,
@@ -496,7 +498,7 @@ class AdmissionRecord(BaseModel):
             if self.nearest_sibling is None:
                 raise ValueError("admit_provisional requires nearest_sibling")
         elif self.decision == "file_as_subframe":
-            if self.gates.orthogonality != "subframe":
+            if self.gates is None or self.gates.orthogonality != "subframe":
                 raise ValueError("file_as_subframe requires orthogonality == subframe")
             if self.nearest_sibling is None:
                 raise ValueError("file_as_subframe requires nearest_sibling")

@@ -153,3 +153,48 @@ def test_subframe_requires_subframe_orthogonality_and_sibling():
         separating_artifact="none found",
     )
     assert ok.gates.orthogonality == "subframe"
+
+
+def test_reject_allows_omitted_gates():
+    # A screen-reject whose human gates were never walked may omit gates entirely.
+    rec = AdmissionRecord(
+        frame_code="f",
+        posture="founder_ceo",
+        provenance=Provenance(pointer="BIZLOG 2026-05-28"),
+        screen=_screen("mixed", "surface"),
+        gates=None,
+        decision="reject",
+        rationale="net-dispreferred (1/3); control wins on substance — insufficient necessity",
+    )
+    assert rec.gates is None and rec.decision == "reject"
+
+
+def test_admit_requires_gates_present():
+    with pytest.raises(ValidationError):
+        AdmissionRecord(
+            frame_code="f",
+            posture="founder_ceo",
+            provenance=Provenance(pointer="ADR-001"),
+            screen=_screen("lift", "surface"),
+            gates=None,
+            decision="admit_provisional",
+            rationale="lifts",
+            nearest_sibling="s",
+            separating_artifact="a",
+            admitted_as=AdmittedAs(experience_id="e", ledger_ref="veldra:s"),
+        )
+
+
+def test_subframe_requires_gates_present():
+    with pytest.raises(ValidationError):
+        AdmissionRecord(
+            frame_code="f",
+            posture="founder_ceo",
+            provenance=Provenance(pointer="ADR-001"),
+            screen=_screen("lift", "surface"),
+            gates=None,
+            decision="file_as_subframe",
+            rationale="merge",
+            nearest_sibling="s",
+            separating_artifact="a",
+        )
