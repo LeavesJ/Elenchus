@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -275,6 +276,114 @@ class SelectionReceipt(BaseModel):
     margin: float
     content_gaps: list[str]
     created_at: datetime
+
+
+class CandidateFrame(BaseModel):
+    frame_code: str
+    frame_detail: str  # carried for SP2/3; the screen never reads it
+    injection: str
+
+
+class LiftScenario(BaseModel):
+    scenario_id: str
+    prompt: str
+    posture: str  # carried for SP2; not read by the screen
+
+
+class GeneratedOutput(BaseModel):
+    text: str
+    refused: bool = False
+
+
+class PreferenceRating(BaseModel):
+    distinguishability: int  # 0..3
+    preferred: Literal["A", "B", "tie"]
+    magnitude: int  # 0..2; 0 iff tie
+    key_difference: str
+
+
+class InjectionExpressed(BaseModel):
+    expressed: bool
+    evidence: str
+
+
+class ScenarioVerdict(BaseModel):
+    scenario_id: str
+    injection_expressed: bool  # the ONLY stored bool that gates aggregation
+    distinguishability: int = 0
+    preference: int = 0  # signed toward FRAMED after un-randomization; 0 = tie
+    key_difference: str = ""
+    framed_output: str = ""
+    control_output: str = ""
+    framed_refused: bool = False
+    control_refused: bool = False
+
+    def status(self, theta_dist: int) -> str:
+        if not self.injection_expressed:
+            return "inconclusive"
+        if self.distinguishability < theta_dist:
+            return "null"  # not distinguishable (incl. dist 0) — a wash / the model can't see it
+        if self.preference > 0:
+            return "lift"
+        if self.preference < 0:
+            return "negative"
+        return "neutral"  # distinguishable but a tie
+
+
+class LiftResult(BaseModel):
+    frame_code: str
+    scenarios: list[ScenarioVerdict]
+    theta_dist: int = 1
+    min_scenarios: int = 3
+
+    def _valid(self) -> list[ScenarioVerdict]:
+        return [s for s in self.scenarios if s.injection_expressed]
+
+    def _statuses(self) -> list[str]:
+        return [s.status(self.theta_dist) for s in self._valid()]
+
+    @property
+    def inconclusive_count(self) -> int:
+        return sum(1 for s in self.scenarios if not s.injection_expressed)
+
+    @property
+    def framed_preferred_count(self) -> int:
+        return sum(1 for s in self._valid() if s.preference > 0)  # excludes ties
+
+    @property
+    def mean_preference(self) -> float:
+        v = self._valid()
+        return sum(s.preference for s in v) / len(v) if v else 0.0
+
+    @property
+    def mean_distinguishability(self) -> float:
+        v = self._valid()
+        return sum(s.distinguishability for s in v) / len(v) if v else 0.0
+
+    @property
+    def verdict(self) -> str:
+        st = self._statuses()
+        if not st:
+            return "inconclusive"
+        if all(s == "lift" for s in st):
+            return "lift"
+        if any(s == "lift" for s in st):
+            return "mixed"
+        if any(s == "negative" for s in st):
+            return "negative_lift"
+        if any(s == "neutral" for s in st):
+            return "neutral"
+        return "null"
+
+    @property
+    def screen_action(self) -> str:
+        if self._valid() and self.verdict in ("null", "negative_lift"):
+            return "auto_kill"
+        return "surface"
+
+    @property
+    def below_floor(self) -> bool:
+        return len(self._valid()) < self.min_scenarios
 
 
 class CoreCandidate(BaseModel):
