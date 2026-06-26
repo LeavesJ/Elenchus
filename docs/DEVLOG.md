@@ -1,5 +1,18 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — Frame-mining SP1 (blind-lift harness) plan written + reviewed
+- `docs/superpowers/plans/2026-06-25-frame-mining-sp1-blind-lift-harness.md` — 5 **additive** TDD tasks
+  (two-axis result types + the derived verdict truth-table; confidentiality + config + scenario scaffolding;
+  the 3 model methods + prompts + FakeLiftModel; the `run_lift_test` harness + pure randomize/un_randomize;
+  the EXP-reproduction acceptance suite). Every commit green (new module; nothing existing depends on it).
+- Self-review caught + fixed an **A/B↔framed `un_randomize` inversion** in two acceptance scripts (EXP-002
+  needed `preferred="A"`, EXP-001 `preferred="B"` under `order="AB"`). A 4-lens adversarial plan review
+  **hand-traced** the truth-table totality, every un_randomize sign, the three EXP reproductions (EXP-001→
+  negative_lift NOT null, EXP-002→lift incl. control-refusal capture, EXP-003→mixed), and the
+  confidentiality fix (verified `content/lift/scenarios.yaml` is currently un-ignored; the plan closes it) —
+  returned **CLEAN, no blockers/majors**. Folded 3 nits (live-skip `ANTHROPIC_AUTH_TOKEN` guard, a
+  consolidated-DEVLOG note, a comment cleanup). NEXT: subagent-driven execution of SP1.
+
 ## 2026-06-25 — Frame-mining (spine expansion) design + Sub-project 1 (blind-lift harness) spec
 - New thread after P3: expand the founder spine by **mining new counter-intuitive frames** (where the base
   Opus is wrong by default) and validating each against `marginal_lift` via an automated **blind-lift
