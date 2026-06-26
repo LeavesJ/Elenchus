@@ -10,6 +10,9 @@ from .types import (
     CheckableQuestion,
     Experience,
     FrameState,
+    GeneratedOutput,
+    InjectionExpressed,
+    PreferenceRating,
     SharperVerdict,
     TrapState,
 )
@@ -52,6 +55,13 @@ class Model(Protocol):
     def grade_sharper(
         self, exp: Experience, kind: str, code: str, push: str, response: str
     ) -> SharperVerdict: ...
+    def generate_output(self, scenario_prompt: str, injection: str | None) -> GeneratedOutput: ...
+    def rate_preference(
+        self, scenario_prompt: str, output_a: str, output_b: str
+    ) -> PreferenceRating: ...
+    def check_injection_expressed(
+        self, injection: str, framed_output: str
+    ) -> InjectionExpressed: ...
 
 
 class FakeModel:
@@ -99,6 +109,25 @@ class FakeModel:
         if scripted:
             return scripted.pop(0)
         return SharperVerdict(sharper=True, reason="(default agree)")
+
+
+class FakeLiftModel:
+    """Scripted model for blind-lift-harness tests. Outputs keyed by (prompt, is_framed);
+    ratings by prompt; expression-checks by the framed output text."""
+
+    def __init__(self, outputs, ratings, expressed):
+        self._outputs = outputs
+        self._ratings = ratings
+        self._expressed = expressed
+
+    def generate_output(self, scenario_prompt, injection):
+        return self._outputs[(scenario_prompt, injection is not None)]
+
+    def rate_preference(self, scenario_prompt, output_a, output_b):
+        return self._ratings[scenario_prompt]
+
+    def check_injection_expressed(self, injection, framed_output):
+        return self._expressed[framed_output]
 
 
 # Shared Opus 4.8 request params (claude-api reference): adaptive thinking + high effort,
@@ -287,6 +316,55 @@ class AnthropicModel:
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=SharperVerdict,
+            **_PARAMS,
+        )
+        return _require(resp)
+
+    def generate_output(self, scenario_prompt: str, injection: str | None) -> GeneratedOutput:
+        kwargs = dict(
+            model=self._model,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": scenario_prompt}],
+            **_PARAMS,
+        )
+        if (
+            injection is not None
+        ):  # framed: the frame is the system guidance; control is frame-naive
+            kwargs["system"] = injection
+        resp = self._get_client().messages.create(**kwargs)
+        refused = getattr(resp, "stop_reason", None) == "refusal"
+        text = ""
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                text = block.text
+                break
+        if not text and not refused:  # a truly empty non-refusal is an error; a refusal is signal
+            raise ModelError("no text in generate_output response")
+        return GeneratedOutput(text=text, refused=refused)
+
+    def rate_preference(
+        self, scenario_prompt: str, output_a: str, output_b: str
+    ) -> PreferenceRating:
+        system = load_prompt("lift_rate")
+        user = f"Task:\n{scenario_prompt}\n\nOutput A:\n{output_a}\n\nOutput B:\n{output_b}"
+        resp = self._get_client().messages.parse(
+            model=self._model,
+            max_tokens=1024,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            output_format=PreferenceRating,
+            **_PARAMS,
+        )
+        return _require(resp)
+
+    def check_injection_expressed(self, injection: str, framed_output: str) -> InjectionExpressed:
+        system = load_prompt("lift_manipulation") + f"\n\nThe move to check for:\n{injection}"
+        resp = self._get_client().messages.parse(
+            model=self._model,
+            max_tokens=1024,
+            system=system,
+            messages=[{"role": "user", "content": f"Output:\n{framed_output}"}],
+            output_format=InjectionExpressed,
             **_PARAMS,
         )
         return _require(resp)
