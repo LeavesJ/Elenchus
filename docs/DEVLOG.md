@@ -1,5 +1,31 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — Frame-mining SP1 (blind-lift harness) BUILT — subagent-driven, 5 tasks + final review
+- **Sub-project 1 of the frame-mining architecture complete** on branch `frame-mining-lift-harness`
+  (7457eae..bfa6a0c, 6 commits). Suite **194 passed / 4 skipped** (the 4th skip = the new `@live` lift
+  smoke), ruff clean, both confidential gates empty, no Co-Authored-By. Executed subagent-driven (fresh
+  implementer + independent reviewer per task; OPUS reviewers on T1 truth-table / T3 refusal-divergence /
+  T4 un_randomize-sign + the final whole-branch review).
+- What shipped: `src/retnovation/lift_test.py` (`run_lift_test` + pure `randomize`/`un_randomize`) over three
+  additive `Model` methods — `generate_output` (**captures a refusal as signal, doesn't raise** — divergence
+  from `generate_push`), `rate_preference` (**unprimed** blind rater), `check_injection_expressed`
+  (**primed** gate). Two-axis result types (`ScenarioVerdict`/`LiftResult`) with `status`/`verdict`/
+  `screen_action` **derived, no stored `lift` bool**; a **total** verdict precedence; `auto_kill` only on
+  {null, negative_lift}. Prompts `lift_rate.md`/`lift_manipulation.md`; config `content/lift/lift.yaml`;
+  the **confidentiality fix** (`/content/lift/scenarios.yaml` gitignored, `scenarios.example.yaml`
+  committable, lessons gate extended). The acceptance suite reproduces the documented EXP verdicts
+  (EXP-001→`negative_lift` at dist=1 — the L-15 `negative` cell, not dist-0 `null`; EXP-002→`lift` incl. a
+  captured control refusal; EXP-003→`mixed`). The harness **automates the kill, not the verdict** — it
+  surfaces verbatim outputs + the rater's key-difference for human adjudication, with the same-model bias
+  named directional (false-positive-leaning) so the human adjudicates preference on survivors.
+- Process: brainstorm → spec (5-lens adversarial review; its "EXP-001 is null" headline refuted on verify →
+  L-15) → plan (4-lens review, hand-traced the truth-table + un_randomize signs + EXP verdicts, clean) →
+  subagent-driven build (per-task reviews caught nothing C/I) → final OPUS review **READY TO MERGE: YES**,
+  one fast-follow fix landed (bfa6a0c): `PreferenceRating` Field bounds + `magnitude==0 iff tie` validator —
+  hardening the rented-Opus boundary ("validate input at system boundaries") before SP2 consumes it. NEXT:
+  Sub-project 2 (mine + admit the first spine frame[s] from the Veldra ore, using this harness as the
+  auto-screen) — its own brainstorm/spec/plan cycle.
+
 ## 2026-06-25 — Frame-mining SP1 (blind-lift harness) plan written + reviewed
 - `docs/superpowers/plans/2026-06-25-frame-mining-sp1-blind-lift-harness.md` — 5 **additive** TDD tasks
   (two-axis result types + the derived verdict truth-table; confidentiality + config + scenario scaffolding;
