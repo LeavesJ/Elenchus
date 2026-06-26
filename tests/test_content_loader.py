@@ -161,3 +161,16 @@ def test_load_progression_has_theta_ledger_refs():
     cfg = load_progression()
     assert cfg["theta_ledger_refs"] == 2
     assert isinstance(cfg["theta_ledger_refs"], int)
+
+
+def test_load_lift_config_and_scenarios():
+    from retnovation.content_loader import load_lift_config, load_lift_scenarios
+    from retnovation.types import LiftScenario
+
+    cfg = load_lift_config()
+    assert cfg["theta_dist"] == 1 and cfg["min_scenarios"] == 3
+    assert isinstance(cfg["theta_dist"], int) and isinstance(cfg["min_scenarios"], int)
+
+    scenarios = load_lift_scenarios("scenarios.example")
+    assert scenarios and all(isinstance(s, LiftScenario) for s in scenarios)
+    assert all(s.scenario_id and s.prompt and s.posture for s in scenarios)

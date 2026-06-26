@@ -21,6 +21,9 @@ docs/SESSION_HANDOFF.md
 *.sqlite
 *.sqlite3
 
+# === Lift-test scenario bank (Veldra-derived generations stay local) ===
+/content/lift/scenarios.yaml
+
 # === Secrets ===
 .env
 .env.*

@@ -1,0 +1,14 @@
+# Example lift-test scenario bank — COMMITTABLE structural stub.
+# The REAL bank (content/lift/scenarios.yaml, Veldra-derived) is gitignored.
+# Scenarios are UNLABELED generation tasks (a pitch, an announcement, an advisory).
+scenarios:
+  - scenario_id: example_pitch
+    posture: founder_ceo
+    prompt: >
+      Write a 180-word opening to a skeptical enterprise security buyer for a
+      financial-infrastructure product.
+  - scenario_id: example_announcement
+    posture: founder_ceo
+    prompt: >
+      Write a 180-word public announcement of a feature that uses customers'
+      sensitive data to automate a workflow.

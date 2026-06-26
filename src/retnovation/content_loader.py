@@ -9,6 +9,7 @@ from .types import (
     CheckableSet,
     Experience,
     Frame,
+    LiftScenario,
     Mode,
     Regime,
     Rubric,
@@ -135,3 +136,16 @@ def load_checkable_experience(name: str, root: Path | None = None) -> Experience
 def load_checkable_library(root: Path | None = None) -> list[Experience]:
     files = sorted((_root(root) / "checkables").glob("*.yaml"))
     return [load_checkable_experience(p.stem, root=root) for p in files]
+
+
+def load_lift_config(root: Path | None = None) -> dict:
+    data = yaml.safe_load((_root(root) / "lift" / "lift.yaml").read_text())
+    return {
+        "theta_dist": int(data["theta_dist"]),
+        "min_scenarios": int(data["min_scenarios"]),
+    }
+
+
+def load_lift_scenarios(name: str = "scenarios", root: Path | None = None) -> list[LiftScenario]:
+    data = yaml.safe_load((_root(root) / "lift" / f"{name}.yaml").read_text())
+    return [LiftScenario(**s) for s in data["scenarios"]]
