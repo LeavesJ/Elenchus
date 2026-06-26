@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — SP2 T4: `format_adjudication_packet` + `format_admission_record` (`admission.py`; both axes + verbatim framed/control per scenario; YAML round-trip with `marginal_lift`; 2 new tests; suite 205 passed 4 skipped)
+
 ## 2026-06-25 — SP2 T3: `screen_candidate` driver + persistence (`admission.py`; filters by candidate tag, persists `LiftResult` JSON; 1 new test; suite 203 passed 4 skipped)
 
 ## 2026-06-25 — SP2 T2: `load_lift_candidates` + `candidate`-tagged scenarios (`LiftScenario.candidate: str | None`; `candidates.example.yaml` stub; 2 new tests; suite 202 passed 4 skipped)
