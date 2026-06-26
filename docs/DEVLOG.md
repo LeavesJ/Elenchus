@@ -1,5 +1,18 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — Frame-mining SP2 (mine + admit) plan written
+- `docs/superpowers/plans/2026-06-25-frame-mining-sp2-mine-admit.md` — 5 additive Phase-1 TDD tasks
+  (admission types + coherence validator; `load_lift_candidates` + candidate-tagged scenarios;
+  `screen_candidate` driver + persistence; adjudication-packet + admission-record formatters; content-graph
+  integrity check + `candidates.yaml` confidentiality wiring) + a gated, human-in-loop Phase-2 runbook
+  (author the real banks → @live screen → triage/adjudicate → admit → integrity check + fresh-DB
+  production-path regression → OPUS whole-branch review → finish). Every Phase-1 commit stays green
+  (additive; nothing existing depends on the new `admission.py`). `marginal_lift` is a pydantic
+  `@computed_field` derived from `screen.verdict` (the record carries both axes — seam 1); the coherence
+  validator constrains all three exits. Verified before commit: the `@computed_field` round-trips through
+  YAML under `extra="ignore"`, and `pass` serializes unquoted. NEXT: adversarial plan review →
+  subagent-driven execution.
+
 ## 2026-06-25 — Frame-mining SP2 (mine + admit) spec written + adversarial review folded
 - `docs/superpowers/specs/2026-06-25-frame-mining-sp2-mine-admit-design.md` — SP2 admits the first new
   spine frame(s) end-to-end: mine the Veldra ore (6 candidates surfaced via parallel recon), screen each
