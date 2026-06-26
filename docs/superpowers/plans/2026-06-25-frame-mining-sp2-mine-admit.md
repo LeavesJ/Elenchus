@@ -89,6 +89,21 @@ def test_mined_candidate_to_candidate_frame():
 
 
 def test_screen_summary_from_result_and_marginal_lift_is_derived():
+    from retnovation.types import LiftResult, ScenarioVerdict
+    lr = LiftResult(
+        frame_code="f",
+        scenarios=[
+            ScenarioVerdict(scenario_id="s1", injection_expressed=True, distinguishability=2, preference=1),
+            ScenarioVerdict(scenario_id="s2", injection_expressed=True, distinguishability=2, preference=1),
+        ],
+        theta_dist=1, min_scenarios=2,
+    )
+    summary = ScreenSummary.from_result(lr, data_ref="data/lift/screen_f.json")
+    assert summary.verdict == lr.verdict == "lift"
+    assert summary.mean_preference == lr.mean_preference
+    assert summary.framed_preferred_count == lr.framed_preferred_count == 2
+    assert summary.data_ref == "data/lift/screen_f.json"
+
     rec = AdmissionRecord(
         frame_code="f", posture="founder_ceo",
         provenance=Provenance(source_type="owned", pointer="EXECLOG EX-028"),
@@ -218,8 +233,8 @@ class Gates(BaseModel):
 
 
 class AdmittedAs(BaseModel):
-    experience_id: str
-    ledger_ref: str
+    experience_id: str = Field(min_length=1)
+    ledger_ref: str = Field(min_length=1)
 
 
 class AdmissionRecord(BaseModel):
@@ -567,6 +582,7 @@ def test_adjudication_packet_shows_both_axes_and_outputs(tmp_path):
     )
     packet = format_adjudication_packet(_candidate(), result)
     assert "mean_distinguishability" in packet and "mean_preference" in packet
+    assert "below_floor" in packet  # advisory floor surfaced for the human (m3)
     assert "framed1" in packet and "control1" in packet  # verbatim outputs for the human
     assert "kd1" in packet  # rater's key_difference
 
@@ -618,7 +634,8 @@ def format_adjudication_packet(candidate: "MinedCandidate", result: LiftResult) 
         f"verdict: {result.verdict}    screen_action: {result.screen_action}",
         f"mean_distinguishability: {result.mean_distinguishability:.2f}    "
         f"mean_preference: {result.mean_preference:.2f}    "
-        f"framed_preferred_count: {result.framed_preferred_count}",
+        f"framed_preferred_count: {result.framed_preferred_count}    "
+        f"below_floor: {result.below_floor}",  # advisory: fewer valid scenarios than min_scenarios
         "",
         "## Per-scenario",
     ]
@@ -869,7 +886,7 @@ git commit -m "feat(admission): content-graph integrity check + candidates.yaml 
 ### Step A — Author the real banks (gitignored)
 
 - [ ] Author `content/lift/candidates.yaml` — the 6 `MinedCandidate` definitions (spec §3 table), each abstracted per the §7 rule. Schema = `content/lift/candidates.example.yaml`.
-- [ ] Author `content/lift/scenarios.yaml` — ≥2 blind scenarios per candidate, each tagged `candidate: <frame_code>`. **L-13: the scenario `prompt` must NOT name the move** — it is a plain generation task (a pitch, an announcement, an advisory); the move lives only in the candidate's `injection`. Fan authoring out per-candidate to parallel subagents; review each for leak + task-only framing.
+- [ ] Author `content/lift/scenarios.yaml` — **≥3 blind scenarios per candidate** (matching the `min_scenarios: 3` advisory floor in `content/lift/lift.yaml`, so a survivor is not admitted below the floor — m3), each tagged `candidate: <frame_code>`. **L-13: the scenario `prompt` must NOT name the move** — it is a plain generation task (a pitch, an announcement, an advisory); the move lives only in the candidate's `injection`. Fan authoring out per-candidate to parallel subagents; review each for leak + task-only framing.
 - [ ] Confirm both files are gitignored: `git status --short content/lift/` shows nothing.
 
 ### Step B — Run the @live screen
@@ -880,6 +897,7 @@ git commit -m "feat(admission): content-graph integrity check + candidates.yaml 
 
 ### Step C — Triage + adjudicate (with the user)
 
+- [ ] Build each record's `screen:` block with `ScreenSummary.from_result(result, data_ref=f"data/lift/screen_{frame_code}.json")` (do not hand-transcribe the axes — derive them from the persisted `LiftResult`).
 - [ ] For every candidate whose `screen_action == auto_kill` (null/negative_lift): write `docs/admissions/{frame_code}.yaml` with `decision: reject`, the full `screen:` block (both axes — preserves null vs negative_lift), and a one-line `rationale`. (The validator requires the screen verdict + rationale.)
 - [ ] For every `surface` candidate: walk the five human gates with the user using the packet; record verdicts + `separating_artifact` + `nearest_sibling`; set `decision` ∈ {admit_provisional, file_as_subframe, reject}; write `docs/admissions/{frame_code}.yaml`.
 - [ ] Each record must construct as a valid `AdmissionRecord` (the validator is the gate). Doctrine: expect ~1–2 admits; a high kill rate is the screen working (spec §11).
@@ -896,7 +914,13 @@ For each `admit_provisional` survivor:
 
 - [ ] Run the integrity check in a scratch script:
   `check_content_graph_integrity(load_library(), load_map("founder_ceo")[0], {ledger_ref(s.slug) for s in load_seed(DEFAULT_SEED)}, [<the admission records>])` — must not raise.
-- [ ] Add a fresh-DB regression test `tests/test_admission_regression.py` exercising each admitted frame through the **real gated path** (pattern from `tests/test_dry_run.py`): `build_store(tmp_path/"db")` (auto-seeds the library's ledger/corpus — the L-8 path), `derive_core(aim())`, then `run_session(...)` with a `FakeModel` scripting the new frame's `intake`/`responses` (frame `absent` → `closed`), and assert the new `frame_code` appears in `assessment.frame_deltas` and the reloaded state has a non-weak strength. This proves the frame is reachable in production, not just in a synthetic fixture (L-9).
+- [ ] Add a fresh-DB regression test `tests/test_admission_regression.py` exercising each admitted frame through the **real gated path** (pattern from `tests/test_dry_run.py`). **Steer the selection explicitly — do NOT accept `proposal.top` (L-14 trap, confirmed in plan review):** the cold-start value function ranks by a `load` tiebreak, so if the new frame lands in a multi-frame rubric it drops in rank and `run_session` will select a *different* experience whose codes the `FakeModel` does not script → `KeyError` in `classify_response` (model.py). Concretely:
+  1. **Author the new frame in a minimal load=1 rubric** (one frame, one trap) — Step D's minimal-experience requirement; this also keeps the regression's `FakeModel` small.
+  2. `store = build_store(tmp_path / "db")` (auto-seeds the new rubric's `ledger_ref` — the L-8 path), `core = derive_core(aim())`.
+  3. Build a `FakeModel` whose `intake` marks the new frame `absent` and whose `responses[frame_code] = [ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)]`.
+  4. Call `run_session(store, core, fake, _now(), present=fixture, decide=_to_new_frame, decide_core=lambda c: [])` where `_to_new_frame` selects the new `experience_id` from `proposal.problem_menu()` (copy the `_to_license` pattern at `tests/test_dry_run.py:51-64`, swapping in the new `ledger_ref`), and `fixture` returns a `Work(opening=..., respond=lambda push: ...)`.
+  5. Assert the new `frame_code` appears in `assessment.frame_deltas` and the reloaded `Store(...).load_state(_now())` has a non-weak strength for it.
+  This proves the frame is reachable in production through the real select→assess→persist path, not just in a synthetic fixture (L-8/L-9), and is steered so a rank change cannot spuriously red the test (L-14).
 - [ ] `PYTHONPATH=src .venv/bin/pytest -q` green; `ruff format . && ruff check .` clean.
 
 ### Step F — Commit, review, finish

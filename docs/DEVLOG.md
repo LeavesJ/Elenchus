@@ -10,8 +10,17 @@
   (additive; nothing existing depends on the new `admission.py`). `marginal_lift` is a pydantic
   `@computed_field` derived from `screen.verdict` (the record carries both axes — seam 1); the coherence
   validator constrains all three exits. Verified before commit: the `@computed_field` round-trips through
-  YAML under `extra="ignore"`, and `pass` serializes unquoted. NEXT: adversarial plan review →
-  subagent-driven execution.
+  YAML under `extra="ignore"`, and `pass` serializes unquoted.
+- **Adversarial plan review folded (READY-TO-BUILD: YES-WITH-FIXES).** An OPUS reviewer that *ran* the code
+  confirmed all of Phase 1 correct (validator branches, `un_randomize` sign, screen-driver round-trip,
+  integrity edges, every-commit-green, `build_store` auto-seed). One MAJOR + four MINORs folded: (M1) the
+  Step-E production-path regression now steers selection via a custom `decide` over a minimal load=1 rubric
+  — the reviewer reproduced the L-14 trap (a multi-frame rubric drops the new frame to rank #5 →
+  `KeyError` on unscripted codes); (m1) spec §4 `check_content_graph_integrity` signature synced to the
+  4-arg form; (m2) `ScreenSummary.from_result` wired into Step C + tested; (m3) author ≥3 scenarios
+  (matching `min_scenarios`) + surface `below_floor` in the packet; (m4) the abstraction rule scoped so the
+  citation-key `pointer` may carry a doc locator/date while reasoning-shape fields may not; (n1) `AdmittedAs`
+  min_length guard. NEXT: subagent-driven execution (Phase 1) → gated Phase 2.
 
 ## 2026-06-25 — Frame-mining SP2 (mine + admit) spec written + adversarial review folded
 - `docs/superpowers/specs/2026-06-25-frame-mining-sp2-mine-admit-design.md` — SP2 admits the first new

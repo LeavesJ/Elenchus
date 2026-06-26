@@ -87,8 +87,10 @@ A small `src/retnovation/admission.py` plus additive pieces:
   output** / refusal flags. What the human reads to adjudicate.
 - **`AdmissionRecord`** (in `types.py`) + **`admission.format_admission_record(record) → str`** — the
   structured, committable audit artifact (§6).
-- **`admission.check_content_graph_integrity(library, ledger, records) → None`** — the referential
-  cross-check run at admit (§8), raising a named assertion on a broken edge.
+- **`admission.check_content_graph_integrity(experiences, process_frames, valid_ledger_refs, records) →
+  None`** — the referential cross-check run at admit (§8), raising a named assertion on a broken edge.
+  Pure over injected inputs (so it is unit-testable with synthetic fixtures, no DB); at admit time
+  `valid_ledger_refs` is `{ledger_ref(s.slug) for s in load_seed(DEFAULT_SEED)}`.
 - **Schema touch:** `LiftScenario` gains an optional `candidate: <frame_code>` field so `screen_candidate`
   selects a candidate's scenarios from a flat bank. Additive, backward-compatible; the example file shows
   it.
@@ -176,13 +178,17 @@ Promotion gates (reach ≥2, durable provenance) are out of scope (§10); every 
 - **`.gitignore`** gains `content/lift/candidates.yaml`; the lessons pre-commit gate extends its grep to
   also catch `content/lift/candidates\.yaml$`.
 - **Abstraction rule (concrete — the smaller-cluster (c) fix).** A committable record / frame is *abstracted*
-  iff: (i) provenance is a **pointer only** (`"EXECLOG EX-028"`), never quoted ore; (ii) `frame_detail`,
-  `injection`, `hypothesis`, `separating_artifact`, and gate rationales describe the **reasoning shape**
-  only — no customer names, dollar figures, dates, internal product/service identifiers, or any Veldra
-  specific beyond the pointer; (iii) the move must read as a *portable founder principle* with the Veldra
-  surface stripped (the surface_independence gate is itself the test). A committed
-  `docs/admissions/_TEMPLATE.example.yaml` carries this rule inline as the authoring guard. This mirrors
-  L-2 and the existing ledger precedent (which already commits provenance pointers, never content).
+  iff: (i) provenance is a **pointer only** (`"EXECLOG EX-028"`), never quoted ore; (ii) the
+  **reasoning-shape fields** — `frame_detail`, `injection`, `hypothesis`, `separating_artifact`, and gate
+  rationales — describe the move only: no customer names, dollar figures, calendar dates, or internal
+  product/service identifiers. *The provenance `pointer` is exempt from (ii)* — it is a citation key and may
+  use the source doc's native locator, including a section id (`EX-028`) or a log date (`BIZLOG
+  2026-04-16`), because a pointer references confidential content without reproducing it; (iii) the move
+  must read as a *portable founder principle* with the Veldra surface stripped (the surface_independence
+  gate is itself the test). A committed `docs/admissions/_TEMPLATE.example.yaml` carries this rule inline as
+  the authoring guard. Enforcement is by-eye (the lessons grep matches filenames, not content), so the
+  template + the surface_independence gate are the real guards; this mirrors L-2 and the existing ledger
+  precedent (which already commits provenance pointers, never content).
 
 ## 8. Admit step, content-graph integrity, testing
 
