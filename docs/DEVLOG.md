@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — SP2 T2: `load_lift_candidates` + `candidate`-tagged scenarios (`LiftScenario.candidate: str | None`; `candidates.example.yaml` stub; 2 new tests; suite 202 passed 4 skipped)
+
 ## 2026-06-25 — SP2 T1: admission types landed (`Provenance`, `MinedCandidate`, `ScreenSummary`, `Gates`, `AdmittedAs`, `AdmissionRecord` with `@computed_field marginal_lift` + coherence validator; 6 new tests; suite 200 passed 4 skipped)
 
 ## 2026-06-25 — Frame-mining SP2 (mine + admit) plan written

@@ -174,3 +174,39 @@ def test_load_lift_config_and_scenarios():
     scenarios = load_lift_scenarios("scenarios.example")
     assert scenarios and all(isinstance(s, LiftScenario) for s in scenarios)
     assert all(s.scenario_id and s.prompt and s.posture for s in scenarios)
+
+
+def test_lift_scenario_accepts_optional_candidate():
+    from retnovation.types import LiftScenario
+
+    s = LiftScenario(scenario_id="s1", prompt="p", posture="founder_ceo", candidate="frame_x")
+    assert s.candidate == "frame_x"
+    s2 = LiftScenario(scenario_id="s2", prompt="p", posture="founder_ceo")  # back-compat
+    assert s2.candidate is None
+
+
+def test_load_lift_candidates_parses_example(tmp_path):
+    import textwrap
+    from retnovation.content_loader import load_lift_candidates
+
+    root = tmp_path / "content"
+    (root / "lift").mkdir(parents=True)
+    (root / "lift" / "candidates.yaml").write_text(
+        textwrap.dedent("""
+        candidates:
+          - frame_code: build_more_to_own_less
+            frame_detail: A larger build can be the net-simpler system.
+            injection: Account for net component count, not effort.
+            posture: founder_ceo
+            hypothesis: the model conflates more-build with more-complexity
+            nearest_sibling: protect_the_core_lane
+            separating_artifact: a net-component-count ledger
+            provenance:
+              source_type: owned
+              pointer: EXECLOG EX-028
+    """)
+    )
+    cands = load_lift_candidates(root=root)
+    assert len(cands) == 1
+    assert cands[0].frame_code == "build_more_to_own_less"
+    assert cands[0].provenance.pointer == "EXECLOG EX-028"

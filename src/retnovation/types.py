@@ -288,6 +288,7 @@ class LiftScenario(BaseModel):
     scenario_id: str
     prompt: str
     posture: str  # carried for SP2; not read by the screen
+    candidate: str | None = None  # SP2: groups a scenario under a MinedCandidate.frame_code
 
 
 class GeneratedOutput(BaseModel):

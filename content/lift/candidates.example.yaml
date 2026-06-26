@@ -1,0 +1,14 @@
+# Example mined-candidate bank — COMMITTABLE structural stub.
+# The REAL bank (content/lift/candidates.yaml, Veldra-derived) is gitignored.
+# Each candidate is an abstracted reasoning move; provenance is a POINTER, never quoted ore.
+candidates:
+  - frame_code: example_build_more_to_own_less
+    frame_detail: A larger-looking build can be the net-simpler system when it deletes a subsystem.
+    injection: Account for net component count, not effort, before choosing scope.
+    posture: founder_ceo
+    hypothesis: the base model conflates "build more" with "more complexity".
+    nearest_sibling: protect_the_core_lane
+    separating_artifact: a net-component-count ledger (+1 client, -2 services).
+    provenance:
+      source_type: owned
+      pointer: "EXECLOG EX-028 (abstracted)"

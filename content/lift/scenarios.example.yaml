@@ -4,6 +4,7 @@
 scenarios:
   - scenario_id: example_pitch
     posture: founder_ceo
+    candidate: example_build_more_to_own_less
     prompt: >
       Write a 180-word opening to a skeptical enterprise security buyer for a
       financial-infrastructure product.

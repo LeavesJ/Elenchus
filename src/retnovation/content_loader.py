@@ -10,6 +10,7 @@ from .types import (
     Experience,
     Frame,
     LiftScenario,
+    MinedCandidate,
     Mode,
     Regime,
     Rubric,
@@ -149,3 +150,10 @@ def load_lift_config(root: Path | None = None) -> dict:
 def load_lift_scenarios(name: str = "scenarios", root: Path | None = None) -> list[LiftScenario]:
     data = yaml.safe_load((_root(root) / "lift" / f"{name}.yaml").read_text())
     return [LiftScenario(**s) for s in data["scenarios"]]
+
+
+def load_lift_candidates(
+    name: str = "candidates", root: Path | None = None
+) -> list[MinedCandidate]:
+    data = yaml.safe_load((_root(root) / "lift" / f"{name}.yaml").read_text())
+    return [MinedCandidate(**c) for c in data["candidates"]]
