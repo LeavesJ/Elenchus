@@ -25,6 +25,9 @@ def screen_candidate(
     expensive @live run is never lost. Returns the LiftResult.
     """
     cand_scenarios = [s for s in scenarios if s.candidate == candidate.frame_code]
+    missing = {s.scenario_id for s in cand_scenarios if s.scenario_id not in order}
+    if missing:
+        raise ValueError(f"order is missing scenario_id(s): {sorted(missing)}")
     result = run_lift_test(candidate.to_candidate_frame(), cand_scenarios, model, order, config)
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

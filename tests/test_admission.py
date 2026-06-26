@@ -105,6 +105,8 @@ def test_adjudication_packet_shows_both_axes_and_outputs(tmp_path):
     )
     packet = format_adjudication_packet(_candidate(), result)
     assert "mean_distinguishability" in packet and "mean_preference" in packet
+    assert "mean_distinguishability: 2.00" in packet  # pin axis value (not just label)
+    assert "mean_preference: 1.00" in packet  # pin axis value (not just label)
     assert "below_floor" in packet  # advisory floor surfaced for the human (m3)
     assert "framed1" in packet and "control1" in packet  # verbatim outputs for the human
     assert "kd1" in packet  # rater's key_difference
@@ -228,4 +230,40 @@ def test_integrity_catches_frame_not_in_rubric():
     with pytest.raises(ValueError, match="not in rubric"):
         check_content_graph_integrity(
             exps, ["frame_x"], {"veldra:slug_a"}, [_admit_record("frame_x", "e1", "veldra:slug_a")]
+        )
+
+
+def test_integrity_catches_missing_admitted_experience():
+    """admitted_as.experience_id points to an id that doesn't exist — must raise."""
+    exps = [_exp("e1", "veldra:slug_a", "frame_x")]
+    # record claims admitted_as experience_id="e_missing" which is not in experiences
+    record = _admit_record("frame_x", "e_missing", "veldra:slug_a")
+    with pytest.raises(ValueError, match="admitted_as.experience_id"):
+        check_content_graph_integrity(exps, ["frame_x"], {"veldra:slug_a"}, [record])
+
+
+def test_integrity_catches_ledger_ref_mismatch():
+    """admitted_as.ledger_ref disagrees with the experience's ledger_ref — must raise."""
+    exps = [_exp("e1", "veldra:slug_a", "frame_x")]
+    # experience e1 has ledger_ref="veldra:slug_a" but record claims "veldra:slug_b"
+    record = _admit_record("frame_x", "e1", "veldra:slug_b")
+    with pytest.raises(ValueError, match="mismatch"):
+        check_content_graph_integrity(exps, ["frame_x"], {"veldra:slug_a"}, [record])
+
+
+def test_screen_candidate_raises_on_missing_order(tmp_path):
+    """order dict missing a scenario_id from the filtered set → named ValueError at the boundary."""
+    scenarios = [
+        LiftScenario(scenario_id="s1", prompt="p1", posture="founder_ceo", candidate="cap_effort"),
+        LiftScenario(scenario_id="s2", prompt="p2", posture="founder_ceo", candidate="cap_effort"),
+    ]
+    # order only contains s1 — s2 is absent
+    with pytest.raises(ValueError, match="order is missing"):
+        screen_candidate(
+            _candidate(),
+            scenarios,
+            _fake(),
+            order={"s1": "AB"},
+            config=CFG,
+            out_dir=tmp_path,
         )

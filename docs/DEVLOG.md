@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-25 — SP2 post-review hardening: 4 new tests (axis-value pins, 2 integrity edges, screen_candidate order-dict boundary guard); suite 213 passed 4 skipped
+
 ## 2026-06-25 — SP2 T5: `check_content_graph_integrity` + `candidates.yaml` confidentiality wiring (`admission.py` + `.gitignore` + `docs/lessons.md` + `docs/admissions/_TEMPLATE.example.yaml`; 5 new integrity-check tests; suite 210 passed 4 skipped)
 
 ## 2026-06-25 — SP2 T4: `format_adjudication_packet` + `format_admission_record` (`admission.py`; both axes + verbatim framed/control per scenario; YAML round-trip with `marginal_lift`; 2 new tests; suite 205 passed 4 skipped)
