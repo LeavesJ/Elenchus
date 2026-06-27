@@ -42,7 +42,17 @@
   no-collision problem). (Issue 3) pin session-2 at the worst-case forming edge (gap ~0.08), record the
   real-use thinness + the cross-drive logged-margin distortion as calibration items; (smaller) no-frame
   surface asserted for BOTH sessions; angle_count floor (8, no headroom) noted.
-  NEXT: user review → writing-plans.
+  Decision locked: keep `license_fork_risk`, accept the commit delay (founder's call).
+
+## 2026-06-26 — Frame-mining SP3 implementation plan written
+- `docs/superpowers/plans/2026-06-26-frame-mining-sp3-isolated-experiences.md` — 3 tasks: (T1)
+  `continuity_lock_in` rubric + atomic re-point of the 3 L-14-cascade tests (steer by `experience_id` over
+  `proposal.candidates`); (T2) the scripted engine-proof regression (`tests/test_sp3_progression.py`) —
+  session-1 construction check, two-session weak→forming→strong over the real path, the session-2 ordering
+  pinned by the direct rank-1-vs-rank-2 V gap at the worst-case forming edge, the shadow self-resolution on
+  the default menu path; (T3) mark the receipt margin cross-drive in the log surface. Plan code transcribes
+  the mechanics I verified by live runs. NEXT: adversarial plan review (runs the regression code) →
+  subagent-driven execution.
 
 ## 2026-06-26 — SP2 cosmetic cleanup (post-review minors)
 - `ScreenSummary` now rounds `mean_distinguishability`/`mean_preference` to 2dp via a `field_validator`
