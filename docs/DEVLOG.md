@@ -1,5 +1,28 @@
 # Retnovation — DEVLOG
 
+## 2026-06-26 — Frame-mining SP3 (isolated experiences) spec written + design review folded
+- `docs/superpowers/specs/2026-06-26-frame-mining-sp3-isolated-experiences-design.md` — SP3 makes the
+  admitted frame `embed_credentials_as_a_list` locatable by the diagnostic-progression engine across ≥2
+  owned problems (reach `strong`, fire transfer), proven by a committable **scripted** regression over the
+  REAL engine path (no @live spend). Components: one new single-frame isolated experience
+  `continuity_lock_in` on the existing `veldra:license_fork_risk` (no seed/ingest/L-8 cascade); reuse
+  `irreversible_anchor` for problem 1; the regression. Decisions settled: content + scripted proof;
+  license_fork_risk as the 2nd problem; single-frame isolate (1 frame + 3 traps = 8 angles); reuse problem 1.
+- **Two design reviews folded (the second was incisive).** Verified the load-bearing code facts before
+  incorporating (L-12/L-15): the cold-start penalty counts FRAMES not traps (`policy.py:68-71`) so the
+  single-frame isolate wins session-2 transfer cleanly; the learner menu withholds the frame
+  (`surface.py:25`); post-`strong` interval = 30d (`state.py:23`); weights wT=1.5/wU=1.0/wL=0.5. Five
+  sharpenings: (1) the regression's REAL-vs-FIXTURED boundary stated explicitly (FakeModel supplies only the
+  model's judgments; selection/transfer/not-probed/no-frame-receipt/aggregation/strength are real; the test
+  asserts the progression as OUTPUTS, never injects it) + the honesty boundary that it proves the path, not
+  content-elicitation (the @live test, deferred); (2) the regression PINS the session-2 ordering (top-ranked
+  = continuity_lock_in, drive=deploy, runner-up named) so a weight change fails a test; (3) the 3 traps are
+  embed's OWN failure modes (scalar-defer / over-build / amendable-belief), not siblings' — orthogonality in
+  the trap slot; (4) the isolate is a genuine 2nd context (legal lock-in vs technical), not a restatement;
+  (5) assert the post-`strong` due interval is the long one. Also: `decision_frame` omitted from the isolate
+  because a stress-probe would mark embed *probed* and disqualify the unprompted read `strong` depends on.
+  NEXT: adversarial spec review → user review → writing-plans.
+
 ## 2026-06-26 — SP2 cosmetic cleanup (post-review minors)
 - `ScreenSummary` now rounds `mean_distinguishability`/`mean_preference` to 2dp via a `field_validator`
   (clean committable audit records; the raw `LiftResult` under gitignored `data/lift/` keeps full precision).
