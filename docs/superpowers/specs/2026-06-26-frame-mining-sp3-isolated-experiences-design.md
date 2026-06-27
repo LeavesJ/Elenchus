@@ -222,9 +222,9 @@ Each `trap_detail` is "the provision-optionality move gone wrong," never an adja
     plan must **(i)** add a regression assertion exercising the **default menu path** on `license_fork_risk`
     (fresh + forming → `continuity_lock_in`; embed-`strong` → `license_continuity`/`commit` surfaces), so the
     shadow + self-resolution is *tested*, not routed around by the `experience_id`-steered §6 assertions; and
-    **(ii)** record the `commit` delay as an accepted consequence (or, if the founder judges it unacceptable,
-    relocate `embed`'s 2nd experience to a problem with no existing experience — e.g.
-    `cross_pool_data_optics` — to avoid the collision; a fork to raise, not decide in the plan).
+    **(ii)** record the `commit` delay as an **accepted consequence** — the founder's call (2026-06-26):
+    keep `license_fork_risk` (the shadow is temporary, self-resolving, and doctrine-consistent); the
+    relocate-to-`cross_pool_data_optics` and menu-fix alternatives were considered and declined.
 
 ## 10. Out of scope / deferred
 
