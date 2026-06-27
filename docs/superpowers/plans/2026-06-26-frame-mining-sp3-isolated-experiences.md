@@ -194,23 +194,40 @@ Expected: PASS (`reasoned_unprompted` contains `embed`; trajectory targets only 
 
 Append:
 
+**ALL module-level imports go at the TOP of `tests/test_sp3_progression.py`** — default ruff forbids
+mid-file imports (E402) and would block the Step-7 commit (`ruff format` does NOT fix E402). The per-step
+snippets show imports inline only for readability; collapse them into this single top block, which is the
+**definitive** import + helper header for the whole file — it supersedes the inline imports AND the `_closed`
+helper the Step-1 snippet showed (define `_closed` once, here), and merges with Task 1's gate-test imports
+(`datetime`, `load_rubric`, `angle_count`) so nothing is imported mid-file:
+
 ```python
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from retnovation.aim import aim, derive_core
+from retnovation.assessment.judgment_loop import assess
 from retnovation.cli import build_store
+from retnovation.content_loader import load_library, load_progression, load_experience, load_rubric
+from retnovation.generator import angle_count
+from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
 from retnovation.orchestration import run_session
 from retnovation.persistence import Store
+from retnovation.policy import select_next
+from retnovation.state import derive_due
 from retnovation.surface import format_problem_menu
-from retnovation.types import Outcome, Regime, Selection, Strength
+from retnovation.types import (
+    FrameState, FrameStrength, LearnerState, Outcome, Proposal, Regime, Selection, Strength,
+    TrapState, Work,
+)
 
 EMBED = "embed_credentials_as_a_list"
 P1 = "veldra:embedded_anchor_lock_in"
 P2 = "veldra:license_fork_risk"
+NOW1 = datetime(2026, 6, 26, tzinfo=timezone.utc)
 
 
-def _S1():  # session 1: irreversible_anchor — embed unprompted, choose_failure closed-under-pressure
-    return datetime(2026, 6, 26, tzinfo=timezone.utc)
+def _closed(n=4):
+    return [ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False) for _ in range(n)]
 
 
 def _steer(experience_id):
@@ -236,12 +253,19 @@ def _model_for(frames_present, traps, probed_responses):
 
 def _present(exp):
     return Work(opening="reasoning that already holds the move unprompted", respond=lambda push: "mechanism")
+```
 
+The test — note the ordering pin is asserted against `state1`, the **REAL post-session-1 state** (which
+carries `choose_the_failure_default_deliberately` as a `forming` competing transfer, since session 1 closes
+it under pressure). A hand-built embed-only state would make the gap a comfortable ~1.4 and miss the ~0.08
+window the spec requires — so derive it from the real run, never hand-build it:
 
-def test_two_session_run_reaches_strong_through_the_real_path():
-    store = build_store(tmp_path_global := __import__("tempfile").mkdtemp() + "/sp3.db")
+```python
+def test_two_session_run_reaches_strong_through_the_real_path(tmp_path):
+    db = tmp_path / "sp3.db"
+    store = build_store(db)
     core = derive_core(aim())
-    now1 = _S1()
+    lib, cfg = load_library(), load_progression()
 
     # --- session 1: irreversible_anchor. embed present_reasoned (unprompted); choose_failure absent (probed, closed).
     s1_model = _model_for(
@@ -249,18 +273,26 @@ def test_two_session_run_reaches_strong_through_the_real_path():
         traps=["deferred_the_one_time_choice", "assumed_the_happy_path"],
         probed_responses={"choose_the_failure_default_deliberately"},
     )
-    # session-1 surface withholds the frame (both sessions credit an unprompted read)
-    captured = {}
-    def present_s1(exp):
-        return _present(exp)
-    state1, _ = run_session(store, core, s1_model, now1, regime=Regime.open_ended,
-                            present=present_s1, decide=_steer("irreversible_anchor"), decide_core=lambda c: [])
+    state1, _ = run_session(store, core, s1_model, NOW1, regime=Regime.open_ended,
+                            present=_present, decide=_steer("irreversible_anchor"), decide_core=lambda c: [])
     assert state1.frames[EMBED].strength is Strength.forming
     assert state1.frames[EMBED].breadth == {P1}
     assert state1.frames[EMBED].unprompted_breadth == {P1}
+    # session-1 learner surface withholds the frame (both sessions credit an unprompted read)
+    assert EMBED not in format_problem_menu(Proposal(candidates=select_next(state1, lib, cfg, NOW1)))
 
-    # --- session 2 at the worst-case forming edge (7 days later); embed present_reasoned (unprompted).
-    now2 = now1 + timedelta(days=7)
+    # --- ordering pin at the worst-case forming edge (+7d), derived from the REAL post-S1 state ---
+    now2 = NOW1 + timedelta(days=7)
+    ranked = select_next(state1, lib, cfg, now2)
+    top_spec, top_rcpt = ranked[0]
+    assert top_spec.experience_id == "continuity_lock_in"
+    assert top_rcpt.frame == EMBED and top_rcpt.drive == "deploy"
+    # the REAL ordering risk is a same-drive competing transfer (choose_failure, forming after S1); assert
+    # the direct rank-1-vs-rank-2 gap (~0.08), NOT the receipt margin (cross-drive only — policy.py:99).
+    assert ranked[0][1].scores["V"] - ranked[1][1].scores["V"] > 0
+    assert EMBED not in format_problem_menu(Proposal(candidates=ranked))  # session-2 surface withholds too
+
+    # --- session 2 at +7d; embed present_reasoned (unprompted) -> strong ---
     s2_model = _model_for(frames_present=[EMBED],
                           traps=["shipped_the_one_shot_term", "over_built_the_escape_hatch",
                                  "treated_the_shipped_choice_as_amendable"],
@@ -269,73 +301,36 @@ def test_two_session_run_reaches_strong_through_the_real_path():
                             present=_present, decide=_steer("continuity_lock_in"), decide_core=lambda c: [])
     assert state2.frames[EMBED].strength is Strength.strong
     assert state2.frames[EMBED].unprompted_breadth == {P1, P2}
-
     # post-strong savings effect: due interval jumps to 30 days
-    from retnovation.state import derive_due
-    fs = Store(tmp_path_global).load_state(now2).frames[EMBED]
+    fs = Store(db).load_state(now2).frames[EMBED]
     assert derive_due(fs.evidence_count, fs.unprompted_breadth, fs.last_seen) == fs.last_seen + timedelta(days=30)
 ```
-
-> Note for the implementer: use a pytest `tmp_path` fixture instead of the `mkdtemp` shim above — pass `tmp_path` into the test and use `build_store(tmp_path / "sp3.db")` / `Store(tmp_path / "sp3.db")`. The shim is only to keep this snippet self-contained; the real test signature is `def test_two_session_run_reaches_strong_through_the_real_path(tmp_path):`.
 
 - [ ] **Step 4: Run it — PASS**
 
 Run: `PYTHONPATH=src .venv/bin/pytest tests/test_sp3_progression.py -k reaches_strong -v`
 Expected: PASS — `forming` after S1, `strong` after S2, `unprompted_breadth == {P1, P2}`, post-strong due `= last_seen + 30d`. (If `KeyError` on a frame code, the loop probed a frame the model didn't script — adjust `frames_present`/`probed_responses`, do not weaken the assertion.)
 
-- [ ] **Step 5: Write the session-2 ordering pin (direct V gap, forming edge) + the shadow-arc**
+- [ ] **Step 5: Write the shadow self-resolution test (cascade Arm 2, default menu path)**
 
-Append:
+Append (imports + helpers already at the top of the file from Step 3):
 
 ```python
-from retnovation.content_loader import load_library, load_progression
-from retnovation.policy import select_next
-from retnovation.types import Proposal
-
-
-def _post_s1_state(now):
-    # the exact state session 1 leaves: embed forming, unprompted on P1 only.
-    from retnovation.types import FrameStrength
-    return __import__("retnovation.types", fromlist=["LearnerState"]).LearnerState(
-        frames={EMBED: FrameStrength(strength=Strength.forming, last_seen=now, due=now,
-                                     last_evidence="irreversible_anchor", evidence_count=1,
-                                     breadth={P1}, unprompted_breadth={P1})})
-
-
-def test_session2_selection_pins_the_isolate_at_the_forming_edge():
-    lib = load_library()
-    cfg = load_progression()
-    now1 = _S1()
-    now2 = now1 + timedelta(days=7)  # worst-case forming edge (gap ~0.08)
-    ranked = select_next(_post_s1_state(now1), lib, cfg, now2)
-    top_spec, top_rcpt = ranked[0]
-    assert top_spec.experience_id == "continuity_lock_in"   # resolve by experience_id, not ledger_ref
-    assert top_rcpt.frame == EMBED and top_rcpt.drive == "deploy"
-    # the REAL ordering risk is a same-drive competing transfer; assert the direct rank gap, not the
-    # receipt margin (which is cross-drive only — policy.py:99).
-    assert ranked[0][1].scores["V"] - ranked[1][1].scores["V"] > 0
-    # the learner-facing menu withholds the frame
-    assert EMBED not in format_problem_menu(Proposal(candidates=ranked))
-
-
-def test_shadow_on_license_continuity_self_resolves(tmp_path):
-    # Arm 2 of the cascade, on the DEFAULT menu path (the path real use takes): the isolate shadows
-    # license_continuity while embed is unlocated, and license_continuity (commit_under_the_deadline's
-    # only home) surfaces once embed is strong. Tested, not routed around.
-    from retnovation.types import FrameStrength, LearnerState
-    lib = load_library()
-    cfg = load_progression()
-    now = _S1()
+def test_shadow_on_license_continuity_self_resolves():
+    # Arm 2 of the cascade on the DEFAULT menu path (what real use takes): the isolate shadows
+    # license_continuity while embed is unlocated; license_continuity (commit_under_the_deadline's only
+    # home) surfaces once embed is strong. Tested, not routed around.
+    lib, cfg = load_library(), load_progression()
 
     def served(state):
-        menu = Proposal(candidates=select_next(state, lib, cfg, now)).problem_menu()
+        menu = Proposal(candidates=select_next(state, lib, cfg, NOW1)).problem_menu()
         return next(s.experience_id for s, _ in menu if s.ledger_ref == P2)
 
-    assert served(LearnerState()) == "continuity_lock_in"  # fresh learner: isolate shadows
-    forming = LearnerState(frames={EMBED: FrameStrength(strength=Strength.forming, last_seen=now, due=now,
+    assert served(LearnerState()) == "continuity_lock_in"  # fresh: isolate shadows
+    forming = LearnerState(frames={EMBED: FrameStrength(strength=Strength.forming, last_seen=NOW1, due=NOW1,
         last_evidence="x", evidence_count=1, breadth={P1}, unprompted_breadth={P1})})
     assert served(forming) == "continuity_lock_in"  # still the isolate (transfer)
-    strong = LearnerState(frames={EMBED: FrameStrength(strength=Strength.strong, last_seen=now, due=now,
+    strong = LearnerState(frames={EMBED: FrameStrength(strength=Strength.strong, last_seen=NOW1, due=NOW1,
         last_evidence="x", evidence_count=2, breadth={P1, P2}, unprompted_breadth={P1, P2})})
     assert served(strong) == "license_continuity"  # self-resolves: commit reachable again
 ```
@@ -389,13 +384,19 @@ Expected: FAIL (no "cross-drive" in the current output).
 
 - [ ] **Step 3: Implement**
 
-In `src/retnovation/surface.py`, find the line in `format_receipt` that renders the margin/runner-up and add the `cross-drive` qualifier. The existing line renders something like `f"runner-up {receipt.runner_up_drive} (margin {receipt.margin:.2f})"`; change it to:
+In `src/retnovation/surface.py`, the exact line in `format_receipt` is `surface.py:17`:
 
 ```python
-        f"runner-up {receipt.runner_up_drive} (cross-drive margin {receipt.margin:.2f})"
+    head += f" (margin {receipt.margin:.2f} over {_label(receipt.runner_up_drive)})"
 ```
 
-(Read the exact current line first; preserve its surrounding format. If the margin is rendered on its own line, append `" (cross-drive)"` there instead.)
+Change it in place to add the `cross-drive` qualifier — **preserve `_label(...)` and the `over` structure** (the existing `test_format_receipt_names_drive_runner_up_and_margin` asserts the uppercase runner-up; dropping `_label` would break it):
+
+```python
+    head += f" (cross-drive margin {receipt.margin:.2f} over {_label(receipt.runner_up_drive)})"
+```
+
+(If line 17 differs from this when you read it, match its real structure and only insert `cross-drive ` before `margin`.)
 
 In `src/retnovation/types.py`, on `SelectionReceipt.margin`, add the clarifying comment:
 
@@ -426,6 +427,16 @@ git commit -m "chore(sp3): mark SelectionReceipt.margin as cross-drive in the lo
 
 ## Self-Review (completed during planning)
 
-- **Spec coverage:** §4 isolate → Task 1; §6 four assertions (session-1 construction + forming; session-2 ordering via direct V gap at forming edge + no-frame both sessions; session-2 strong; post-strong interval) → Task 2 Steps 1/3/5; §7 traps → Task 1 rubric; §8 confidentiality → Task 1 (abstracted prompt, ore gitignored); §9 cascade Arm 1 (re-point 3 tests) → Task 1, Arm 2 (shadow self-resolution on the default menu path) → Task 2 Step 5; §6 logged-margin calibration → Task 3. No gaps.
-- **Placeholder scan:** none; the one `mkdtemp` shim in Task 2 Step 3 is explicitly flagged with the real `tmp_path` signature to use.
-- **Type consistency:** `_to_license`/`_steer` resolve by `experience_id` over `proposal.candidates` everywhere; `select_next` returns `list[(NextExperienceSpec, SelectionReceipt)]` and the V gap reads `scores["V"]` (matches `policy.py:118-124`); `FrameStrength`/`LearnerState`/`derive_due` signatures match `state.py`/`types.py`; `assess(exp, work, model)` and `run_session(store, core, model, now, regime=, present=, decide=, decide_core=)` match the merged code.
+- **Spec coverage:** §4 isolate → Task 1; §6 four assertions — session-1 construction → Task 2 Step 1;
+  session-1 forming + the session-2 ordering pin (direct V gap at the forming edge, derived from the real
+  post-S1 state) + no-frame both sessions + session-2 strong + post-strong interval → **Task 2 Step 3** (the
+  one two-session test); §7 traps → Task 1 rubric; §8 confidentiality → Task 1 (abstracted prompt, ore
+  gitignored); §9 cascade Arm 1 (re-point 3 tests) → Task 1, Arm 2 (shadow self-resolution on the default
+  menu path) → Task 2 Step 5; §6 logged-margin calibration → Task 3. No gaps.
+- **Placeholder scan:** none; the plan-review fixes landed — the ordering pin derives from the real `state1`
+  (no hand-built drift), all imports hoisted to the file top (E402), and Task 3 quotes the real `surface.py:17`.
+- **Type consistency:** `_to_license`/`_steer` resolve by `experience_id` over `proposal.candidates`
+  everywhere; `select_next` returns `list[(NextExperienceSpec, SelectionReceipt)]` and the V gap reads
+  `ranked[i][1].scores["V"]` (matches `policy.py:118-124`); `FrameStrength`/`LearnerState`/`derive_due`
+  signatures match `state.py`/`types.py`; `assess(exp, work, model)` and `run_session(store, core, model,
+  now, regime=, present=, decide=, decide_core=)` match the merged code.

@@ -51,8 +51,15 @@
   session-1 construction check, two-session weak→forming→strong over the real path, the session-2 ordering
   pinned by the direct rank-1-vs-rank-2 V gap at the worst-case forming edge, the shadow self-resolution on
   the default menu path; (T3) mark the receipt margin cross-drive in the log surface. Plan code transcribes
-  the mechanics I verified by live runs. NEXT: adversarial plan review (runs the regression code) →
-  subagent-driven execution.
+  the mechanics I verified by live runs.
+- **Adversarial plan review folded (OPUS, ran the regression code green end-to-end) = YES-WITH-FIXES.** 3
+  MAJORs: (M1) the ordering-pin used a hand-built embed-only state → comfortable gap ~1.4, missing the real
+  ~0.08 window (reviewer proved it: with `wL=0` the real state inverts but the helper still passed) — fixed
+  by deriving the pin from the REAL post-session-1 `state1` (carries `choose_failure` forming as the
+  competing transfer), folded into the two-session test; (M2) appended imports → 14 ruff E402 → commit
+  blocked → hoist all imports to the file top; (M3) Task 3 quoted a non-existent `format_receipt` line whose
+  literal edit lowercased the runner-up and broke 2 tests → fixed to the real `surface.py:17` preserving
+  `_label`/`over`. Plus a MINOR (session-1 surface-withhold assertion added). NEXT: subagent-driven execution.
 
 ## 2026-06-26 — SP2 cosmetic cleanup (post-review minors)
 - `ScreenSummary` now rounds `mean_distinguishability`/`mean_preference` to 2dp via a `field_validator`
