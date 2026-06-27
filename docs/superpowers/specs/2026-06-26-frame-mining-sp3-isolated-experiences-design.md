@@ -105,20 +105,32 @@ the fake**. Therefore:
 **Assertions the regression must make:**
 1. After session 1: `embed.strength == forming`, `breadth == {embedded_anchor_lock_in}`,
    `unprompted_breadth == {embedded_anchor_lock_in}` — produced by the real loop, not set.
-2. At session-2 selection: the **top-ranked** `(spec, receipt)` is `continuity_lock_in`, `drive == "deploy"`,
-   `runner_up_drive` is named, `margin > 0`; AND `format_problem_menu(proposal)` does **not** contain
-   `"embed_credentials_as_a_list"`. (Pins the §6/`policy.py:68-71` ordering against weight/penalty drift —
-   §below.)
+2. At session-2 selection: **`ranked[0]` is `continuity_lock_in` resolved by `experience_id`** (NOT by
+   ledger_ref — two experiences now share `veldra:license_fork_risk`, §M3 below), with `drive == "deploy"`
+   and `frame == "embed_credentials_as_a_list"`; AND the **true rank gap `ranked[0].V − ranked[1].V > 0`
+   asserted directly over the scored candidates** — NOT the receipt's `margin`. (The receipt's
+   `margin`/`runner_up_drive` are **cross-drive only** — `policy.py:99` filters `others` to a *different*
+   drive — so they are blind to a same-drive *competing transfer* overtaking the isolate, which is the real
+   failure mode; the receipt margin would pass while the actual ordering inverted.) AND
+   `format_problem_menu(proposal)` (a multi-item menu, `license_fork_risk` among the four problems) does
+   **not** contain `"embed_credentials_as_a_list"`.
 3. After session 2: `embed.strength == strong`, `unprompted_breadth == {embedded_anchor_lock_in,
    license_fork_risk}`.
 4. Post-`strong`: `derive_due(...)` for `embed` is `last_seen + 30 days` (the savings effect; so the
    subsequent quiet reads as scheduled-rarely, not dropped).
 
-**Pinned definition (so a future change fails a test, not the dogfood):** a *trap is not a constituent
-frame* for the cold-start penalty or `load` (`policy.py:68-71`). The session-2 ordering depends on it:
-worked at the real weights, the embed isolate scores `V = wT·1.0 + (wU−wL)·u_embed = 1.5 + 0.5·u_embed` at
-`drive=deploy`, beating the best diagnose candidate (`V = wU·1.0 − wL·1.0 = 0.5`) and any competing transfer
-(its single-frame penalty is lower, and `load=1` wins the tie-break). Assertion #2 fails if this inverts.
+**Pinned definition (so a future change fails a test, not the dogfood) — corrected against a live
+`select_next` run.** A *trap is not a constituent frame* for the cold-start penalty or `load`
+(`policy.py:68-71`), so the single-frame isolate has the lowest penalty. The embed isolate wins session-2
+**on `V`** (≈1.77), and its true runner-up is a **competing transfer**, not the diagnose floor:
+`choose_the_failure_default_deliberately` — the 2nd frame in `irreversible_anchor`, which goes `forming` in
+session 1 — fires `deploy` on `decision_under_stakes`/`proof_before_promise` at `V`≈1.55. The isolate wins
+because its penalty is `wL·u_embed` (one *seen* frame) vs the competitor's `wL·1.0` (its 2nd frame unseen);
+the `load=1` tie-break **never fires** (the `V`s differ). The gap is **real but thin: ~0.25 same-day,
+shrinking to ~0.08 at the 7-day `forming` edge** as `retention_due` and uncertainty drift — so the
+regression must run session-2 at a **fixed, documented `now` offset** (not implicitly at the widest-margin
+point) and assert the direct rank-1-vs-rank-2 `V` gap. A weight change that lets the competing transfer
+overtake the isolate then fails the test — which the receipt-margin assertion would have missed.
 
 ## 7. The three traps are embed's OWN failure modes
 
@@ -154,8 +166,18 @@ Each `trap_detail` is "the provision-optionality move gone wrong," never an adja
   `genuinely_open` + null binding; prompt leaks no frame/trap code or framework word; corpus entry for
   `license_fork_risk` already has non-empty `unlabeled`/`why_owned`/`provenance`).
 - Build features subagent-driven TDD; the regression is the L-8/L-9-class production-path test (it exercises
-  the real `build_store → propose → select → assess → persist` path, steered via a custom `decide`, never
-  `proposal.top` — L-14).
+  the real `build_store → propose → select → assess → persist` path, steered via a custom `decide` resolving
+  the experience by **`experience_id`**, never `proposal.top` and never by ledger_ref — L-14).
+- **Cascade fix (BLOCKER — the plan MUST include this task, verified by a live run):** authoring
+  `continuity_lock_in` on the *shared* `veldra:license_fork_risk` re-steers `Proposal.problem_menu()` — the
+  isolate wins the per-problem dedup over `license_continuity` at `load=1` vs `load=3`, **even from empty
+  state** — so the served experience for that problem becomes `continuity_lock_in`, whose frame `embed` is
+  not scripted by the FakeModels in three existing tests → `KeyError: 'embed_credentials_as_a_list'` in
+  `tests/test_dry_run.py::test_dry_run_closes_the_loop`,
+  `tests/test_orchestration.py::test_run_session_closes_one_cycle`, and `::test_run_session_logs_selection_receipt`.
+  This is the L-14 selection-re-steer cascade (a content add changes which item is served). The plan must
+  re-point those three tests (steer by `experience_id`, extend their FakeModels to script `embed`, or move
+  them to a different ledger_ref) so the suite is green at every commit. *The branch must not land CI-red.*
 
 ## 10. Out of scope / deferred
 
@@ -169,5 +191,7 @@ Each `trap_detail` is "the provision-optionality move gone wrong," never an adja
 
 - `continuity_lock_in` authored, clears the anti-label gate, and is reachable through the real gated path.
 - The scripted regression is green and asserts §6's four claims — the progression is produced by the real
-  engine path (not injected), with the no-frame receipt and the post-`strong` interval verified.
-- Suite green, ruff clean, confidentiality gates empty, no `Co-Authored-By`.
+  engine path (not injected), the session-2 ordering pinned by the **direct rank-1-vs-rank-2 `V` gap** (not
+  the receipt margin), with the no-frame receipt and the post-`strong` interval verified.
+- Suite green **including the three re-pointed tests** (§9 cascade fix), ruff clean, confidentiality gates
+  empty, no `Co-Authored-By`.

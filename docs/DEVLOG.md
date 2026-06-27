@@ -21,7 +21,17 @@
   the trap slot; (4) the isolate is a genuine 2nd context (legal lock-in vs technical), not a restatement;
   (5) assert the post-`strong` due interval is the long one. Also: `decision_frame` omitted from the isolate
   because a stress-probe would mark embed *probed* and disqualify the unprompted read `strong` depends on.
-  NEXT: adversarial spec review → user review → writing-plans.
+- **Adversarial spec review folded (OPUS, ran the checks) = YES-WITH-FIXES.** It reproduced the central
+  claims live (the unprompted proof: trajectory length 0, embed never probed, `reasoned_unprompted=[embed]`;
+  the session-2 isolate win; the anti-label gate; strong/interval). Folded: (B1, blocker) authoring
+  `continuity_lock_in` on the shared `license_fork_risk` re-steers `problem_menu` (load=1 wins) and breaks
+  `test_dry_run` + `test_orchestration`×2 with `KeyError: embed` — the plan must re-point those 3 (L-14
+  cascade); (M1) the §6 ordering assertion was wrong — the true rank-2 is a *competing transfer*
+  (`choose_the_failure_default`, forming after S1), the isolate wins on V not the load tie-break, and the
+  receipt's margin is *cross-drive only* (`policy.py:99`) so it can't see a same-drive transfer overtaking —
+  the regression now asserts the direct rank-1-vs-rank-2 V gap; (M2) the gap is thin (~0.08–0.25,
+  staleness-dependent) → run session-2 at a fixed `now`; (M3) steer by `experience_id` not ledger_ref.
+  NEXT: user review → writing-plans.
 
 ## 2026-06-26 — SP2 cosmetic cleanup (post-review minors)
 - `ScreenSummary` now rounds `mean_distinguishability`/`mean_preference` to 2dp via a `field_validator`
