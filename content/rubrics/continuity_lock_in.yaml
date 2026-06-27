@@ -1,0 +1,23 @@
+experience_id: continuity_lock_in
+ledger_ref: "veldra:license_fork_risk"
+regime: open_ended
+mode: genuinely_open
+binding_constraint: null
+prompt: >
+  A buyer's counsel wants the continuity terms in your license pinned down before they will sign this
+  quarter. Whatever you write into that clause now is what every customer reads into their own risk
+  planning — and once deals depend on it, you cannot quietly revise it. One straightforward continuity
+  promise covers what this buyer is asking for today. Decide what you commit to in the clause, and account
+  for what you are trading and how it fails if those terms ever have to change.
+  (No framework is named for you on purpose.)
+frames:
+  - frame_code: embed_credentials_as_a_list
+    frame_detail: When the choice cannot be amended after it ships, provision the cheap optionality now; the option to add it later will not exist.
+    paired_trap: shipped_the_one_shot_term
+traps:
+  - trap_code: shipped_the_one_shot_term
+    trap_detail: Committed a single fixed term now and assumed more could be layered in later, when the shipped commitment admits no quiet later change.
+  - trap_code: over_built_the_escape_hatch
+    trap_detail: Reached for an elaborate revisable or remote mechanism to preserve flexibility, instead of the cheap optionality provisioned from the start.
+  - trap_code: treated_the_shipped_choice_as_amendable
+    trap_detail: Assumed the commitment could be revised after others depend on it, missing that shipping removes the later option.

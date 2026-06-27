@@ -1,5 +1,10 @@
 # Retnovation — DEVLOG
 
+## 2026-06-27 — SP3 T1: continuity_lock_in isolate added + L-14 cascade tests re-pointed (Arm 1)
+- `content/rubrics/continuity_lock_in.yaml`: single-frame isolate on `veldra:license_fork_risk`, frame `embed_credentials_as_a_list` + 3 traps, 8 angles, clears the anti-label gate.
+- `tests/test_sp3_progression.py`: gate assertion (load + frame list + angle_count == 8).
+- `tests/test_dry_run.py`, `tests/test_orchestration.py`: re-pointed `_to_license` to steer by `experience_id == "license_continuity"` over `proposal.candidates` (L-14 re-steer); 219 passed, 4 skipped.
+
 ## 2026-06-26 — Frame-mining SP3 (isolated experiences) spec written + design review folded
 - `docs/superpowers/specs/2026-06-26-frame-mining-sp3-isolated-experiences-design.md` — SP3 makes the
   admitted frame `embed_credentials_as_a_list` locatable by the diagnostic-progression engine across ≥2

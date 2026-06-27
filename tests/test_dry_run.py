@@ -49,11 +49,14 @@ def _cooperative_model():
 
 
 def _to_license(proposal):
+    # Steer to license_continuity specifically. SP3 added continuity_lock_in on the same ledger_ref,
+    # so the deduped problem_menu serves the single-frame isolate; license_continuity is still in the
+    # full candidate list — steer by experience_id over proposal.candidates (L-14 re-steer).
     from retnovation.types import Outcome, Selection
 
     top_spec, top_receipt = proposal.top
-    for spec, receipt in proposal.problem_menu():
-        if spec.ledger_ref == "veldra:license_fork_risk":
+    for spec, receipt in proposal.candidates:
+        if spec.experience_id == "license_continuity":
             outcome = Outcome.accepted if spec is top_spec else Outcome.redirected
             return Selection(
                 proposed_receipt=top_receipt,
@@ -61,7 +64,7 @@ def _to_license(proposal):
                 chosen_receipt=receipt,
                 outcome=outcome,
             )
-    raise AssertionError("license_fork_risk not in the proposal")
+    raise AssertionError("license_continuity not in the proposal")
 
 
 def test_dry_run_closes_the_loop(tmp_path):
