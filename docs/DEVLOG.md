@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-27 — SP3 T2: engine-proof regression — embed weak→forming→strong via the real path; ordering pinned; shadow self-resolves (222 passed, 4 skipped)
+
 ## 2026-06-27 — SP3 T1: continuity_lock_in isolate added + L-14 cascade tests re-pointed (Arm 1)
 - `content/rubrics/continuity_lock_in.yaml`: single-frame isolate on `veldra:license_fork_risk`, frame `embed_credentials_as_a_list` + 3 traps, 8 angles, clears the anti-label gate.
 - `tests/test_sp3_progression.py`: gate assertion (load + frame list + angle_count == 8).
