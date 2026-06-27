@@ -1,5 +1,7 @@
 # Retnovation — DEVLOG
 
+## 2026-06-27 — SP3 T3: SelectionReceipt.margin labeled cross-drive in format_receipt + types comment (223 passed, 4 skipped)
+
 ## 2026-06-27 — SP3 T2: engine-proof regression — embed weak→forming→strong via the real path; ordering pinned; shadow self-resolves (222 passed, 4 skipped)
 
 ## 2026-06-27 — SP3 T1: continuity_lock_in isolate added + L-14 cascade tests re-pointed (Arm 1)

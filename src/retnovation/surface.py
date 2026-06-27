@@ -14,7 +14,7 @@ def format_receipt(receipt: SelectionReceipt) -> str:
     pre-experience (it names the frame — §17.1)."""
     head = f"{_label(receipt.drive)} -> {receipt.frame} on {receipt.problem}"
     if receipt.runner_up_drive is not None and receipt.margin > 1e-9:
-        head += f" (margin {receipt.margin:.2f} over {_label(receipt.runner_up_drive)})"
+        head += f" (cross-drive margin {receipt.margin:.2f} over {_label(receipt.runner_up_drive)})"
     else:
         head += " (uncontested / cold start)"
     if receipt.content_gaps:

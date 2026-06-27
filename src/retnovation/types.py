@@ -273,7 +273,9 @@ class SelectionReceipt(BaseModel):
     drive: str
     scores: dict[str, float]
     runner_up_drive: str | None
-    margin: float
+    margin: (
+        float  # cross-drive only (vs the best OTHER-drive candidate); NOT the rank-1-vs-rank-2 gap
+    )
     content_gaps: list[str]
     created_at: datetime
 

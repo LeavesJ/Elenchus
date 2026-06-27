@@ -61,3 +61,24 @@ def test_problem_menu_never_names_a_frame():
         "DEPLOY",
     ):
         assert leak not in menu
+
+
+def test_format_receipt_labels_margin_cross_drive():
+    from datetime import datetime, timezone
+
+    from retnovation.surface import format_receipt
+    from retnovation.types import SelectionReceipt
+
+    r = SelectionReceipt(
+        frame="f",
+        problem="veldra:p",
+        experience_id="e",
+        drive="deploy",
+        scores={"V": 1.5},
+        runner_up_drive="diagnose",
+        margin=1.2,
+        content_gaps=[],
+        created_at=datetime(2026, 6, 26, tzinfo=timezone.utc),
+    )
+    out = format_receipt(r)
+    assert "cross-drive" in out  # margin is cross-drive only; not the rank-1-vs-rank-2 gap
