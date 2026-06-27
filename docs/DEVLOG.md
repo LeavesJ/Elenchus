@@ -31,6 +31,17 @@
   receipt's margin is *cross-drive only* (`policy.py:99`) so it can't see a same-drive transfer overtaking —
   the regression now asserts the direct rank-1-vs-rank-2 V gap; (M2) the gap is thin (~0.08–0.25,
   staleness-dependent) → run session-2 at a fixed `now`; (M3) steer by `experience_id` not ledger_ref.
+- **Second user design-review folded (the gate it named, verified by live runs).** (Issue 1, gating) the
+  spec asserted session 1's unprompted read without verifying it — VERIFIED by construction:
+  `assess(irreversible_anchor, embed=present_reasoned)` → `reasoned_unprompted=[embed]`, embed never probed
+  (no decision_frame → no stress-probe); the regression now re-runs this session-1 construction check. (Issue
+  2) the §9 cascade only handled the CI arm — VERIFIED the served-experience arm: the isolate shadows
+  `license_continuity` on `license_fork_risk` (the only home of `commit_under_the_deadline`), but the shadow
+  is temporary + self-resolving (fresh/forming → isolate; embed `strong` → license_continuity/commit
+  surfaces); the plan now tests the default-menu-path arc + records the commit-delay (or relocates to a
+  no-collision problem). (Issue 3) pin session-2 at the worst-case forming edge (gap ~0.08), record the
+  real-use thinness + the cross-drive logged-margin distortion as calibration items; (smaller) no-frame
+  surface asserted for BOTH sessions; angle_count floor (8, no headroom) noted.
   NEXT: user review → writing-plans.
 
 ## 2026-06-26 — SP2 cosmetic cleanup (post-review minors)

@@ -57,14 +57,23 @@ the frame, transfer fires, the frame reaches `strong`, and a series-dogfood beco
 - **1 frame**: `embed_credentials_as_a_list` (frame_detail: the provision-optionality move) +
   `paired_trap: shipped_the_one_shot_term`.
 - **3 traps** = embed's own three failure modes (§7).
-- `angle_count = 1 frame + 3 traps + 0 binding + 4 = 8` (clears the floor; `generator.angle_count`).
+- `angle_count = 1 frame + 3 traps + 0 binding + 4 = 8` (clears the floor; `generator.angle_count`) —
+  **at the floor, no headroom: this is the deliberate minimal-isolate shape, but any future cut to a trap
+  drops it below the gate, so an angle change must re-check `load_gated_library` (a 4th embed-failure trap is
+  the margin option if ever needed).**
 - A neutral *legal* lock-in prompt that surfaces the irreversibility + the single-term bait without naming
   the move (L-13): a buyer's counsel wants the continuity terms pinned down before signing; whatever you
   write now is what every customer reads into their risk planning and you can't quietly revise once deals
   depend on it; one straightforward promise covers today's ask; decide what you commit to and how it fails
   if the terms ever must change.
 
-**(b) `irreversible_anchor` unchanged** — the embed experience on problem 1.
+**(b) `irreversible_anchor` unchanged** — the embed experience on problem 1. It has **no `decision_frame`
+and `binding_constraint: null`**, so no stress-probe can mark `embed` probed. **Verified by construction**
+(the same check the isolate got): `assess(irreversible_anchor, ...)` with `embed = present_reasoned` at
+intake (and `choose_the_failure_default_deliberately = absent`, scripted) yields `reasoned_unprompted =
+['embed_credentials_as_a_list']` with `embed` **never in the trajectory** (only `choose_…` is probed). So
+session 1 starts `embed` at `unprompted_breadth = 1` *through the real not-probed path* — §6 assertion #1 is
+verified, not assumed. The regression re-runs this construction check (§6).
 
 **(c) A committable scripted regression** — `tests/test_sp3_progression.py` (§6): drives the real engine
 across two sessions and asserts the `weak → forming → strong` progression, the session-2 transfer ordering,
@@ -103,8 +112,15 @@ the fake**. Therefore:
   deferred** (§10). Without this boundary, SP3 would prove the state machine (P1's job), not this content.
 
 **Assertions the regression must make:**
-1. After session 1: `embed.strength == forming`, `breadth == {embedded_anchor_lock_in}`,
-   `unprompted_breadth == {embedded_anchor_lock_in}` — produced by the real loop, not set.
+1. **Session 1 starts the frame unprompted *through the real path* (the step the first draft asserted
+   without verifying — the gating fix).** Assert `embed ∈ assessment.reasoned_unprompted` AND `embed` is
+   **never a trajectory target** in session 1 (it is not probed — verified by construction:
+   `irreversible_anchor` has no `decision_frame`, so a frame `present_reasoned` at intake stays unprobed and
+   the credit is earned, not an artifact of a stress-probe the FakeModel silently omitted). Then assert
+   `embed.strength == forming`, `breadth == {embedded_anchor_lock_in}`, `unprompted_breadth ==
+   {embedded_anchor_lock_in}` — produced by the real loop, not set. AND the session-1 **learner surface
+   withholds the frame** too (both sessions credit an unprompted read, so both presentations must withhold
+   the move, not only session 2's).
 2. At session-2 selection: **`ranked[0]` is `continuity_lock_in` resolved by `experience_id`** (NOT by
    ledger_ref — two experiences now share `veldra:license_fork_risk`, §M3 below), with `drive == "deploy"`
    and `frame == "embed_credentials_as_a_list"`; AND the **true rank gap `ranked[0].V − ranked[1].V > 0`
@@ -128,9 +144,21 @@ session 1 — fires `deploy` on `decision_under_stakes`/`proof_before_promise` a
 because its penalty is `wL·u_embed` (one *seen* frame) vs the competitor's `wL·1.0` (its 2nd frame unseen);
 the `load=1` tie-break **never fires** (the `V`s differ). The gap is **real but thin: ~0.25 same-day,
 shrinking to ~0.08 at the 7-day `forming` edge** as `retention_due` and uncertainty drift — so the
-regression must run session-2 at a **fixed, documented `now` offset** (not implicitly at the widest-margin
-point) and assert the direct rank-1-vs-rank-2 `V` gap. A weight change that lets the competing transfer
-overtake the isolate then fails the test — which the receipt-margin assertion would have missed.
+regression must run session-2 **pinned at the worst case (the 7-day forming edge, gap ~0.08), not a
+comfortable midpoint**, so a passing test guards the whole window rather than a wide point inside it, and
+assert the direct rank-1-vs-rank-2 `V` gap. A weight change that lets the competing transfer overtake the
+isolate then fails the test — which the receipt-margin assertion would have missed.
+
+**Known thinness (calibration territory, not a build blocker — §10).** That ~0.08 forming-edge margin is a
+*real-use* fragility, not just a test concern: in the dogfood the learner returns when they return, so if
+session 2 lands near the forming edge the transfer win sits on a margin the competing transfer's own
+retention drift can invert — making "embed reaches `strong`" timing-dependent. The fixed test offset must
+**not** hide this; it is recorded here as a known thinness to tune in `content/cadence/progression.yaml`
+(e.g. a larger `wT`), not left implied-robust. Relatedly, the cross-drive receipt `margin` (the dogfood's
+calibration *log* surface) **overstates decisiveness whenever the real contest is same-drive** — it would
+log a comfortable cross-drive margin while the call was nearly tied. The plan should either log the absolute
+rank-1-vs-rank-2 gap alongside it, or mark the logged `margin` as cross-drive-only so it is not misread
+during calibration.
 
 ## 7. The three traps are embed's OWN failure modes
 
@@ -168,16 +196,35 @@ Each `trap_detail` is "the provision-optionality move gone wrong," never an adja
 - Build features subagent-driven TDD; the regression is the L-8/L-9-class production-path test (it exercises
   the real `build_store → propose → select → assess → persist` path, steered via a custom `decide` resolving
   the experience by **`experience_id`**, never `proposal.top` and never by ledger_ref — L-14).
-- **Cascade fix (BLOCKER — the plan MUST include this task, verified by a live run):** authoring
-  `continuity_lock_in` on the *shared* `veldra:license_fork_risk` re-steers `Proposal.problem_menu()` — the
-  isolate wins the per-problem dedup over `license_continuity` at `load=1` vs `load=3`, **even from empty
-  state** — so the served experience for that problem becomes `continuity_lock_in`, whose frame `embed` is
-  not scripted by the FakeModels in three existing tests → `KeyError: 'embed_credentials_as_a_list'` in
-  `tests/test_dry_run.py::test_dry_run_closes_the_loop`,
-  `tests/test_orchestration.py::test_run_session_closes_one_cycle`, and `::test_run_session_logs_selection_receipt`.
-  This is the L-14 selection-re-steer cascade (a content add changes which item is served). The plan must
-  re-point those three tests (steer by `experience_id`, extend their FakeModels to script `embed`, or move
-  them to a different ledger_ref) so the suite is green at every commit. *The branch must not land CI-red.*
+- **Cascade fix (BLOCKER — the plan MUST cover BOTH arms of the L-14 re-steer, verified by live runs).**
+  Authoring `continuity_lock_in` on the *shared* `veldra:license_fork_risk` re-steers
+  `Proposal.problem_menu()`: the isolate wins the per-problem dedup over `license_continuity` at `load=1` vs
+  `load=3`, **even from empty state** (equal `V`, the `(-V, load, …)` tie-break picks the smaller load). This
+  has two arms — the spec must address **both**, not only the first:
+  - **Arm 1 — CI breakage.** The served experience for `license_fork_risk` becomes `continuity_lock_in`,
+    whose frame `embed` is not scripted by the FakeModels in three existing tests → `KeyError:
+    'embed_credentials_as_a_list'` in `tests/test_dry_run.py::test_dry_run_closes_the_loop`,
+    `tests/test_orchestration.py::test_run_session_closes_one_cycle`, and `::test_run_session_logs_selection_receipt`.
+    The plan re-points those three (steer by `experience_id`, extend their FakeModels to script `embed`, or
+    move them to a different ledger_ref) so the suite is green at every commit. *The branch must not land CI-red.*
+  - **Arm 2 — the served-experience shadow (the consequence past CI).** `license_continuity` is **production
+    content**, and it is the **only home of `commit_under_the_deadline`** (lead/protect have other homes;
+    commit does not). While `embed` is unlocated the isolate shadows `license_continuity` on
+    `license_fork_risk`, so `commit` has no menu path. **This is NOT the §16 (frame, problem) ambiguity** —
+    `continuity_lock_in` carries `embed`, `license_continuity` carries other frames, so the pair (embed,
+    license_fork_risk) still has exactly one backing experience; the collision is in the *coarser per-problem
+    dedup under the menu*, which darkens the richer experience as a side effect of lighting `embed`.
+    **Verified the shadow is temporary + self-resolving** (`select_next` over the real library, three
+    states): fresh → `continuity_lock_in` (diagnose); embed `forming` → `continuity_lock_in` (deploy); embed
+    **`strong` → `license_continuity` surfaces** (`commit_under_the_deadline`, diagnose). So `commit` is
+    *delayed* behind `embed` reaching `strong`, **not lost** — which is consistent with the
+    isolate-before-capstone doctrine (diagnose the single-frame isolate before the load-3 mini-capstone). The
+    plan must **(i)** add a regression assertion exercising the **default menu path** on `license_fork_risk`
+    (fresh + forming → `continuity_lock_in`; embed-`strong` → `license_continuity`/`commit` surfaces), so the
+    shadow + self-resolution is *tested*, not routed around by the `experience_id`-steered §6 assertions; and
+    **(ii)** record the `commit` delay as an accepted consequence (or, if the founder judges it unacceptable,
+    relocate `embed`'s 2nd experience to a problem with no existing experience — e.g.
+    `cross_pool_data_optics` — to avoid the collision; a fork to raise, not decide in the plan).
 
 ## 10. Out of scope / deferred
 
