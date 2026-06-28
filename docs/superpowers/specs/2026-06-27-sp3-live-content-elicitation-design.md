@@ -71,6 +71,33 @@ the target its `binding_constraint`, the equivalence breaks and the probe must r
 than silently report the weaker property (the L-16 move — encode the precondition the honesty
 rests on).
 
+## Durability of the proof — the guard covers only half
+
+The proof has **two** kinds of hypotheses: the *rubric shape* (no `decision_frame`, target ≠
+`binding_constraint`) **and** the *judgment loop's behavior* (`_select_target` skips
+present-at-intake frames at [`:52`](../../../src/retnovation/assessment/judgment_loop.py); the
+force-probe [`:34`](../../../src/retnovation/assessment/judgment_loop.py) and binding branches
+are inert; exit mutations are keyed to the probed code at
+[`:129`](../../../src/retnovation/assessment/judgment_loop.py)/[`:147`](../../../src/retnovation/assessment/judgment_loop.py)).
+`assert_intake_equivalence` enforces only the **rubric half**. The **loop half** is asserted in
+prose and protected by nothing — an edit to `judgment_loop.py` that lets a present-at-intake
+frame be probed, adds a state-mutating branch not keyed to the probed code, or changes
+`_select_target`'s condition would silently break the intake↔`reasoned_unprompted` equivalence
+while every rubric precondition still holds, and the probe would resume reporting the weaker
+property through the door the guard does not watch.
+
+So the loop half is pinned by a **fixtured regression (no live spend)**: run the real `assess()`
+on a crafted intake-present target under each in-scope rubric shape and assert the target lands
+in `reasoned_unprompted` and never in `probed`. P1 (`irreversible_anchor`) is already guarded by
+[`test_session1_credits_embed_unprompted_through_the_real_loop`](../../../tests/test_sp3_progression.py)
+(intake-present embed, `choose_failure` absent+probed → embed unprompted, never probed). The
+build adds the **P2 analogue** for `continuity_lock_in`, co-located alongside it in
+`tests/test_sp3_progression.py` (intake-present embed, one trap tripped so the loop *actually runs
+a probe* on another target, embed still unprompted + unprobed at exit). **The probe's intake-only
+validity is declared to depend on these two tests staying green** — a loop edit that breaks the
+equivalence turns them red, which is the enforcement the rubric-shaped guard structurally cannot
+provide.
+
 ## Non-goals
 
 - Re-proving the engine path (selection, ordering, accumulation to `strong`) — done in
@@ -137,10 +164,18 @@ the frame-naive control*, making the probe directly interpretable against the li
      embed failed: the same paired trap on every miss = the prompt steering into the trap
      (content-fixable) vs. simply not surfacing (genuinely hard);
   2. each verbatim opening + the target's intake state;
-  3. the other frame's state (P1 only — `choose_the_failure_default_deliberately`).
+  3. the other frame's state (P1 only — `choose_the_failure_default_deliberately`);
+  4. the **refusal rate — first-class**, not merely a denominator adjustment: a heavy-refusal run
+     reads as "the prompt is mis-set" (a distinct content finding from "engages without surfacing
+     embed"), and at P2's n=5 a couple of refusals shrink the *usable* denominator below the
+     already-thin resolution → such a run is flagged, never silently averaged.
   The human renders the three-way calibration read: **reachable** (then check the verbatim that
   the scaffold did not leak it, L-6), **genuinely-hard** (trap tripped — frame counter-intuitive,
-  prompt does not leak), or **borderline** (→ rerun, per the n-resolution note).
+  prompt does not leak), or **borderline** (→ rerun, per the n-resolution note). A
+  "genuinely-hard" verdict means **hard *at intake***, not hard everywhere: the intake-only probe
+  is blind by design to the hard-at-intake-but-recoverable-under-pressure case (the converse — it
+  lands in breadth, not `reasoned_unprompted`), which would matter to a content fix and is a
+  separate measurement.
 
 ## Testing
 
@@ -149,6 +184,13 @@ the frame-naive control*, making the probe directly interpretable against the li
     always present across N runs.
   - `assert_intake_equivalence` **refuses** a rubric with a `decision_frame`, and refuses one
     where the target is the `binding_constraint`; **passes** the two real rubrics.
+- **Loop-side equivalence guardian** (`tests/test_sp3_progression.py`, fixtured, no live) — pins
+  the *loop half* of the proof: the real `assess()` on an intake-present target lands it in
+  `reasoned_unprompted` and never in `probed`, for **each** in-scope rubric shape. P1 exists
+  (`test_session1_credits_embed_unprompted_through_the_real_loop`); the build adds the P2 analogue
+  for `continuity_lock_in` (one trap tripped so the loop runs a probe, embed untouched). These are
+  named the guardians of the equivalence; the probe's intake-only validity depends on them staying
+  green.
 - `tests/test_elicitation_acceptance.py` — `@pytest.mark.live` + `skipif(no key)` smoke
   (mirrors `test_lift_acceptance.py::test_live_lift_smoke`):
   - the real pipeline returns a valid `ProbeResult`; the target key is in `frame_states`.
@@ -161,7 +203,11 @@ the frame-naive control*, making the probe directly interpretable against the li
 
 - **L-13** (no-leak): the only learner-facing string is `rubric.prompt`, which already withholds
   the frame ("No framework is named for you on purpose"); `injection=None` ⇒ no system ⇒
-  frame-naive by construction; asserted live on the real prompt.
+  frame-naive by construction. The live `frame_code`-substring assertion is the **automated
+  floor** — it catches the literal code leaking, not a plain-words paraphrase. The **real no-leak
+  adjudication is the human verbatim check**: on a *reachable* read, the human reads the opening to
+  confirm the scaffold did not hand the move over in different words (L-6). The green substring
+  test is the floor, not the whole guarantee.
 - **L-16 / equivalence precondition**: `assert_intake_equivalence` refuses where the intake↔
   `reasoned_unprompted` equivalence would not hold, so the tool fails loud instead of reporting
   the weaker property.

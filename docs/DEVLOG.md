@@ -18,7 +18,15 @@
   `run_elicitation.py` I/O entrypoint; artifact gitignored under `data/elicitation/`. Folded review points:
   trap-pattern foregrounded for hard-vs-borderline, n-resolution honesty boundary (borderline ⇒ rerun, not a
   stable category), asymmetric P1-weighted sampling (P1=8 / P2=5), live L-13 assertion on the real prompt.
-  Next: writing-plans.
+- **2nd review folded (load-bearing):** the proof is about the *loop's* behavior but the guard enforces
+  only the *rubric* half — added a **loop-side guardian** (fixtured, no live) in
+  `tests/test_sp3_progression.py`: the real `assess()` pins an intake-present target into
+  `reasoned_unprompted`/never-`probed` for each rubric shape (P1 = existing `test_session1_…`; build adds
+  the P2 `continuity_lock_in` analogue), and the probe's intake-only validity is declared dependent on them
+  staying green. Three clarifications: L-13 substring = automated floor, the human verbatim check = the real
+  no-leak adjudication; refusals are a first-class content signal (heavy refusal ⇒ "prompt mis-set", not
+  silent denominator shrink); "genuinely-hard" = hard *at intake* (recoverable-under-pressure is invisible
+  by design). Next: writing-plans (build includes the loop-side guardian).
 
 ## 2026-06-27 — SP3 T3: SelectionReceipt.margin labeled cross-drive in format_receipt + types comment (223 passed, 4 skipped)
 
