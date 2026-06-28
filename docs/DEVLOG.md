@@ -1,5 +1,12 @@
 # Retnovation — DEVLOG
 
+## 2026-06-28 — SP3 elicitation probe — implementation plan written
+- `docs/superpowers/plans/2026-06-27-sp3-live-content-elicitation.md` — 7 tasks (subagent-driven): probe
+  result types; `assert_intake_equivalence` + L-13 `assert_no_frame_code_leak` guards; `run_elicitation_probe`
+  (pure, refusal-aware); `run_elicitation.py` entrypoint; P2 loop-side equivalence guardian in
+  `tests/test_sp3_progression.py`; `@live` smoke; whole-branch OPUS review + DEVLOG. OPUS reviewers on the
+  guard, the probe, and the doctrine tests. The ~26-call live run is a gated MANUAL step with the user.
+
 ## 2026-06-27 — SP3 live content-elicitation probe — design spec (intake-equivalence proof + folded review)
 - `docs/superpowers/specs/2026-06-27-sp3-live-content-elicitation-design.md` — closes SP3's deferred claim:
   does real frame-naive Opus read `embed_credentials_as_a_list` `present_reasoned` at intake on the two
