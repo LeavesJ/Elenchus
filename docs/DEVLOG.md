@@ -1,5 +1,25 @@
 # Retnovation — DEVLOG
 
+## 2026-06-27 — SP3 live content-elicitation probe — design spec (intake-equivalence proof + folded review)
+- `docs/superpowers/specs/2026-06-27-sp3-live-content-elicitation-design.md` — closes SP3's deferred claim:
+  does real frame-naive Opus read `embed_credentials_as_a_list` `present_reasoned` at intake on the two
+  authored prompts? (The scripted regression *scripts* that read; this measures it.) A **calibration probe** —
+  automates the run, leaves the verdict to the human (SP1/L-15).
+- **Key finding folded after an incisive review** (does the probe measure the intake-leg or the full
+  `reasoned_unprompted` property?): traced the merged code — for a rubric with no `decision_frame` and target
+  ≠ `binding_constraint`, target `present_reasoned` at intake ⟺ target ∈ `reasoned_unprompted`
+  (`judgment_loop.py:52/129/147/170-176`): a present-at-intake frame is never selected, probed, or lowered.
+  Both in-scope rubrics qualify, so the intake-only probe is provably the SP3 property here — a proof, not a
+  weaker proxy. The full live `assess()` loop would add only breadth-under-pressure (not the unprompted
+  property), so it is omitted by design.
+- Design: thin `src/retnovation/elicitation.py` (pure orchestration over the Model protocol),
+  `generate_output(prompt, None)` [bare = the SP2 control call] → `classify_intake`; an
+  `assert_intake_equivalence` guard refuses rubrics where the equivalence breaks (L-16); a
+  `run_elicitation.py` I/O entrypoint; artifact gitignored under `data/elicitation/`. Folded review points:
+  trap-pattern foregrounded for hard-vs-borderline, n-resolution honesty boundary (borderline ⇒ rerun, not a
+  stable category), asymmetric P1-weighted sampling (P1=8 / P2=5), live L-13 assertion on the real prompt.
+  Next: writing-plans.
+
 ## 2026-06-27 — SP3 T3: SelectionReceipt.margin labeled cross-drive in format_receipt + types comment (223 passed, 4 skipped)
 
 ## 2026-06-27 — SP3 T2: engine-proof regression — embed weak→forming→strong via the real path; ordering pinned; shadow self-resolves (222 passed, 4 skipped)
