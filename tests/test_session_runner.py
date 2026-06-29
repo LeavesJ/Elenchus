@@ -9,6 +9,14 @@ from retnovation.web.session_runner import SessionRegistry
 NOW = datetime(2026, 6, 29, tzinfo=timezone.utc)
 
 
+def test_start_emits_error_on_worker_failure(tmp_path, make_fake):
+    # tmp_path is a directory -> build_store's sqlite connect raises inside the worker
+    # -> error emission (no hang); verifies the "exception inside worker → error, never hang" guarantee
+    reg = SessionRegistry(str(tmp_path), model_factory=make_fake)
+    tag, data = reg.start("s_err", now=NOW)
+    assert tag == "error" and "message" in data
+
+
 def test_runner_assessment_equals_direct_run_session(tmp_path, make_fake, steer):
     # direct run_session with synchronous scripted callbacks
     db1 = build_store(str(tmp_path / "a.db"))

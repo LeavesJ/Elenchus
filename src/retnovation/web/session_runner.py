@@ -32,8 +32,9 @@ class SessionRegistry:
             self._ch[session_id] = ch
 
         def worker():
-            store = build_store(self._db_path)
+            store = None
             try:
+                store = build_store(self._db_path)
                 core = derive_core(aim())
                 model = self._model_factory()
 
@@ -76,7 +77,8 @@ class SessionRegistry:
             except Exception as e:  # surface, never hang the client
                 ch.from_worker.put(("error", {"message": repr(e)}))
             finally:
-                store.close()
+                if store is not None:
+                    store.close()
 
         threading.Thread(target=worker, daemon=True).start()
         tag, data = ch.from_worker.get()
