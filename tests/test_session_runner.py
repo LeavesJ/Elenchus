@@ -50,3 +50,22 @@ def test_runner_assessment_equals_direct_run_session(tmp_path, make_fake, steer)
     assert (
         runner_assess.model_dump() == direct_assess.model_dump()
     )  # byte-identical -> bridge transparent
+
+
+def test_step_after_done_returns_error_and_does_not_hang(tmp_path, make_fake):
+    """Terminal-state guard: step after 'done' must short-circuit, never put to the dead worker."""
+    reg = SessionRegistry(str(tmp_path / "c.db"), model_factory=make_fake)
+    tag, _ = reg.start("s_term", now=NOW)
+    assert tag == "menu"
+    menu_idx = reg.menu_index("s_term", "veldra:embedded_anchor_lock_in")
+    tag, _ = reg.step("s_term", menu_idx)
+    assert tag == "problem"
+    tag, data = reg.step("s_term", "reasoning that already holds the move")
+    while tag == "push":
+        tag, data = reg.step("s_term", "mechanism")
+    assert tag == "done"
+
+    # Session is now terminal — further step must return error immediately, not hang.
+    tag2, data2 = reg.step("s_term", "anything")
+    assert tag2 == "error"
+    assert "message" in data2

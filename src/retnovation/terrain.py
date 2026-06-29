@@ -39,7 +39,11 @@ def _components(frames: dict) -> list[list[str]]:
 
 
 def project_terrain(
-    state: LearnerState, now: datetime, *, min_frames: int = 2, min_problems: int = 2
+    state: LearnerState,
+    now: datetime,  # reserved: decay/savings time-axis (§4d), inert in the MVP
+    *,
+    min_frames: int = 2,
+    min_problems: int = 2,
 ) -> TerrainView:
     regions: list[Region] = []
     for comp in _components(state.frames):

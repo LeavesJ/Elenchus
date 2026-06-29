@@ -48,6 +48,9 @@ def test_full_session_and_l13_surface(tmp_path, make_fake):
         assert "embed_credentials_as_a_list" not in blob
         assert "choose_the_failure_default_deliberately" not in blob
 
+    # terrain must be non-empty so the loop below cannot pass vacuously
+    assert r["terrain"]
+
     # terrain entries are learner_view (no frame_codes key)
     for region in r["terrain"]:
         assert "frame_codes" not in region

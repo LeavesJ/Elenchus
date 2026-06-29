@@ -16,6 +16,7 @@ class _Channel:
         self.to_worker: queue.Queue = queue.Queue()
         self.from_worker: queue.Queue = queue.Queue()
         self.last_menu: list[str] = []
+        self.terminal: bool = False
 
 
 class SessionRegistry:
@@ -84,14 +85,20 @@ class SessionRegistry:
         tag, data = ch.from_worker.get()
         if tag == "menu":
             ch.last_menu = data["problems"]
+        if tag in ("done", "error"):
+            ch.terminal = True
         return tag, data
 
     def step(self, session_id: str, value) -> tuple[str, dict]:
         ch = self._ch[session_id]
+        if ch.terminal:
+            return ("error", {"message": "session already ended"})
         ch.to_worker.put(value)
         tag, data = ch.from_worker.get()
         if tag == "menu":
             ch.last_menu = data["problems"]
+        if tag in ("done", "error"):
+            ch.terminal = True
         return tag, data
 
     def menu_index(self, session_id: str, ledger_ref: str) -> int:

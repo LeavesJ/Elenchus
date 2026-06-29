@@ -69,3 +69,19 @@ def test_disjoint_frames_form_separate_regions():
     view = project_terrain(state, NOW)
     assert len(view.regions) == 2  # no shared problem -> two components, both seeds
     assert all(r.render is RegionRender.seed for r in view.regions)
+
+
+def test_connected_components_are_transitive():
+    # A shares P1 with B; B shares P2 with C; A and C share nothing.
+    # Transitively they form ONE component (A-B-C linked through B).
+    # 3 frames x 2 problems clears the guard, so the region renders.
+    state = LearnerState(
+        frames={
+            "A": _fs(Strength.forming, ["P1"]),
+            "B": _fs(Strength.forming, ["P1", "P2"]),
+            "C": _fs(Strength.forming, ["P2"]),
+        }
+    )
+    view = project_terrain(state, NOW)
+    assert len(view.regions) == 1
+    assert set(view.regions[0].frame_codes) == {"A", "B", "C"}
