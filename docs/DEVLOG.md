@@ -1,5 +1,19 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — Cartographer MVP — live API smoke CONFIRMED (both paths), merged + pushed
+- Merged to main (FF → 9cc9ab4), pushed to origin/main. Then a gated live API smoke (real Opus instructor,
+  TEMP db so the founder's real state is untouched, in-process TestClient driving the real endpoints).
+- **Both live paths confirmed:** (1) strong opening → real Opus intake → **converged at 0 pushes** → `done` →
+  one `seed` region (the zero-push-convergence case the review flagged — returns `done`, NOT a hung push); (2)
+  weak opening → real Opus issued **2 genuinely sharp, doctrine-faithful probes** (generate_push +
+  classify_response + the reply→push handshake) → **plateau → `done`** → empty terrain (learner tripped traps,
+  engaged no frame → honestly nothing took root). **L-13 holds live:** the menu shows only ledger_refs, the
+  probes never name the frame. The friction quality is real — this is the clean-room experience working.
+- NEXT (optional, anytime): the founder's own browser session — `PYTHONPATH=src .venv/bin/python -m
+  retnovation.web` → http://127.0.0.1:8000 (real Opus, real state).
+- New deferred Minor: the empty-terrain reveal copy says "a seed was planted" even when terrain is `[]` (nothing
+  took root) — cosmetic copy fix.
+
 ## 2026-06-29 — Cartographer MVP — BUILT (subagent-driven; suite 250 passed / 5 skipped; whole-branch review YES)
 - The local web app: the founder runs the clean-room friction-dialogue end-to-end through the REAL, UNTOUCHED
   engine, then sees a single honest *nascent seed* of their judgment-terrain.
