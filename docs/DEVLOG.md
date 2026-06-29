@@ -1,5 +1,29 @@
 # Retnovation — DEVLOG
 
+## 2026-06-28 — UI/UX vision + MVP design — "The Cartographer" (spec written)
+- `docs/superpowers/specs/2026-06-28-uiux-cartographer-design.md` — the selling-surface vision. Concept: a
+  **cultivated world under a constellation sky** — height = accreted durable strength, surface glow = current
+  vitality (two-axis split), sky-threads = transfer, garden quality = decay/rebound. Makes the invisible engine
+  felt without naming the frame.
+- **Doctrinal crux resolved** (felt vs no-name, across sessions): read-only mirror (pick problems, not regions);
+  two-phase timing (clean during the read, reveal after) = within-session L-13; **lossy non-invertible
+  `terrain_projection` seam** = cross-session safety; honest bound "exploit-the-map ≡ learn-the-move". Folded two
+  adversarial critiques: safety is **corpus-dependent** (weakest at user-zero) and enforced by a non-invertibility
+  **guard = corpus-density gate** (`assert_intake_equivalence` pattern); the falsification test must be **paired**
+  (terrain shown vs hidden) to tell a gamed map from honest non-transfer; rebound = accepted depth-location leak.
+- **Encodings stress-tested** (5 findings → channel separation, two-axis height/glow, constellation-not-spaghetti
+  transfer, animated rebound). OPEN #5: the slip/hazard marker is itself a potential label leak.
+- **Market scan (light, 4 categories)** → the unclaimed triple (open reasoning + live move-diagnosis + unlabeled
+  spatial trajectory). **Why-persist research:** enterprise is a **graveyard** (H2 commercial illegibility — Humu/
+  Pymetrics/Koru/Knewton died at the sales motion). Way through = **B2C narrow-premium** to discerning individuals
+  who self-evaluate; trial-as-conversion + founder credibility; the terrain doubles as B2C self-legibility.
+  **Positioning PARKED** (open).
+- **Medium:** local web app (thin FastAPI over the untouched engine + browser/Three.js), reuses the P3 seams,
+  **checkpointed stepper (L-11)** since you can't block on input() across HTTP. **MVP slice:** "trial + nascent
+  seed" — the clean-room friction-dialogue end-to-end through the real engine + a single pre-threshold seed.
+- Built via brainstorming skill (4-agent market scan + 2-agent strategy research, all parallel; 3 live concept
+  renders incl. an interactive 3D terrain). OPEN items: hazard-leak (#5), positioning. NEXT: user review → writing-plans.
+
 ## 2026-06-28 — SP3 @live content-elicitation run — CLAIM CONFIRMED (13/13), over-scaffold caveat recorded
 - Ran the gated probe (artifact gitignored: `data/elicitation/20260629T031154Z.json`; ~26 Opus calls; P1=8 / P2=5).
 - **Result: 13/13 embed `present_reasoned`, 0 refusals, 0 traps** (P1 irreversible_anchor 8/8; P2 continuity_lock_in
