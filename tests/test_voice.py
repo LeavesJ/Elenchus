@@ -1,4 +1,9 @@
-from retnovation.model import FakeModel, InjectionExpressed, IntakeClassification
+from retnovation.model import (
+    AnthropicModel,
+    FakeModel,
+    InjectionExpressed,
+    IntakeClassification,
+)
 from retnovation.types import (
     EntryClass,
     EntryClassification,
@@ -130,3 +135,47 @@ def test_door_replaces_leaking_reply_with_safe_contract():
     )
     cls, reply = voice.door(m, _exp(), "I don't get it", [])
     assert cls is EntryClass.confusion and reply == voice.SAFE_CONTRACT
+
+
+class _Resp:
+    def __init__(self, parsed=None, content=None, stop_reason="end_turn"):
+        self.parsed_output = parsed
+        self.content = content or []
+        self.stop_reason = stop_reason
+
+
+class _Block:
+    def __init__(self, text):
+        self.type = "text"
+        self.text = text
+
+
+class _StubClient:
+    """Captures the last request kwargs and returns canned responses."""
+
+    def __init__(self, parsed=None, text=None):
+        self._parsed, self._text = parsed, text
+        self.last = {}
+        self.messages = self
+
+    def parse(self, **kw):
+        self.last = kw
+        return _Resp(parsed=self._parsed)
+
+    def create(self, **kw):
+        self.last = kw
+        return _Resp(content=[_Block(self._text)])
+
+
+def test_classify_entry_is_frame_blind_and_parses():
+    parsed = EntryClassification(entry_class=EntryClass.greeting, reply="Welcome.")
+    stub = _StubClient(parsed=parsed)
+    m = AnthropicModel(client=stub)
+    out = m.classify_entry("The pricing problem text.", "hi", [("student", "hi")])
+    assert out.entry_class is EntryClass.greeting
+    # frame-blind: neither rubric codes nor details may appear anywhere in the request
+    blob = str(stub.last)
+    assert "lead_with_what_you_refuse_to_do" not in blob
+    assert "frame_detail" not in blob and "Rubric" not in blob
+    # the problem prompt IS available to the classifier
+    assert "The pricing problem text." in blob

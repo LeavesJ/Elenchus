@@ -193,6 +193,13 @@ def _render_rubric(rubric) -> str:
     return "\n".join(lines)
 
 
+def _render_turns(recent: list[tuple[str, str]]) -> str:
+    if not recent:
+        return ""
+    lines = [f"{role}: {text}" for role, text in recent[-6:]]
+    return "Recent exchange:\n" + "\n".join(lines) + "\n\n"
+
+
 def _target_detail(rubric, kind: str, code: str) -> str:
     if kind == "trap":
         for t in rubric.traps:
@@ -302,6 +309,21 @@ class AnthropicModel:
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=ResponseClassification,
+            **_PARAMS,
+        )
+        return _require(resp)
+
+    def classify_entry(
+        self, prompt: str, opening: str, recent: list[tuple[str, str]]
+    ) -> EntryClassification:
+        system = load_prompt("entry")  # frame-blind: doctrine only, never the rubric
+        user = f"Problem:\n{prompt}\n\n{_render_turns(recent)}Student's latest message:\n{opening}"
+        resp = self._get_client().messages.parse(
+            model=self._model,
+            max_tokens=2048,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            output_format=EntryClassification,
             **_PARAMS,
         )
         return _require(resp)
