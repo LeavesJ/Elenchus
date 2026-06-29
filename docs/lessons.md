@@ -144,3 +144,13 @@ Read this checklist before every code change. Update it after every correction o
   against the new need and parameterize them (default preserving existing callers) rather than assuming the
   original constant fits; and for live-only behavior, run a cheap single-call sanity BEFORE a full multi-call
   batch — it catches the break without burning the whole run (and the tokens).
+- **L-18 A runnable entry point that needs an env var must load it — or the documented launch command fails,
+  even when a `.env` file is present.** `python -m retnovation.web` started uvicorn WITHOUT loading `.env`, so
+  `ANTHROPIC_API_KEY` never reached `os.environ` and the Anthropic SDK raised `TypeError("Could not resolve
+  authentication method…")` at the first model call — surfaced only in the founder's BROWSER dogfood, because the
+  @live smokes had each done `set -a && . ./.env && set +a` first, so "it works in my smoke" was not "the
+  documented command works." A mounted `.env` file ≠ the variable in the process environment. Fix: a best-effort
+  `.env` loader in the launch entry (`os.environ.setdefault` per KEY=VALUE line, so a real exported var always
+  wins; never log values). Prevention: when an entry point depends on env vars, either load them itself or make
+  the documented launch command include the sourcing — and when validating a runnable thing, run it the EXACT way
+  the user will (a smoke that pre-sets env the real command doesn't is testing a different command).

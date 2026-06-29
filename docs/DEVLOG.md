@@ -1,5 +1,15 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — fix(web): launcher auto-loads .env (founder browser dogfood hit an auth TypeError)
+- The founder's first BROWSER session errored: `TypeError("Could not resolve authentication method…")` —
+  `python -m retnovation.web` started uvicorn WITHOUT loading `.env`, so `ANTHROPIC_API_KEY` wasn't in the
+  process env. The @live smokes had each sourced `.env` manually (`set -a && . ./.env && set +a`), which masked
+  it — "works in my smoke" ≠ "the documented command works." **L-18.**
+- Fix: `web/__main__.py` now best-effort-loads `.env` (`os.environ.setdefault` per KEY=VALUE line; a real exported
+  var always wins; values never logged). Verified: with the var unset, importing the launcher populates it from
+  `.env`; suite 250/5; ruff clean. `python -m retnovation.web` now works without sourcing. (The errored session
+  ends "single" as terminal by design → a page reload starts a fresh one.)
+
 ## 2026-06-29 — Cartographer MVP — live API smoke CONFIRMED (both paths), merged + pushed
 - Merged to main (FF → 9cc9ab4), pushed to origin/main. Then a gated live API smoke (real Opus instructor,
   TEMP db so the founder's real state is untouched, in-process TestClient driving the real endpoints).
