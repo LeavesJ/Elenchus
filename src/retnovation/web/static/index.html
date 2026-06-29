@@ -1,1 +1,78 @@
-<!doctype html><title>Cartographer</title><h1>Cartographer</h1>
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cartographer</title>
+<style>
+  :root{color-scheme:dark}
+  body{margin:0;background:#0a0f1c;color:#e8eef7;font:16px/1.55 ui-sans-serif,system-ui,sans-serif}
+  main{max-width:720px;margin:0 auto;padding:32px 20px}
+  h1{font:600 20px/1 Georgia,serif;color:#9fb2cc;margin:0 0 24px}
+  .prompt{background:#0f1a2b;border:1px solid #1b2b44;border-radius:12px;padding:18px 20px;margin:14px 0}
+  .push{color:#5eead4;margin:18px 0 8px}
+  textarea{width:100%;box-sizing:border-box;background:#0f1a2b;color:#e8eef7;border:1px solid #1b2b44;
+    border-radius:10px;padding:12px;font:inherit;min-height:90px;resize:vertical}
+  button{margin-top:10px;background:#155e63;color:#e8eef7;border:0;border-radius:9px;padding:10px 18px;
+    font:inherit;cursor:pointer}
+  button:hover{background:#1f7a80}
+  .menu button{display:block;width:100%;text-align:left;margin:6px 0;background:#0f1a2b;border:1px solid #1b2b44}
+  #seed{display:flex;align-items:center;gap:14px;margin-top:24px}
+  #seed svg{flex:0 0 auto}
+  .muted{color:#8aa0bf;font-size:13px}
+</style></head>
+<body><main>
+  <h1>your terrain begins</h1>
+  <div id="app"></div>
+</main>
+<script>
+const app = document.getElementById('app');
+const post = (url, body) => fetch(url, {method:'POST', headers:{'content-type':'application/json'},
+  body: body?JSON.stringify(body):null}).then(r=>r.json());
+
+function el(html){const d=document.createElement('div'); d.innerHTML=html; return d.firstElementChild;}
+
+async function start(){
+  const r = await post('/api/session');
+  renderMenu(r.problems);
+}
+function renderMenu(problems){
+  app.innerHTML = '<div class="muted">Choose a problem to work. You are never told the move to make.</div>';
+  const m = el('<div class="menu"></div>');
+  problems.forEach((p,i)=>{ const b=el(`<button>${p}</button>`); b.onclick=()=>choose(i); m.appendChild(b); });
+  app.appendChild(m);
+}
+async function choose(index){
+  const r = await post('/api/session/single/choose', {index});
+  renderProblem(r.prompt);
+}
+function renderProblem(prompt){
+  app.innerHTML='';
+  app.appendChild(el(`<div class="prompt">${prompt.replace(/</g,'&lt;')}</div>`));
+  const ta=el('<textarea placeholder="Reason it through. Decide, and account for the trade-offs."></textarea>');
+  const btn=el('<button>Submit</button>');
+  btn.onclick=async()=>{ const r=await post('/api/session/single/open',{text:ta.value}); advance(r); };
+  app.appendChild(ta); app.appendChild(btn);
+}
+function advance(r){
+  if(r.kind==='push') return renderPush(r.text);
+  if(r.kind==='done') return renderSeed(r.terrain);
+  app.appendChild(el(`<div class="muted">error: ${r.message||''}</div>`));
+}
+function renderPush(text){
+  app.appendChild(el(`<div class="push">${text.replace(/</g,'&lt;')}</div>`));
+  const ta=el('<textarea placeholder="Respond."></textarea>');
+  const btn=el('<button>Reply</button>');
+  btn.onclick=async()=>{ ta.disabled=true; btn.disabled=true;
+    const r=await post('/api/session/single/reply',{text:ta.value}); advance(r); };
+  app.appendChild(ta); app.appendChild(btn);
+}
+function renderSeed(terrain){
+  const rendered = terrain.filter(t=>t.render==='rendered').length;
+  const note = rendered ? `${rendered} region${rendered>1?'s':''} took shape.`
+                        : 'A seed was planted. Your world is too young to read yet — it grows as you work more problems.';
+  app.innerHTML = `<div class="muted">The read is locked. Now — your terrain:</div>
+    <div id="seed"><svg width="80" height="80" viewBox="0 0 80 80">
+      <circle cx="40" cy="40" r="6" fill="#5eead4"></circle>
+      <circle cx="40" cy="40" r="16" fill="none" stroke="#5eead4" stroke-opacity="0.35"></circle>
+    </svg><div>${note}</div></div>`;
+}
+start();
+</script></body></html>
