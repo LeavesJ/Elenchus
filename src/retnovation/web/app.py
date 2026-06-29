@@ -52,6 +52,8 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
         return {"kind": "problem", "prompt": data["prompt"], "ledger_ref": data["ledger_ref"]}
     if tag == "push":
         return {"kind": "push", "text": data["text"]}
+    if tag == "door":
+        return {"kind": "door", "text": data["text"]}
     return {"kind": "error", "message": data.get("message", "")}
 
 

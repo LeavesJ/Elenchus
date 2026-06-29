@@ -49,6 +49,7 @@ function renderProblem(prompt){
   const ta=el('<textarea placeholder="Reason it through. Decide, and account for the trade-offs."></textarea>');
   const btn=el('<button>Submit</button>');
   btn.onclick=async()=>{ if(!ta.value.trim()) return hint(btn);
+    ta.disabled=true; btn.disabled=true;
     const r=await post('/api/session/single/open',{text:ta.value}); advance(r); };
   app.appendChild(ta); app.appendChild(btn);
 }
@@ -60,9 +61,19 @@ function hint(anchor){
 }
 function advance(r){
   if(r.kind==='nudge'){ const b=app.querySelector('button:last-of-type'); if(b){ b.disabled=false; hint(b); } return; }
+  if(r.kind==='door') return renderDoor(r.text);
   if(r.kind==='push') return renderPush(r.text);
   if(r.kind==='done') return renderSeed(r.terrain);
   app.appendChild(el(`<div class="muted">error: ${String(r.message||'').replace(/</g,'&lt;')}</div>`));
+}
+function renderDoor(text){
+  app.appendChild(el(`<div class="push">${text.replace(/</g,'&lt;')}</div>`));
+  const ta=el('<textarea placeholder="Take a position on the problem."></textarea>');
+  const btn=el('<button>Submit</button>');
+  btn.onclick=async()=>{ if(!ta.value.trim()) return hint(btn);
+    ta.disabled=true; btn.disabled=true;
+    const r=await post('/api/session/single/open',{text:ta.value}); advance(r); };
+  app.appendChild(ta); app.appendChild(btn);
 }
 function renderPush(text){
   app.appendChild(el(`<div class="push">${text.replace(/</g,'&lt;')}</div>`));

@@ -2,6 +2,9 @@ import pytest
 
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
+
+from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
+from retnovation.types import EntryClass, EntryClassification, FrameState, TrapState
 from retnovation.web.app import create_app
 
 
@@ -96,4 +99,52 @@ def test_blank_reply_is_nudged_not_bricked(tmp_path, make_fake):
 
     # a real reply now proceeds
     r = client.post("/api/session/s/reply", json={"text": "mechanism"}).json()
+    assert r["kind"] in ("push", "done")
+
+
+class _DoormanModel(FakeModel):
+    """'hi'/'hey'/'hello' -> greeting (door turn); anything else -> substantive (enter engine)."""
+
+    def classify_entry(self, prompt, opening, recent):
+        if opening.strip().lower() in {"hi", "hey", "hello"}:
+            return EntryClassification(
+                entry_class=EntryClass.greeting,
+                reply="Welcome — take a position on the problem to begin.",
+            )
+        return EntryClassification(entry_class=EntryClass.substantive, reply="")
+
+
+def _doorman_factory():
+    intake = IntakeClassification(
+        frame_states={
+            "embed_credentials_as_a_list": FrameState.present_reasoned,
+            "choose_the_failure_default_deliberately": FrameState.absent,
+        },
+        trap_states={
+            "deferred_the_one_time_choice": TrapState.not_tripped,
+            "assumed_the_happy_path": TrapState.not_tripped,
+        },
+    )
+    closed = [
+        ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+        for _ in range(4)
+    ]
+    return _DoormanModel(intake, {"choose_the_failure_default_deliberately": closed})
+
+
+def test_low_signal_opening_gets_a_door_turn_then_real_opening_proceeds(tmp_path):
+    app = create_app(db_path=str(tmp_path / "d.db"), model_factory=_doorman_factory)
+    client = TestClient(app)
+    client.post("/api/session")
+    client.post("/api/session/s/choose", json={"ledger_ref": "veldra:embedded_anchor_lock_in"})
+
+    # 'hi' is intercepted by the Doorman — a conversational turn, NOT a probe
+    r = client.post("/api/session/s/open", json={"text": "hi"}).json()
+    assert r["kind"] == "door"
+    assert "embed_credentials_as_a_list" not in r["text"]  # L-13: no frame leak in the door turn
+
+    # a real opening now proceeds into the engine
+    r = client.post(
+        "/api/session/s/open", json={"text": "reasoning that already holds the move"}
+    ).json()
     assert r["kind"] in ("push", "done")
