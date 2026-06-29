@@ -1,5 +1,32 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — Engaged agent "Doorman + Echo" v1 BUILT (subagent-driven; suite 268/8; whole-branch READY-TO-MERGE)
+- D2/D3 resolved — a conversational layer over the byte-UNTOUCHED judgment-loop engine:
+  - **Doorman** (`classify_entry`, frame-blind 6-class) handles entry (greeting/meta/confusion/resistance/
+    low-signal) BEFORE the engine — `hi` now orients (persona "Vera"), never a deaf probe (fixes D2).
+  - **Echo** (`echo_push`, frame-blind) re-voices each push onto the user's words (DISPLAY only) — fixes D3.
+  - **Semantic L-13 egress gate** (`voice.py`, reuses `check_injection_expressed`; ADDED-REVELATION vs the
+    canonical push; covers frames AND traps) is the mechanical moat backstop.
+  - **Bridge** (`session_runner.present()`) runs the Doorman re-collect loop + Echo wrap; the engine gets the
+    RAW opening/replies and grades its OWN canonical `Push.text` — Echo never enters `assess()`.
+- **ENGINE + `model.py` existing methods byte-UNTOUCHED** (additive only); bridge-transparency
+  (`done.assessment == direct run_session`) intact (test green).
+- Built subagent-driven (9 commits: 8 TDD tasks + 1 harden). After 3 long-agent infra connection drops, the
+  controller implemented from the exact plan code + dispatched an independent review subagent per task —
+  **OPUS** on T2 (egress), T4/T5 (doctrine prompts), T6 (bridge invariant); sonnet on T3/T7/T8; every task
+  Approved, no Critical/Important. **Whole-branch review = 3 OPUS lenses (moat/L-13, engine-invariant,
+  test-integrity) + OPUS synthesis = READY-TO-MERGE YES**, all 4 invariants independently re-verified. The
+  trap-egress hardening was folded from that review.
+- Surfaces: `src/retnovation/web/voice.py` (new); `classify_entry`/`echo_push`/`_render_turns`/`_ECHO_MAX_TOKENS`
+  on `model.py`; `content/prompts/entry.md` + `echo.md`; `door` kind in `app.py`; `renderDoor` + double-submit
+  fix in `index.html`; `tests/test_voice.py`, `tests/test_voice_live.py` (@live), Echo-fidelity test in
+  `test_session_runner.py`. Suite 268 passed / 8 skipped (@live), ruff clean.
+- @live calibration (golden-set zero-false-positive, echo budget L-17, faithful-revoice no-op detector)
+  self-skips offline — run with the key during the browser dogfood.
+- **Deferred (Phase-2 / pre-multi-user, tracked):** bound the Doorman re-collect loop (turn cap); cache/
+  short-circuit the egress fan-out (N live calls/turn); trim the `recent[]` latest-message duplication; add
+  echo challenge-preservation fidelity. Phase 2 itself = escalate toward the tool-calling "Concierge."
+
 ## 2026-06-29 — plan: Engaged agent "Doorman + Echo" (8 TDD tasks, pending adversarial review)
 - Spec approved (persona "Vera", scope as specced). Implementation plan written:
   `docs/superpowers/plans/2026-06-29-engaged-agent-doorman-echo.md` — 8 TDD tasks, each committed:
