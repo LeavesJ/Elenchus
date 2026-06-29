@@ -171,3 +171,16 @@ Read this checklist before every code change. Update it after every correction o
   -m pkg` launch fails with ModuleNotFoundError on a `src/` layout, do NOT reinstall editable and call it fixed —
   validate the EXACT command with a health smoke, and prefer `PYTHONPATH=src` (a thin repo-root launcher script is
   the only way to restore the bare `python -m` form, since a package cannot self-bootstrap its own import for `-m`).
+- **L-20 MEASURE per-call latency before tuning `effort` — with adaptive thinking, high effort is NOT slow on easy
+  calls, and the real lever is usually call COUNT, not per-call depth.** Diagnosing "the engaged agent is slow," the
+  intuitive fix was to drop `output_config.effort` to low/medium on the simple classifier calls. Measured on Opus
+  4.8 (2026-06-29): `classify_entry` was 1.3s at HIGH vs 1.8s at low and 6.5s at medium — high is *faster*, because
+  adaptive thinking already spends little when the task is easy; lowering effort just changed the thinking regime
+  for the worse. `generate_push` (a real judgment call) was 3.3s, not the 20–30s assumed. The actual cost was the
+  egress fan-out: the old gate made one `check_injection_expressed` call PER hidden move (4 serial calls ≈ 11.3s),
+  fired on every Echo, ~6–8× per session — that is where the minutes went. Fix that moved the needle: BATCH the N
+  per-move screens into ONE `screen_moves(moves, text)` call (≈2.5s), reducing call count; the effort-lowering was
+  reverted as a wash-or-worse. Prevention: never assume effort↔latency is monotonic on adaptive-thinking models —
+  time low/medium/high (n≥3; they're noisy) on the ACTUAL call before changing it, and look first for redundant
+  serial round-trips to collapse. A counterfactual timing of the old path (per-move @ high) vs the new (batched) is
+  what proved the win — bake that comparison into the change; don't claim a speedup you didn't measure.

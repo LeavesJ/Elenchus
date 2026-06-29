@@ -332,6 +332,14 @@ class InjectionExpressed(BaseModel):
     evidence: str
 
 
+class EgressScreen(BaseModel):
+    # performed: 1-based indices of the screened moves the text PERFORMS. evidence: grounding
+    # span(s) for each performed move, or what's missing if none — parity with the high-effort lift
+    # gate (InjectionExpressed), so the cheaper backstop must justify itself, not flag/clear lazily.
+    performed: list[int]
+    evidence: str
+
+
 class ScenarioVerdict(BaseModel):
     scenario_id: str
     injection_expressed: bool  # the ONLY stored bool that gates aggregation

@@ -9,13 +9,6 @@ SAFE_CONTRACT = (
 )
 
 
-def _performs(model: Model, move: str, text: str) -> bool:
-    """Does `text` PERFORM the hidden move (not merely touch its topic)? Reuses
-    check_injection_expressed ('performs the move, not the topic'): a Socratic probe that
-    questions an angle does not perform it; naming the principle or handing the answer does."""
-    return model.check_injection_expressed(move, text).expressed
-
-
 def _moves(exp: Experience) -> list[str]:
     """Every hidden 'move' a learner-facing surface must not perform (L-5: never name the move):
     the rubric's frame details AND trap details — naming a trap hands reasoning just as naming a
@@ -26,11 +19,23 @@ def _moves(exp: Experience) -> list[str]:
     return [f.frame_detail for f in exp.rubric.frames] + [t.trap_detail for t in exp.rubric.traps]
 
 
+def _performed(model: Model, exp: Experience, text: str) -> set[int]:
+    """Which of the experience's hidden moves does `text` PERFORM — name the principle or hand the
+    answer, not merely touch the topic? ONE batched egress screen over the whole move list (was one
+    check_injection_expressed call per move). Empty when there are no moves or none are performed.
+    Out-of-range indices from the judge are dropped so a hallucinated number can't gate."""
+    moves = _moves(exp)
+    if not moves:
+        return set()
+    valid = range(1, len(moves) + 1)
+    return {i for i in model.screen_moves(moves, text).performed if i in valid}
+
+
 def egress_safe_reply(model: Model, exp: Experience, text: str) -> bool:
     """For a Doorman authored reply (orientation only — NO push baseline): safe iff it performs
     NONE of the experience's hidden moves (frames and traps). A door turn legitimately performs
-    zero moves, so the flat check has no false-positive risk here."""
-    return not any(_performs(model, m, text) for m in _moves(exp))
+    zero moves, so the flat check has no false-positive risk here. One model call."""
+    return not _performed(model, exp, text)
 
 
 def echo(model: Model, exp: Experience, push_text: str, recent: list[tuple[str, str]]) -> str:
@@ -38,13 +43,16 @@ def echo(model: Model, exp: Experience, push_text: str, recent: list[tuple[str, 
     REVELATION: fall back to the verbatim push only if the re-voice performs a hidden move the
     canonical push did NOT already perform. The push baseline is essential — a faithful probe
     legitimately orbits the angle's vocabulary, so judging the re-voice against the bare move
-    detail would force a verbatim fallback every turn (Echo silently no-ops; review #3)."""
+    detail would force a verbatim fallback every turn (Echo silently no-ops; review #3). One screen
+    on the candidate; the push is screened only when the candidate already looks leaky."""
     candidate = model.echo_push(push_text, recent)
     if not candidate:
         return push_text
-    for m in _moves(exp):
-        if _performs(model, m, candidate) and not _performs(model, m, push_text):
-            return push_text  # added revelation beyond the push -> hard fallback
+    performed = _performed(model, exp, candidate)
+    if not performed:
+        return candidate
+    if performed - _performed(model, exp, push_text):  # added revelation beyond the push
+        return push_text  # hard fallback to the verbatim push
     return candidate
 
 

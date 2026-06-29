@@ -1,5 +1,32 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — perf(engaged-agent): batch the egress screen (N per-move calls → 1) — the real latency lever (L-20)
+- The founder's dogfood: "after clicking submit the time the agent takes to think and execute is a while." My first
+  diagnosis (each turn = ~8 high-effort Opus calls @ 20–30s; lower `effort` on the simple ones) was WRONG, and
+  measuring caught it. On Opus 4.8 with adaptive thinking, high effort is already fast on easy calls — `classify_entry`
+  **1.3s @high** vs 1.8s @low vs 6.5s @medium (high is *faster*; lowering changes the thinking regime for the worse),
+  `echo_push` 1.5s @high ≈ 1.8s @med, `generate_push` (a real judgment call) **3.3s**, not 20–30s. The actual cost was
+  the egress fan-out: the old gate ran one `check_injection_expressed` per hidden move (**4 serial calls ≈ 11.3s**),
+  fired on every Echo, ~6–8× per session — minutes of serial round-trips.
+- **Fix (the only change that moved the needle): BATCH the egress.** New `screen_moves(moves, text) → {performed:
+  [idx], evidence}` makes ONE call over the whole move list (**≈2.5s** @medium) instead of N. `voice._performed` /
+  `egress_safe_reply` / `echo` rewritten to the batched added-revelation set-difference (semantically identical to the
+  old per-move loop, proven by the OPUS review; out-of-range judge indices are dropped so a hallucinated number can't
+  gate). The effort-lowering on `classify_entry`/`echo_push` was REVERTED (a wash-or-worse, measured). The lift
+  harness's `check_injection_expressed` is byte-untouched (kept @high as the screen-of-record); the engine is
+  byte-untouched; Echo is display-only (bridge stays transparent — engine grades the canonical push).
+- **Adversarial OPUS review → SHIP-WITH-FIXES, all incorporated:** (a) offline suite never exercised *partial* added
+  revelation (the all-or-nothing LEAK fake can't represent candidate-performs-A / push-performs-B) → added
+  `_PerMoveModel` + subset-keep / partial-fallback tests; (b) `screen_moves` had no truncation guard → raise on
+  `stop_reason == "max_tokens"` (a cut-off parse could silently drop a `performed` index = leak passes); (c) the new
+  `egress.md` dropped the evidence/"point at the specific text" grounding the high-effort lift gate enforces → added a
+  required `evidence` field so the cheaper backstop must justify itself at grounding parity (also resolves the
+  mutable-default NIT).
+- **Verified:** offline 272 passed / 9 skipped, ruff + format clean; `@live` calibration (final config) all 4 green —
+  golden-set zero-false-positive (entry @high), echo budget, faithful re-voice NOT flagged, named move CAUGHT (the
+  medium-effort batched screen keeps its teeth). Recorded as **L-20**. NEXT for the founder: manual browser dogfood
+  to feel the difference; Phase-2 tool-calling Concierge still open.
+
 ## 2026-06-29 — fix(run): the editable install is unreliable on Python 3.14 — launch with `PYTHONPATH=src` (L-19)
 - The founder ran the documented `python -m retnovation.web` and hit `ModuleNotFoundError: No module named
   'retnovation'` — the recurring stale-editable-install papercut. Diagnosed: the `__editable__.retnovation.pth`

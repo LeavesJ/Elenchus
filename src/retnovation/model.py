@@ -8,6 +8,7 @@ from .content_loader import load_prompt
 from .types import (
     CheckableGrade,
     CheckableQuestion,
+    EgressScreen,
     EntryClass,
     EntryClassification,
     Experience,
@@ -70,6 +71,7 @@ class Model(Protocol):
         self, prompt: str, opening: str, recent: list[tuple[str, str]]
     ) -> "EntryClassification": ...
     def echo_push(self, push_text: str, recent: list[tuple[str, str]]) -> str: ...
+    def screen_moves(self, moves: list[str], text: str) -> "EgressScreen": ...
 
 
 class FakeModel:
@@ -131,6 +133,10 @@ class FakeModel:
         # Safe by default; voice tests that need a leak use FakeLeakModel (Task 2).
         return InjectionExpressed(expressed=False, evidence="(fake: no leak)")
 
+    def screen_moves(self, moves: list[str], text: str) -> EgressScreen:
+        # Safe by default; voice tests that need a leak override this (FakeLeakModel).
+        return EgressScreen(performed=[], evidence="(fake: nothing screened)")
+
 
 class FakeLiftModel:
     """Scripted model for blind-lift-harness tests. Outputs keyed by (prompt, is_framed);
@@ -154,6 +160,14 @@ class FakeLiftModel:
 # Shared Opus 4.8 request params (claude-api reference): adaptive thinking + high effort,
 # no sampling parameters (temperature/top_p are removed on 4.8 and 400).
 _PARAMS = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}}
+
+# Medium effort for the batched egress screen only (claude-api: effort is low|medium|high, default
+# high; adaptive thinking stays ON). MEASURED: with adaptive thinking, high is already fast on the
+# simple calls (classify_entry ~1.3s, echo_push ~1.5s) — lowering them buys nothing and slightly
+# hurts, so they keep _PARAMS. The real latency win was BATCHING the egress (4 serial per-move
+# checks ~11s -> one screen ~2.5s, §screen_moves), not effort. Medium shaves the screen 3.6->2.5s
+# and the @live no-op + leak-catch confirm it stays accurate. Judgment calls all keep _PARAMS.
+_MED_PARAMS = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "medium"}}
 
 _ECHO_MAX_TOKENS = 1024  # a push is a sentence or two; explicit per L-17 (adaptive thinking budget)
 
@@ -326,7 +340,7 @@ class AnthropicModel:
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=EntryClassification,
-            **_PARAMS,
+            **_PARAMS,  # measured ~1.3s at high; lowering effort here is slower, not faster
         )
         return _require(resp)
 
@@ -338,7 +352,7 @@ class AnthropicModel:
             max_tokens=_ECHO_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user}],
-            **_PARAMS,
+            **_PARAMS,  # measured ~1.5s at high; medium was no faster and re-voice quality matters
         )
         if getattr(resp, "stop_reason", None) == "refusal":
             return push_text  # never block the loop on a refusal; show the canonical push
@@ -431,4 +445,25 @@ class AnthropicModel:
             output_format=InjectionExpressed,
             **_PARAMS,
         )
+        return _require(resp)
+
+    def screen_moves(self, moves: list[str], text: str) -> EgressScreen:
+        # Batched egress (the L-13 backstop): which of the hidden moves does `text` PERFORM, in ONE
+        # call over the whole list, instead of one check_injection_expressed per move. The lift
+        # harness keeps check_injection_expressed (high effort); this auditor runs at medium.
+        numbered = "\n".join(f"{i + 1}. {m}" for i, m in enumerate(moves))
+        system = load_prompt("egress")
+        user = f"Hidden moves:\n{numbered}\n\nText to screen:\n{text}"
+        resp = self._get_client().messages.parse(
+            model=self._model,
+            max_tokens=1024,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            output_format=EgressScreen,
+            **_MED_PARAMS,
+        )
+        # Fail LOUD on truncation: a cut-off parse could drop performed indices -> silent
+        # false-negative (a leak passes), the one direction the backstop must never fail quietly.
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            raise ModelError("screen_moves truncated at max_tokens — egress screen unreliable")
         return _require(resp)

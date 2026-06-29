@@ -55,12 +55,9 @@ def test_echo_push_budget_on_a_long_turn():
     assert out and isinstance(out, str)  # no truncation-to-empty / no raise (L-17)
 
 
-@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
-def test_echo_gate_does_not_flag_a_faithful_revoice(tmp_path):
-    """The REAL no-op detector (review #3/#7): the added-revelation gate, judged by the REAL model
-    against the REAL frame_details, must PASS a faithful re-voice (same challenge, no named move) —
-    else Echo silently falls back to the verbatim push every turn and D3 is never fixed. Every
-    offline substring fake misses this; only the real judge over real content catches it."""
+def _first_open_exp(db_path):
+    """Materialize the first open-ended experience (real rubric: frames + traps) for live egress
+    tests. Shared so the no-op and leak-catch tests screen against identical real content."""
     from datetime import datetime, timezone
 
     from retnovation.aim import aim, derive_core
@@ -69,18 +66,28 @@ def test_echo_gate_does_not_flag_a_faithful_revoice(tmp_path):
     from retnovation.experience import select_experience
     from retnovation.scheduler import propose_open_ended
     from retnovation.types import Regime
-    from retnovation.web import voice
 
-    store = build_store(str(tmp_path / "live.db"))
+    store = build_store(db_path)
     try:
         core = derive_core(aim())
         now = datetime.now(timezone.utc)
         state, ledger, corpus = store.load_state(now), store.load_ledger(), store.load_corpus()
         exps = [e for e in load_library() if e.regime is Regime.open_ended]
         spec, _ = propose_open_ended(state, exps, load_progression(), now).problem_menu()[0]
-        exp = select_experience(core, state, ledger, corpus, spec)
+        return select_experience(core, state, ledger, corpus, spec)
     finally:
         store.close()
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_echo_gate_does_not_flag_a_faithful_revoice(tmp_path):
+    """The REAL no-op detector (review #3/#7): the batched added-revelation gate, judged by the REAL
+    model against the REAL frames+traps, must PASS a faithful re-voice (same challenge, no named
+    move) — else Echo silently falls back to the verbatim push every turn and D3 is never fixed.
+    Every offline substring fake misses this; only the real judge over real content catches it."""
+    from retnovation.web import voice
+
+    exp = _first_open_exp(str(tmp_path / "live.db"))
     m = AnthropicModel()
     f = exp.rubric.frames[0]
     push = m.generate_push(exp, "frame", f.frame_code, stress=False)
@@ -89,9 +96,23 @@ def test_echo_gate_does_not_flag_a_faithful_revoice(tmp_path):
         "You leaned on being able to fix it later — is undoing this number actually as cheap as "
         "the cost of getting it wrong in the first place?"
     )
-    added = any(
-        voice._performs(m, fr.frame_detail, faithful_revoice)
-        and not voice._performs(m, fr.frame_detail, push)
-        for fr in exp.rubric.frames
-    )
+    added = bool(voice._performed(m, exp, faithful_revoice) - voice._performed(m, exp, push))
     assert added is False, "egress flags a faithful re-voice as added revelation — Echo would no-op"
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_echo_gate_catches_a_named_move(tmp_path):
+    """The moat direction (false negatives = leaks slip): the batched medium-effort screen must
+    FLAG a re-voice that states the frame's principle outright as added revelation vs the push. A
+    degenerate screen that always returns [] would pass the no-op test and the offline suite but
+    fail here — this is the L-13 backstop's teeth, at the lowered effort."""
+    from retnovation.web import voice
+
+    exp = _first_open_exp(str(tmp_path / "live2.db"))
+    m = AnthropicModel()
+    f = exp.rubric.frames[0]
+    push = m.generate_push(exp, "frame", f.frame_code, stress=False)
+    # a leaking re-voice: hands the move by stating the frame's principle outright
+    leak = f"The move here is to {f.frame_detail.rstrip('.').lower()} — just do that."
+    added = bool(voice._performed(m, exp, leak) - voice._performed(m, exp, push))
+    assert added is True, "egress missed an explicitly named move — the L-13 backstop has a hole"

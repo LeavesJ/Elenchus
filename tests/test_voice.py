@@ -1,10 +1,10 @@
 from retnovation.model import (
     AnthropicModel,
     FakeModel,
-    InjectionExpressed,
     IntakeClassification,
 )
 from retnovation.types import (
+    EgressScreen,
     EntryClass,
     EntryClassification,
     Experience,
@@ -49,13 +49,14 @@ def _exp():
 
 
 class FakeLeakModel(FakeModel):
-    """check_injection_expressed flags any text containing 'LEAK' as PERFORMING the move."""
+    """screen_moves flags any text containing 'LEAK' as PERFORMING every screened move."""
 
     def echo_push(self, push_text, recent):
         return "LEAK: lead with what you refuse to do"
 
-    def check_injection_expressed(self, injection, framed_output):
-        return InjectionExpressed(expressed="LEAK" in framed_output, evidence="x")
+    def screen_moves(self, moves, text):
+        hit = list(range(1, len(moves) + 1)) if "LEAK" in text else []
+        return EgressScreen(performed=hit, evidence="x")
 
 
 def test_entry_classification_type():
@@ -109,15 +110,47 @@ def test_egress_safe_reply_flags_a_move_naming_string():
 
 def test_egress_also_covers_rubric_traps():
     # a learner-facing reply that PERFORMS a trap move ("never name the move", L-5) must be flagged
-    # unsafe — the egress gate covers traps, not only frames. (_exp()'s trap_detail below.)
+    # unsafe — the egress screen covers traps, not only frames. _exp()'s trap is the 2nd move, so
+    # flagging ONLY it (not the frame) proves the trap path is screened.
     class _TrapLeak(FakeModel):
-        def check_injection_expressed(self, injection, framed_output):
-            return InjectionExpressed(
-                expressed=(injection == "Bend the offer to avoid saying no."), evidence="x"
-            )
+        def screen_moves(self, moves, text):
+            performed = [
+                i for i, m in enumerate(moves, 1) if m == "Bend the offer to avoid saying no."
+            ]
+            return EgressScreen(performed=performed, evidence="x")
 
     m = _TrapLeak(_intake(), {})
     assert voice.egress_safe_reply(m, _exp(), "anything") is False
+
+
+class _PerMoveModel(FakeModel):
+    """screen_moves flags moves per-text (content-addressed) so a test can represent PARTIAL added
+    revelation — candidate performs move A, push performs a DIFFERENT move B — which the
+    all-or-nothing LEAK fake cannot. These pin the set-difference heart of the echo gate offline
+    (was @live-only): a candidate that adds a move the push lacked must fall back; a candidate whose
+    moves are a SUBSET of the push's must be kept."""
+
+    def __init__(self, intake, flags):
+        super().__init__(intake, {})
+        self._flags = flags
+
+    def echo_push(self, push_text, recent):
+        return "CANDIDATE"
+
+    def screen_moves(self, moves, text):
+        return EgressScreen(performed=self._flags.get(text, []), evidence="x")
+
+
+def test_echo_keeps_candidate_when_its_moves_are_a_subset_of_the_push():
+    # candidate performs only move {2}, which the push ALSO performs -> no ADDED revelation -> keep
+    m = _PerMoveModel(_intake(), {"CANDIDATE": [2], "PUSH": [1, 2]})
+    assert voice.echo(m, _exp(), "PUSH", [("student", "x")]) == "CANDIDATE"
+
+
+def test_echo_falls_back_on_partial_added_revelation():
+    # candidate performs move {1}; push performs a DIFFERENT move {2} -> {1}-{2}={1} added -> push
+    m = _PerMoveModel(_intake(), {"CANDIDATE": [1], "PUSH": [2]})
+    assert voice.echo(m, _exp(), "PUSH", [("student", "x")]) == "PUSH"
 
 
 class FakeDoorModel(FakeModel):
@@ -143,8 +176,8 @@ def test_door_greeting_returns_authored_reply():
 
 def test_door_replaces_leaking_reply_with_safe_contract():
     m = FakeDoorModel(_intake(), EntryClass.confusion, "lead with what you refuse to do")
-    m.check_injection_expressed = lambda inj, out: InjectionExpressed(
-        expressed="refuse" in out, evidence="x"
+    m.screen_moves = lambda moves, text: EgressScreen(
+        performed=([1] if "refuse" in text else []), evidence="x"
     )
     cls, reply = voice.door(m, _exp(), "I don't get it", [])
     assert cls is EntryClass.confusion and reply == voice.SAFE_CONTRACT
