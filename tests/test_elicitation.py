@@ -184,3 +184,21 @@ def test_run_writes_artifact_and_returns_result(tmp_path):
     on_disk = json.loads(path.read_text())
     assert on_disk["runs"][0]["opening"] == "op-x"
     assert isinstance(result, ProbeResult)
+
+
+def test_summarize_groups_by_experience():
+    result = ProbeResult(
+        target_frame_code="embed_credentials_as_a_list",
+        runs=[
+            _run("irreversible_anchor", 0, FrameState.present_reasoned),
+            _run("continuity_lock_in", 0, FrameState.absent, trips=("shipped_the_one_shot_term",)),
+            _run("continuity_lock_in", 1, FrameState.present_reasoned),
+        ],
+    )
+    summaries = {s.experience_id: s for s in result.summarize()}
+    assert set(summaries) == {"irreversible_anchor", "continuity_lock_in"}
+    assert summaries["irreversible_anchor"].target_present_reasoned == 1
+    assert summaries["irreversible_anchor"].usable_runs == 1
+    assert summaries["continuity_lock_in"].target_present_reasoned == 1
+    assert summaries["continuity_lock_in"].target_absent == 1
+    assert summaries["continuity_lock_in"].trap_trips == {"shipped_the_one_shot_term": 1}
