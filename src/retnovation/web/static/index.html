@@ -17,6 +17,10 @@
   #seed{display:flex;align-items:center;gap:14px;margin-top:24px}
   #seed svg{flex:0 0 auto}
   .muted{color:#8aa0bf;font-size:13px}
+  .thinking{color:#5eead4;font-size:14px;margin:18px 0 4px}
+  .thinking span{animation:tdot 1.2s infinite}
+  .thinking span:nth-child(2){animation-delay:.2s} .thinking span:nth-child(3){animation-delay:.4s}
+  @keyframes tdot{0%,60%,100%{opacity:.2}30%{opacity:1}}
 </style></head>
 <body><main>
   <h1>your terrain begins</h1>
@@ -48,9 +52,7 @@ function renderProblem(prompt){
   app.appendChild(el(`<div class="prompt">${prompt.replace(/</g,'&lt;')}</div>`));
   const ta=el('<textarea placeholder="Reason it through. Decide, and account for the trade-offs."></textarea>');
   const btn=el('<button>Submit</button>');
-  btn.onclick=async()=>{ if(!ta.value.trim()) return hint(btn);
-    ta.disabled=true; btn.disabled=true;
-    const r=await post('/api/session/single/open',{text:ta.value}); advance(r); };
+  btn.onclick=()=>submit('/api/session/single/open', ta, btn);
   app.appendChild(ta); app.appendChild(btn);
 }
 function hint(anchor){
@@ -58,6 +60,18 @@ function hint(anchor){
   anchor.parentNode.insertBefore(
     el('<div class="muted hint">Take a position — even a rough first instinct.</div>'),
     anchor.nextSibling);
+}
+function thinking(){
+  const d=el('<div class="thinking" aria-live="polite">Vera is thinking<span>.</span><span>.</span><span>.</span></div>');
+  app.appendChild(d); return d;
+}
+async function submit(endpoint, ta, btn){
+  if(!ta.value.trim()) return hint(btn);
+  ta.disabled=true; btn.disabled=true;
+  const t=thinking();
+  try { const r=await post(endpoint,{text:ta.value}); t.remove(); advance(r); }
+  catch(e){ t.remove(); btn.disabled=false; ta.disabled=false;
+    app.appendChild(el('<div class="muted">connection lost — is the server still running? try again.</div>')); }
 }
 function advance(r){
   if(r.kind==='nudge'){ const b=app.querySelector('button:last-of-type'); if(b){ b.disabled=false; hint(b); } return; }
@@ -70,18 +84,14 @@ function renderDoor(text){
   app.appendChild(el(`<div class="push">${text.replace(/</g,'&lt;')}</div>`));
   const ta=el('<textarea placeholder="Take a position on the problem."></textarea>');
   const btn=el('<button>Submit</button>');
-  btn.onclick=async()=>{ if(!ta.value.trim()) return hint(btn);
-    ta.disabled=true; btn.disabled=true;
-    const r=await post('/api/session/single/open',{text:ta.value}); advance(r); };
+  btn.onclick=()=>submit('/api/session/single/open', ta, btn);
   app.appendChild(ta); app.appendChild(btn);
 }
 function renderPush(text){
   app.appendChild(el(`<div class="push">${text.replace(/</g,'&lt;')}</div>`));
   const ta=el('<textarea placeholder="Respond."></textarea>');
   const btn=el('<button>Reply</button>');
-  btn.onclick=async()=>{ if(!ta.value.trim()) return hint(btn);
-    ta.disabled=true; btn.disabled=true;
-    const r=await post('/api/session/single/reply',{text:ta.value}); advance(r); };
+  btn.onclick=()=>submit('/api/session/single/reply', ta, btn);
   app.appendChild(ta); app.appendChild(btn);
 }
 function renderSeed(terrain){
