@@ -155,6 +155,8 @@ class FakeLiftModel:
 # no sampling parameters (temperature/top_p are removed on 4.8 and 400).
 _PARAMS = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}}
 
+_ECHO_MAX_TOKENS = 1024  # a push is a sentence or two; explicit per L-17 (adaptive thinking budget)
+
 
 class _FrameStateItem(BaseModel):
     code: str
@@ -327,6 +329,23 @@ class AnthropicModel:
             **_PARAMS,
         )
         return _require(resp)
+
+    def echo_push(self, push_text: str, recent: list[tuple[str, str]]) -> str:
+        system = load_prompt("echo")  # frame-blind: the push + recent turns only
+        user = f"{_render_turns(recent)}Push to re-voice:\n{push_text}"
+        resp = self._get_client().messages.create(
+            model=self._model,
+            max_tokens=_ECHO_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            **_PARAMS,
+        )
+        if getattr(resp, "stop_reason", None) == "refusal":
+            return push_text  # never block the loop on a refusal; show the canonical push
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        return push_text  # no text block -> fall back to the canonical push (never raise here)
 
     def grade_answer(
         self, exp: Experience, question: CheckableQuestion, answer: str

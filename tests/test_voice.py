@@ -179,3 +179,16 @@ def test_classify_entry_is_frame_blind_and_parses():
     assert "frame_detail" not in blob and "Rubric" not in blob
     # the problem prompt IS available to the classifier
     assert "The pricing problem text." in blob
+
+
+def test_echo_push_is_frame_blind_and_returns_text():
+    stub = _StubClient(
+        text="Given you'd hold firm — what makes you sure that's the reversible side?"
+    )
+    m = AnthropicModel(client=stub)
+    out = m.echo_push("Which mistake can you walk back?", [("student", "I'd hold firm.")])
+    assert out.startswith("Given you'd hold firm")
+    blob = str(stub.last)
+    assert "lead_with_what_you_refuse_to_do" not in blob and "Rubric" not in blob
+    # the canonical push IS the input to re-voice
+    assert "Which mistake can you walk back?" in blob
