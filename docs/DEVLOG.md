@@ -1,5 +1,21 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — Cartographer MVP — implementation plan written
+- `docs/superpowers/plans/2026-06-29-cartographer-mvp.md` — 7 tasks (subagent-driven). Architecture fork
+  resolved with the user: §7 stepper realized as **(A) worker-bridge**, NOT (B) checkpointed-reimplemented —
+  the real, *untouched* `run_session` runs in a daemon thread whose `present`/`decide`/`respond` seams block on
+  per-session queues fed by HTTP, so the engine is byte-identical and the unprompted-read is computed by
+  unchanged code (the review's reconstruction risk vanishes; the "stepper-equivalence test" becomes a
+  bridge-transparency test: `done.assessment == direct run_session.assessment`). L-11 doesn't apply (a uvicorn
+  process is persistent); matches existing durability (state persists at session end). Tasks: (1-2) pure
+  `terrain.py` — `region_clears_guard` + `project_terrain` (lossy connected-component clustering, per-region
+  ≥2-frames/≥2-problems gate → seed/rendered; user-zero → seed); (3) `web` extra (FastAPI/uvicorn/httpx) +
+  skeleton; (4) the worker-bridge session runner [OPUS]; (5) stepper endpoints + the L-13 surface test (no
+  frame_code/terrain in menu/problem/push; seed only at `done`) [OPUS]; (6) minimal clean-room frontend + seed
+  reveal; (7) launch entry + DEVLOG + OPUS whole-branch + gated MANUAL browser dogfood. OPUS reviewers on the
+  guard, the bridge, and the L-13 surface. OUT OF SCOPE: rich 3D terrain, trails, decay/rebound animation,
+  positioning. NEXT: subagent-driven build.
+
 ## 2026-06-28 — UI/UX vision + MVP design — "The Cartographer" (spec written)
 - `docs/superpowers/specs/2026-06-28-uiux-cartographer-design.md` — the selling-surface vision. Concept: a
   **cultivated world under a constellation sky** — height = accreted durable strength, surface glow = current
