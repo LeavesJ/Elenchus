@@ -22,7 +22,16 @@
   **checkpointed stepper (L-11)** since you can't block on input() across HTTP. **MVP slice:** "trial + nascent
   seed" — the clean-room friction-dialogue end-to-end through the real engine + a single pre-threshold seed.
 - Built via brainstorming skill (4-agent market scan + 2-agent strategy research, all parallel; 3 live concept
-  renders incl. an interactive 3D terrain). OPEN items: hazard-leak (#5), positioning. NEXT: user review → writing-plans.
+  renders incl. an interactive 3D terrain).
+- **Spec review folded (2nd adversarial pass):** (1) the **trial-vs-guard tension** — the guard withholds the
+  wow exactly at user-zero — RESOLVED in new §8a: the conversion wow is the *dialogue's felt diagnosis* (ungated),
+  the terrain is *retention* for the converted, so the narrow beachhead is intrinsic to the conversion mechanism
+  (guard merely aligns, and protectively — gating flash from the unconvinced avoids the wrong-customer acquisition
+  that killed Humu/Pymetrics); (2) the non-invertibility guard is now **per-region**, not global (map grows
+  unevenly like the corpus); (3) **§4c honesty** — the paired test covers only the smaller live-terrain leak; the
+  cross-session memory prime is defended-not-tested (real test = between-cohort, later corpus); (4) the hazard
+  leak **inherits §4** (no longer open); (5) the L-11 **stepper gets a required equivalence test** (stepped==in-memory
+  frame_states/probed/reasoned_unprompted). One OPEN item now: positioning. NEXT: user confirm §8a → writing-plans.
 
 ## 2026-06-28 — SP3 @live content-elicitation run — CLAIM CONFIRMED (13/13), over-scaffold caveat recorded
 - Ran the gated probe (artifact gitignored: `data/elicitation/20260629T031154Z.json`; ~26 Opus calls; P1=8 / P2=5).

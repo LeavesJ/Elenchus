@@ -1,7 +1,9 @@
 # Retnovation UI/UX — The Cartographer — Vision + MVP Design
 
 Date: 2026-06-28
-Status: design (vision + thin MVP slice; two items OPEN — see §9). Awaiting user review → writing-plans.
+Status: design (vision + thin MVP slice). Review folded (§8a trial/guard tension resolved; per-region guard;
+§4c honest scoping; hazard-leak resolved by inheriting §4; stepper-equivalence test required). One item OPEN:
+positioning (§9). Awaiting user confirm of the §8a wedge decision → writing-plans.
 Related: `retnovation-ui-ux-vision` memory; P3 (the diagnostic-progression interactive surface with injectable seams).
 
 ## 1. The problem
@@ -80,14 +82,19 @@ early clean read does not certify the projection; an early leak may indict corpu
 is a real **coarseness floor**: past some coarseness the map stops being felt, so the safe-vs-felt tension is
 tightest when content is thinnest (now).
 
-### 4b. The non-invertibility guard = the corpus-density gate
+### 4b. The non-invertibility guard = a PER-REGION corpus-density gate
 
-Encode the precondition as a test/guard (the `assert_intake_equivalence` pattern from the elicitation work):
-**every region's vitality must draw on ≥N distinct frames across ≥M problems**, or the guard fails. At
-user-zero it likely fails — and that is correct: it **refuses to render an invertible thin-corpus map.** So
-"safety strengthens with content" becomes *enforced*, not hoped: the guard decides *when* the Cartographer is
-allowed to get rich. The early surface therefore leans on the friction-trial (§7), and the map matures as the
-corpus grows.
+Encode the precondition as a test/guard (the `assert_intake_equivalence` pattern from the elicitation work): a
+**region renders only when its OWN vitality draws on ≥N distinct frames across ≥M problems**; below that
+threshold the region stays in the pre-map **seed/fog** state rather than rendering decodable vitality. The gate
+is **regional, not global.** Corpus grows unevenly — a heavily-worked region is dense/many-to-one while a
+barely-touched one is one dominant move — so a single global render-or-refuse either blocks the whole map until
+the *thinnest* region matures (wasting the density already earned in the dense one) or renders the sparse region
+while it is still invertible. Per-region gating instead makes the Cartographer **grow unevenly the way the
+corpus does** — dense regions become real terrain, sparse ones stay seeds — which is both safer and a more
+honest picture of where the learner actually has breadth. "Safety strengthens with content" is thus *enforced
+per region*; at user-zero every region is sub-threshold (all seeds), which is exactly the nascent-seed MVP state
+(§8). `N`, `M` are calibration parameters tuned to corpus size.
 
 ### 4c. The falsification test (paired, not single)
 
@@ -95,9 +102,14 @@ corpus grows.
 engine exists to detect), so a single held-out novel problem cannot distinguish a gamed map from honest
 non-transfer. The discriminating test is **paired**: read the same region's problem **with the terrain shown**
 vs. **with it hidden** (a true clean-room read). Strong-with / weak-without = the terrain is inflating;
-weak-in-both = honest non-transfer, map innocent. **Bound:** at n=1 the terrain-hidden control still carries
-the learner's *memory* of prior reveals, so the paired test isolates the *live*-terrain marginal leak, not the
-cross-session memory prime — which is defended only by the lossy projection (§4, §4a).
+weak-in-both = honest non-transfer, map innocent. **Be honest about what this does and doesn't cover:** the
+live-terrain increment is the *smaller* leak. The *larger* one — the **cross-session memory prime** (what the
+learner carries into the next opening read from having seen the map) — is **blind to the paired test**, because
+both arms run on a learner with the *same* memory. That memory prime is the leak the entire lossy projection
+exists to bound, and in the MVP it is **defended-by-projection but not tested** — its adequacy is asserted, not
+measured. A real test of it needs a **between-cohort design** (saw-the-map vs. never-saw) on matched novel
+problems — a later-corpus experiment, not a user-zero one. The paired test is also **run per region** against
+that region's density (§4b): a leak in a sparse region and a dense region mean opposite things.
 
 ### 4d. The rebound leak (accepted)
 
@@ -117,10 +129,11 @@ Five problems surfaced and shaped the design:
    genuinely-transferred pairs draw; broad transfer = a shared sky, not a ground-web.
 4. **Rebound ≈ first-time growth in a still frame.** → Rebound is *animated* (springs up faster than it first
    grew; speed is the tell).
-5. **OPEN — the slip/hazard leak.** A consistent "you keep hitting this" marker can be decoded into a named
-   anti-move, the same failure as region-decoding. **Unresolved:** either give hazards the lossy treatment
-   (cluster traps; don't pin one marker to one `trap_code`) or accept a bounded depth-location leak like
-   rebound. See §9.
+5. **The slip/hazard leak — resolved by inheriting §4.** It is the region-decoding leak in different clothes: a
+   marker pinned to one `trap_code` is invertible exactly as a region pinned to one move is. So hazards take the
+   *same* treatment — **cluster traps so no marker maps to one failure mode** (lossy), gated per-region (§4b) —
+   and the residual is an accepted **bounded depth-location leak** like rebound (§4d). Not a separate open
+   question; solving it any other way would risk inconsistency with the regions.
 
 ## 6. Positioning / go-to-market (OPEN — parked by the user)
 
@@ -152,7 +165,12 @@ open strategic decision the user chose to revisit separately.
   rework to the judgment loop; the seams were built for this.
 - **Checkpointed stepper (L-11):** you cannot block on `input()` across an HTTP boundary, so the session
   advances **one step per request**, persisting loop-state to the existing SQLite store. This is the main piece
-  of *new* engine-adjacent code.
+  of *new* engine-adjacent code — and the one place the unprompted-read property could silently break: a
+  step-per-request loop must reconstruct the same intake `frame_states` and `probed` set the synchronous loop
+  held in memory, and a lossy reconstruction would compromise `reasoned_unprompted` at the surface after it was
+  protected everywhere upstream. **Required test (elicitation-guardian pattern):** assert the stepped →
+  persisted → reloaded loop produces byte-identical `frame_states`, `probed` set, and `reasoned_unprompted` to
+  the in-memory loop on the same scripted inputs, so the HTTP boundary cannot change what counts as unprompted.
 - **`terrain_projection`** (the lossy seam, §4) lives in the engine; the API serves its coarse output; the
   frontend renders it; the non-invertibility guard (§4b) gates whether it renders at all.
 
@@ -167,18 +185,45 @@ at user-zero. So the thin slice is:
   near-empty world — "watch your world begin"), which dogfoods `terrain_projection` + the guard from day one.
   (No contradiction with §4b: the guard gates the *rich, decodable multi-region* map; a single nascent seed is
   *below* that threshold — one point is nothing to decode — so it is shown honestly as "your world begins,"
-  pre-map, not as a readable terrain.)
+  pre-map, not as a readable terrain.) **Required:** the stepper-equivalence test (§7) ships with this slice.
 - **Out of scope (later increments):** the rich 3D terrain over a mature corpus; transfer trails; the full
   garden decay/rebound animation; multi-session map accretion at scale. These earn their way in as the corpus
   grows (§4a–4b).
 - **Why not "rich terrain now":** it would be the glamour shot over near-empty state, and the guard would gate
   it.
 
-## 9. Open items (carry into the plan, do not block the vision)
+## 8a. The trial-vs-guard tension (resolved)
 
-1. **The hazard/slip leak (§5 #5):** lossy-cluster traps vs. accept a bounded depth-location leak. A doctrine
-   sub-question to settle before the trap gallery is rendered.
-2. **Positioning (§6):** B2C-vs-enterprise go-to-market — parked by the user.
+§8's trial is the conversion mechanism; §4b's guard withholds the rich, decodable map at user-zero — *every*
+trial user's state. So the guard gates the terrain exactly when conversion would most want a wow, and the
+clean-room dialogue alone is (by §1) what reads as "ChatGPT-with-a-system-prompt" to a first-timer. As first
+written, §6 and §8 did not compose.
+
+**Resolution — the wow is the dialogue, not the terrain.** The trial's self-demonstration is the **felt
+diagnosis in the friction-dialogue** — the probe that catches a flaw the user would have missed (mechanism A:
+"the buyer becomes the measurement instrument"). It fires in the first session, *ungated*. The **terrain is a
+retention / self-legibility artifact for the *converted*** — who by definition have done sessions and grown
+corpus — so gating it early (per-region, §4b) costs conversion nothing. The single nascent seed is a *teaser*
+of that retention artifact, not the wow.
+
+**Consequence — the narrow beachhead is intrinsic, not manufactured.** The narrowness ("people who already
+suspect they have a judgment problem") comes from the **conversion mechanism** — felt diagnosis only lands for
+the meta-aware — **not** from the guard; the guard merely *aligns* with it (both point at the same narrow
+beachhead). Further, gating the flashy terrain from the unconvinced is **protective**: converting-via-flash the
+users who cannot yet perceive the value is precisely how you acquire the customers who later force the
+legibility compromises that killed Humu/Pymetrics (§6). So the guard is a GTM *feature*, not a tax, and the
+narrow wedge is a **deliberate choice.** (Rejected the alternative — make the seed carry the wow — because a
+more demonstrative seed is a more decodable seed, reopening §4.)
+
+**Status:** a strategic commitment that connects to the parked positioning (§6, §9). Confirm before writing-plans.
+
+## 9. Open items
+
+1. **Positioning (§6) — parked by the user.** B2C-vs-enterprise go-to-market. Sharpened by §8a: the narrow
+   beachhead is *intrinsic to the conversion mechanism*, so the open choice is *how narrow, deliberately* (and
+   whether/when to attempt an enterprise legibility bridge) — not *whether* the wedge is narrow.
+
+*(The hazard/slip leak, previously open, is resolved in §5 #5 by inheriting the §4 projection.)*
 
 ## 10. Visual references
 
