@@ -154,3 +154,20 @@ Read this checklist before every code change. Update it after every correction o
   wins; never log values). Prevention: when an entry point depends on env vars, either load them itself or make
   the documented launch command include the sourcing — and when validating a runnable thing, run it the EXACT way
   the user will (a smoke that pre-sets env the real command doesn't is testing a different command).
+- **L-19 The setuptools editable install (`pip install -e .`) is UNRELIABLE on this Python 3.14 venv — launch and
+  test with `PYTHONPATH=src`, do NOT depend on `import retnovation` resolving on its own.** Recurring symptom: the
+  founder runs the documented `python -m retnovation.web` and gets `ModuleNotFoundError: No module named
+  'retnovation'`. Root cause (diagnosed 2026-06-29): the `__editable__.retnovation-0.1.0.pth` is present and
+  contains the correct plain path (`…/src`), yet `src` is NOT added to `sys.path` at startup — Python 3.14 +
+  setuptools silently drops it. Every editable mode fails the **`-m`/`runpy`** resolution path: lenient (plain
+  `.pth`) → `src` never on `sys.path`; strict (`editable_mode=strict`) → a `build/__editable__…` symlink-finder
+  makes `import retnovation` work in a `python -c` context but `python -m retnovation.web` STILL raises (runpy
+  doesn't consult the editable finder the same way). Prior handoffs "fixed" it with `pip install -e . --no-deps`,
+  which works *momentarily in the same shell* then breaks again — a false fix. **The robust, deterministic
+  commands (verified via health smoke, `GET /api/health → {"ok":true}`, `GET / → 200`):**
+  - Web app: `cd ~/Documents/Retnovation && PYTHONPATH=src .venv/bin/python -m retnovation.web` → http://127.0.0.1:8000
+  - Tests: `PYTHONPATH=src .venv/bin/pytest -q` (already the documented form).
+  `PYTHONPATH=src` does not depend on the editable install at all, so it cannot recur. Prevention: when a `python
+  -m pkg` launch fails with ModuleNotFoundError on a `src/` layout, do NOT reinstall editable and call it fixed —
+  validate the EXACT command with a health smoke, and prefer `PYTHONPATH=src` (a thin repo-root launcher script is
+  the only way to restore the bare `python -m` form, since a package cannot self-bootstrap its own import for `-m`).

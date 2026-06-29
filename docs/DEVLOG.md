@@ -1,5 +1,17 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — fix(run): the editable install is unreliable on Python 3.14 — launch with `PYTHONPATH=src` (L-19)
+- The founder ran the documented `python -m retnovation.web` and hit `ModuleNotFoundError: No module named
+  'retnovation'` — the recurring stale-editable-install papercut. Diagnosed: the `__editable__.retnovation.pth`
+  holds the correct plain path (`…/src`) but Python 3.14 + setuptools silently drops it from `sys.path`; EVERY
+  editable mode fails the `-m`/runpy resolution (lenient → src never on path; strict → `build/__editable__…`
+  symlink-finder works for `python -c "import retnovation"` but `python -m retnovation.web` still raises). Prior
+  handoffs "fixed" it with `pip install -e . --no-deps` — a FALSE fix (works momentarily in-shell, breaks again).
+- **Robust launch (verified via health smoke — `GET /api/health → {"ok":true}`, `GET / → 200`):**
+  `cd ~/Documents/Retnovation && PYTHONPATH=src .venv/bin/python -m retnovation.web` → http://127.0.0.1:8000.
+  `PYTHONPATH=src` (same as the test command) does not touch the editable install, so it cannot recur. Recorded
+  as **L-19**; the `.env` auto-loader (L-18) still fires, so the live model calls work for the browser dogfood.
+
 ## 2026-06-29 — Doorman + Echo: pre-multi-user hardening (deferred Minors; TDD; suite 270/8)
 - Applied the three liveness/quality/cost Minors the whole-branch review deferred. All in the conversational
   layer (`session_runner.present()`); the judgment-loop engine + `voice.py` stay byte-UNTOUCHED; the
