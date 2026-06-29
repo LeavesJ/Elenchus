@@ -397,6 +397,64 @@ class LiftResult(BaseModel):
         return len(self._valid()) < self.min_scenarios
 
 
+class ProbeRun(BaseModel):
+    experience_id: str
+    run_index: int
+    opening: str  # verbatim learner output — gitignored artifact only, never committed
+    refused: bool = False
+    frame_states: dict[str, FrameState] = Field(default_factory=dict)
+    trap_states: dict[str, TrapState] = Field(default_factory=dict)
+
+
+class ProbeSummary(BaseModel):
+    experience_id: str
+    total_runs: int
+    refused_runs: int
+    usable_runs: int  # total_runs - refused_runs; the present-reasoned-rate denominator
+    target_present_reasoned: int
+    target_present_asserted: int
+    target_absent: int
+    trap_trips: dict[str, int]  # trap_code -> tripped count across usable runs (first-class)
+
+
+class ProbeResult(BaseModel):
+    target_frame_code: str
+    runs: list[ProbeRun]
+
+    def summarize(self) -> list[ProbeSummary]:
+        by_exp: dict[str, list[ProbeRun]] = {}
+        for r in self.runs:
+            by_exp.setdefault(r.experience_id, []).append(r)
+        out: list[ProbeSummary] = []
+        for eid, runs in by_exp.items():
+            usable = [r for r in runs if not r.refused]
+            trips: dict[str, int] = {}
+            for r in usable:
+                for code, st in r.trap_states.items():
+                    if st is TrapState.tripped:
+                        trips[code] = trips.get(code, 0) + 1
+            tgt = self.target_frame_code
+            out.append(
+                ProbeSummary(
+                    experience_id=eid,
+                    total_runs=len(runs),
+                    refused_runs=len(runs) - len(usable),
+                    usable_runs=len(usable),
+                    target_present_reasoned=sum(
+                        1 for r in usable if r.frame_states.get(tgt) is FrameState.present_reasoned
+                    ),
+                    target_present_asserted=sum(
+                        1 for r in usable if r.frame_states.get(tgt) is FrameState.present_asserted
+                    ),
+                    target_absent=sum(
+                        1 for r in usable if r.frame_states.get(tgt) is FrameState.absent
+                    ),
+                    trap_trips=trips,
+                )
+            )
+        return out
+
+
 class Provenance(BaseModel):
     source_type: Literal["owned", "public"] = "owned"  # public = forward-room, untested this arc
     pointer: str
