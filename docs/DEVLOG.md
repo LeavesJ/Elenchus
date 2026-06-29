@@ -1,5 +1,17 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — plan: Engaged agent "Doorman + Echo" (8 TDD tasks, pending adversarial review)
+- Spec approved (persona "Vera", scope as specced). Implementation plan written:
+  `docs/superpowers/plans/2026-06-29-engaged-agent-doorman-echo.md` — 8 TDD tasks, each committed:
+  (1) types + Protocol + FakeModel stubs; (2) egress gate (reuses `check_injection_expressed`) +
+  Echo with verbatim-push fallback; (3) Doorman routing + `SAFE_CONTRACT`; (4) `AnthropicModel.classify_entry`
+  + `entry.md` (frame-blind); (5) `echo_push` + `echo.md` (frame-blind, explicit budget L-17);
+  (6) bridge wiring (Doorman loop + Echo wrap; keeps transparency green + adds the Echo-fidelity
+  invariant: engine records the canonical push, not the Echo); (7) `door` kind + frontend + integration
+  + L-13 no-leak; (8) @live golden-set zero-false-positive calibration + echo budget sanity.
+- Engine + `model.py` existing methods byte-untouched (additive only). Plan is under adversarial review
+  (runs code) before the subagent-driven build.
+
 ## 2026-06-29 — spec: Engaged agent "Doorman + Echo" (D2/D3 design, pending review)
 - Brainstorm outcome for D2/D3. User steer: an *engaged* agent — more than a
   front-door+listening-probe shell, not a generic assistant ("not Claude 2.0"), not a full reframe.
