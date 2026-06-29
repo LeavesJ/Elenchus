@@ -2,8 +2,16 @@ from datetime import datetime, timezone
 
 from retnovation.aim import aim, derive_core
 from retnovation.cli import build_store
+from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
 from retnovation.orchestration import run_session
-from retnovation.types import Regime, Work
+from retnovation.types import (
+    EntryClass,
+    EntryClassification,
+    FrameState,
+    Regime,
+    TrapState,
+    Work,
+)
 from retnovation.web.session_runner import SessionRegistry
 
 NOW = datetime(2026, 6, 29, tzinfo=timezone.utc)
@@ -69,3 +77,48 @@ def test_step_after_done_returns_error_and_does_not_hang(tmp_path, make_fake):
     tag2, data2 = reg.step("s_term", "anything")
     assert tag2 == "error"
     assert "message" in data2
+
+
+class _EchoFidelityModel(FakeModel):
+    """Substantive entry; echo_push PREFIXES so the displayed push differs from the canonical one."""
+
+    def classify_entry(self, prompt, opening, recent):
+        return EntryClassification(entry_class=EntryClass.substantive, reply="")
+
+    def echo_push(self, push_text, recent):
+        return "ECHO::" + push_text
+
+
+def _fid_factory():
+    intake = IntakeClassification(
+        frame_states={
+            "embed_credentials_as_a_list": FrameState.present_reasoned,
+            "choose_the_failure_default_deliberately": FrameState.absent,
+        },
+        trap_states={
+            "deferred_the_one_time_choice": TrapState.not_tripped,
+            "assumed_the_happy_path": TrapState.not_tripped,
+        },
+    )
+    closed = [
+        ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+        for _ in range(4)
+    ]
+    return _EchoFidelityModel(intake, {"choose_the_failure_default_deliberately": closed})
+
+
+def test_engine_records_canonical_push_not_echo(tmp_path):
+    """Echo is display-only: the trajectory the engine records (and grades / reads for the
+    unprompted signal) must be the canonical generate_push output, never the Echo re-skin."""
+    reg = SessionRegistry(str(tmp_path / "f.db"), model_factory=_fid_factory)
+    tag, _ = reg.start("sf", now=NOW)
+    menu_idx = reg.menu_index("sf", "veldra:embedded_anchor_lock_in")
+    reg.step("sf", menu_idx)
+    tag, data = reg.step("sf", "reasoning that already holds the move")
+    while tag == "push":
+        assert data["text"].startswith("ECHO::")  # the user SEES the echo
+        tag, data = reg.step("sf", "mechanism")
+    assert tag == "done"
+    for push in data["assessment"].trajectory:
+        assert not push.text.startswith("ECHO::")  # the engine RECORDS the canonical push
+        assert push.text == "[push:frame]"  # FakeModel.generate_push canonical output

@@ -8,7 +8,8 @@ from datetime import datetime, timezone
 from ..aim import aim, derive_core
 from ..cli import build_store
 from ..orchestration import run_session
-from ..types import Outcome, Regime, Selection, Work
+from ..types import EntryClass, Outcome, Regime, Selection, Work
+from . import voice
 
 
 class _Channel:
@@ -56,11 +57,23 @@ class SessionRegistry:
                     ch.from_worker.put(
                         ("problem", {"prompt": exp.prompt, "ledger_ref": exp.ledger_ref})
                     )
-                    opening = ch.to_worker.get()
+                    recent: list[tuple[str, str]] = []
+                    while True:
+                        text = ch.to_worker.get()
+                        recent.append(("student", text))
+                        entry, reply = voice.door(model, exp, text, recent)
+                        if entry is EntryClass.substantive:
+                            opening = text  # RAW opening to the engine — bridge stays transparent
+                            break
+                        ch.from_worker.put(("door", {"text": reply}))
+                        recent.append(("Vera", reply))
 
                     def respond(push):
-                        ch.from_worker.put(("push", {"text": push}))
-                        return ch.to_worker.get()
+                        shown = voice.echo(model, exp, push, recent)
+                        ch.from_worker.put(("push", {"text": shown}))
+                        student = ch.to_worker.get()
+                        recent.append(("student", student))
+                        return student  # RAW reply to the engine — canonical push is what it grades
 
                     return Work(opening=opening, respond=respond)
 
