@@ -1,5 +1,27 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — Cartographer MVP — BUILT (subagent-driven; suite 250 passed / 5 skipped; whole-branch review YES)
+- The local web app: the founder runs the clean-room friction-dialogue end-to-end through the REAL, UNTOUCHED
+  engine, then sees a single honest *nascent seed* of their judgment-terrain.
+- `src/retnovation/terrain.py` (pure): `region_clears_guard` (per-region ≥2-frames/≥2-problems non-invertibility
+  gate) + `project_terrain` (lossy connected-component clustering by shared problem → seed/rendered; vitality =
+  mean of ≥2 frames; user-zero → seed). `Region`/`TerrainView`/`learner_view` (strips `frame_codes`) in types.py.
+- `src/retnovation/web/`: FastAPI skeleton (`web` extra: fastapi/uvicorn/httpx); `session_runner.py` — the
+  **worker-bridge** (§7 option A): the real `run_session` runs in a daemon thread whose present/decide/respond
+  seams block on per-session queues fed by HTTP, so the engine is byte-identical and the unprompted-read is
+  computed by unchanged code (bridge-transparency test: `done.assessment == direct run_session`, model_dump-equal;
+  `build_store`-inside-`try` → worker failure emits `error` not a hang; terminal-state guard so a post-done/error
+  `step` can't hang); `app.py` stepper endpoints + the **L-13 surface** (no frame_code/terrain in menu/problem/push;
+  terrain only at `done` via `learner_view`; full-session test); minimal clean-room frontend + nascent-seed reveal
+  (seed only on `done`; escaped); `__main__.py` uvicorn launch.
+- Built subagent-driven (7 tasks; OPUS reviewers on the guard, the bridge, the L-13 surface, + whole-branch).
+  2 in-task fixes (T4 hang-on-error; T6 escaping) + a final-review fix wave (terminal guard, transitivity test,
+  non-empty assert), each re-reviewed clean. **Engine UNTOUCHED across all 9 commits.** ruff clean.
+- NEXT (gated MANUAL with the user, spends Opus tokens): `PYTHONPATH=src .venv/bin/python -m retnovation.web` →
+  browser dogfood at 127.0.0.1:8000 — one real clean-room session end-to-end + the seed reveal; then record it.
+- Deferred Minors (single-user MVP-safe): terminal flag unlocked (TOCTOU only under concurrent same-session);
+  region_id process-salted hash; Starlette/httpx deprecation warning; narrow frontend escape (< only).
+
 ## 2026-06-29 — Cartographer MVP — implementation plan written
 - `docs/superpowers/plans/2026-06-29-cartographer-mvp.md` — 7 tasks (subagent-driven). Architecture fork
   resolved with the user: §7 stepper realized as **(A) worker-bridge**, NOT (B) checkpointed-reimplemented —
