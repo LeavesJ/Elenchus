@@ -162,6 +162,9 @@ def test_probe_uses_learner_max_tokens_budget():
     # decision-prompt openings (or starves the text block when thinking fires). Pins the production default.
     from retnovation.elicitation import LEARNER_MAX_TOKENS
 
+    assert (
+        LEARNER_MAX_TOKENS > 1024
+    )  # must exceed the lift default, else the 1024-cap bug silently returns
     exp = load_experience("continuity_lock_in")
     seen: list[int] = []
 

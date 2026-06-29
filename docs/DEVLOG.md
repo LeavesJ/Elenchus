@@ -11,7 +11,12 @@
   — lift stays byte-identical (default unchanged). `elicitation.LEARNER_MAX_TOKENS = 8192`; `run_elicitation_probe`
   threads it via a new `learner_max_tokens` param. `injection=None` is untouched → frame-naiveness preserved
   (max_tokens is a budget, not a primer); the spec's "exact same call" wording corrected. New wiring test pins the
-  production budget. Suite 238 passed / 5 skipped. Core-path change → OPUS adversarial review before merge.
+  production budget. Suite 238 passed / 5 skipped.
+- OPUS core-path review = Ready-to-merge YES (backward-compat verified — lift byte-identical, all callers
+  positional; the param is USED not just accepted; injection=None untouched + test-pinned). Folded 2 recs: a
+  `LEARNER_MAX_TOKENS > 1024` regression guard in the wiring test, and the note that **8192 is empirical
+  headroom, not a derived bound** (adaptive thinking at effort=high has no fixed size); a still-truncated
+  opening WITH a text block returns the partial (graceful degradation).
 
 ## 2026-06-28 — SP3 live content-elicitation probe — BUILT (subagent-driven; suite 237 passed / 5 skipped)
 - New PURE `src/retnovation/elicitation.py` (Model-protocol-only, no I/O): `run_elicitation_probe` (bare
