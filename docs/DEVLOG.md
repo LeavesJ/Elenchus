@@ -9,8 +9,15 @@
   (6) bridge wiring (Doorman loop + Echo wrap; keeps transparency green + adds the Echo-fidelity
   invariant: engine records the canonical push, not the Echo); (7) `door` kind + frontend + integration
   + L-13 no-leak; (8) @live golden-set zero-false-positive calibration + echo budget sanity.
-- Engine + `model.py` existing methods byte-untouched (additive only). Plan is under adversarial review
-  (runs code) before the subagent-driven build.
+- Engine + `model.py` existing methods byte-untouched (additive only).
+- **Adversarial plan review (code-running) DONE + folded.** Verified clean: transparency byte-identity,
+  fixture codes vs the real `irreversible_anchor` rubric, `_require` stub, acyclic imports, Protocol
+  additivity (`FakeLiftModel` correctly NOT stubbed). Three findings folded: (#3, central) the Echo egress
+  is now ADDED-REVELATION — judged against the canonical push as baseline, not the bare `frame_detail`, so
+  a faithful probe isn't falsely flagged and Echo can't silently no-op (the trap every offline fake misses);
+  (#6) Task 7 fixes a double-Submit DOM bug (`renderProblem`/`renderDoor` now disable on submit); (#7) Task 8
+  gains a live faithful-revoice no-op detector. Doorman replies keep the flat egress (they perform zero moves).
+  Plan ready for the subagent-driven build.
 
 ## 2026-06-29 — spec: Engaged agent "Doorman + Echo" (D2/D3 design, pending review)
 - Brainstorm outcome for D2/D3. User steer: an *engaged* agent — more than a

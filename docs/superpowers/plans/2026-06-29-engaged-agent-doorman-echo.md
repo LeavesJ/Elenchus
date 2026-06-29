@@ -20,6 +20,9 @@
 - **Pre-commit gate (lessons.md):** `ruff format .`; `ruff check .`; `pytest`; update `docs/DEVLOG.md`; no secrets staged; confidentiality gate (`git ls-files | grep -iE 'berkeley|guidebook|blueprint|brief|founderceo|judgmentloop|lifttest|mvp_scope|\.pdf'`) empty; stage explicit paths only; **no `Co-Authored-By`**.
 - **Branch:** all work on `feat/engaged-agent-doorman-echo` (already created; the spec is its first commit).
 - **Run tests:** `PYTHONPATH=src .venv/bin/python -m pytest -q`. Lint: `.venv/bin/ruff format . && .venv/bin/ruff check .`.
+- **Test-file assembly:** `tests/test_voice.py` is built up across Tasks 1–5,8. CONSOLIDATE imports and shared helpers (`_intake`, `_exp`, `FakeLeakModel`, the `voice` import) at the top of the file — do not re-import or re-define a name already present (ruff `F811`). The code blocks below show the NEW tests per task; place each shared helper exactly once.
+- **Conversation role tokens:** use `("student", text)` / `("Vera", text)` consistently for `recent` turns everywhere (bridge, tests, live fixtures).
+- **Egress design (review #3):** the Echo egress gate is ADDED-REVELATION — judge the re-voice against the canonical push as baseline (flag only a move the push did not already perform). Judging against the bare `frame_detail` would false-positive on a faithful probe and make Echo a silent no-op. Doorman replies (no push baseline) keep the flat check.
 
 ---
 
@@ -170,7 +173,7 @@ git commit -m "feat(voice): add EntryClass/EntryClassification + classify_entry/
 
 **Interfaces:**
 - Consumes: `Model.echo_push`, `Model.check_injection_expressed`; `Experience.rubric.frames[*].frame_detail`.
-- Produces: `egress_safe(model, exp, text: str) -> bool`; `echo(model, exp, push_text: str, recent: list[tuple[str, str]]) -> str`.
+- Produces: `_performs(model, move: str, text: str) -> bool`; `egress_safe_reply(model, exp, text: str) -> bool` (Doorman replies — flat check, no push baseline); `echo(model, exp, push_text: str, recent: list[tuple[str, str]]) -> str` (ADDED-REVELATION gate vs the canonical push).
 
 - [ ] **Step 1: Write the failing test** (append to `tests/test_voice.py`)
 
@@ -178,6 +181,11 @@ git commit -m "feat(voice): add EntryClass/EntryClassification + classify_entry/
 from retnovation.model import FakeModel, InjectionExpressed
 from retnovation.types import Experience, Frame, Mode, Regime, Rubric, Trap
 from retnovation.web import voice
+
+
+def _intake():
+    from retnovation.model import IntakeClassification
+    return IntakeClassification(frame_states={}, trap_states={})
 
 
 def _exp():
@@ -194,35 +202,39 @@ def _exp():
 
 
 class FakeLeakModel(FakeModel):
-    """check_injection_expressed reports a leak for any text containing 'LEAK'."""
+    """check_injection_expressed flags any text containing 'LEAK' as PERFORMING the move."""
     def echo_push(self, push_text, recent):
-        return "LEAK: lead with what you refuse to do"  # a re-skin that names the move
+        return "LEAK: lead with what you refuse to do"  # a re-skin that NAMES the move
     def check_injection_expressed(self, injection, framed_output):
         return InjectionExpressed(expressed="LEAK" in framed_output, evidence="x")
 
 
-def test_echo_returns_reskin_when_safe():
-    m = FakeModel.__new__(FakeModel)  # identity echo + safe egress (Task 1 stubs)
-    FakeModel.__init__(m, __import__("retnovation.model", fromlist=["IntakeClassification"]).IntakeClassification(frame_states={}, trap_states={}), {})
-    out = voice.echo(m, _exp(), "the push", [("user", "hi")])
-    assert out == "the push"
+def test_echo_keeps_reskin_when_no_added_leak():
+    # identity echo (no 'LEAK') + safe egress -> returned as-is
+    m = FakeModel(_intake(), {})
+    assert voice.echo(m, _exp(), "the push", [("student", "hi")]) == "the push"
 
 
-def test_echo_falls_back_to_verbatim_push_on_leak():
-    intake = __import__("retnovation.model", fromlist=["IntakeClassification"]).IntakeClassification(frame_states={}, trap_states={})
-    m = FakeLeakModel(intake, {})
-    out = voice.echo(m, _exp(), "the canonical push", [("user", "hi")])
-    assert out == "the canonical push"  # leak detected -> verbatim engine push
+def test_echo_falls_back_when_reskin_adds_a_leak_the_push_lacked():
+    # push performs no move (no 'LEAK'); echo NAMES the move ('LEAK') -> added -> verbatim push
+    m = FakeLeakModel(_intake(), {})
+    assert voice.echo(m, _exp(), "the canonical push", [("student", "hi")]) == "the canonical push"
 
 
-def test_egress_safe_flags_a_move_naming_string():
-    intake = __import__("retnovation.model", fromlist=["IntakeClassification"]).IntakeClassification(frame_states={}, trap_states={})
-    m = FakeLeakModel(intake, {})
-    assert voice.egress_safe(m, _exp(), "harmless probe?") is True
-    assert voice.egress_safe(m, _exp(), "LEAK here") is False
+def test_echo_does_not_flag_a_move_already_performed_by_the_push():
+    # both push and echo contain 'LEAK' -> NOT an ADDED revelation -> echo is kept (no false fallback)
+    class _BothLeak(FakeLeakModel):
+        def echo_push(self, push_text, recent):
+            return "LEAK echo variant"
+    m = _BothLeak(_intake(), {})
+    assert voice.echo(m, _exp(), "LEAK canonical push", [("student", "x")]) == "LEAK echo variant"
+
+
+def test_egress_safe_reply_flags_a_move_naming_string():
+    m = FakeLeakModel(_intake(), {})
+    assert voice.egress_safe_reply(m, _exp(), "harmless orientation?") is True
+    assert voice.egress_safe_reply(m, _exp(), "LEAK here") is False
 ```
-
-(Note: the `FakeModel.__new__` dance avoids a fixture; a subagent may simplify by adding a tiny `tests/test_voice.py` factory. Keep behavior identical.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -238,24 +250,37 @@ from ..model import Model
 from ..types import Experience
 
 
-def egress_safe(model: Model, exp: Experience, text: str) -> bool:
-    """True iff `text` does not PERFORM (name/hand) any of the experience's hidden moves.
-    Reuses check_injection_expressed ('performs the move, not the topic'): a Socratic probe
-    questions an angle (safe); naming the principle or supplying the answer performs it (a leak)."""
+def _performs(model: Model, move: str, text: str) -> bool:
+    """Does `text` PERFORM the hidden move (not merely touch its topic)? Reuses
+    check_injection_expressed ('performs the move, not the topic'): a Socratic probe that
+    questions an angle does not perform it; naming the principle or handing the answer does."""
+    return model.check_injection_expressed(move, text).expressed
+
+
+def egress_safe_reply(model: Model, exp: Experience, text: str) -> bool:
+    """For a Doorman authored reply (orientation only — NO push baseline): safe iff it performs
+    NONE of the experience's hidden moves. A door turn legitimately performs zero moves, so the
+    flat check has no false-positive risk here."""
     frames = exp.rubric.frames if exp.rubric else []
-    for f in frames:
-        if model.check_injection_expressed(f.frame_detail, text).expressed:
-            return False
-    return True
+    return not any(_performs(model, f.frame_detail, text) for f in frames)
 
 
 def echo(model: Model, exp: Experience, push_text: str, recent: list[tuple[str, str]]) -> str:
-    """Re-voice the engine's canonical push onto the user's words (display only). If the re-skin
-    cannot pass the egress gate, fall back hard to the verbatim engine push."""
+    """Re-voice the engine's canonical push onto the user's words (display only). Gate = ADDED
+    REVELATION: fall back to the verbatim push only if the re-voice performs a hidden move the
+    canonical push did NOT already perform. The push baseline is essential — a faithful probe
+    legitimately orbits the angle's vocabulary, so judging the re-voice against the bare
+    frame_detail would force a verbatim fallback every turn (Echo silently no-ops; review #3)."""
     candidate = model.echo_push(push_text, recent)
-    if candidate and egress_safe(model, exp, candidate):
-        return candidate
-    return push_text
+    if not candidate:
+        return push_text
+    frames = exp.rubric.frames if exp.rubric else []
+    for f in frames:
+        if _performs(model, f.frame_detail, candidate) and not _performs(
+            model, f.frame_detail, push_text
+        ):
+            return push_text  # added revelation beyond the push -> hard fallback
+    return candidate
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -268,7 +293,7 @@ Expected: PASS.
 ```bash
 .venv/bin/ruff format . && .venv/bin/ruff check .
 git add src/retnovation/web/voice.py tests/test_voice.py
-git commit -m "feat(voice): egress gate (reuses check_injection_expressed) + Echo with verbatim-push fallback"
+git commit -m "feat(voice): added-revelation egress gate (reuses check_injection_expressed) + Echo + Doorman-reply egress"
 ```
 
 ---
@@ -280,7 +305,7 @@ git commit -m "feat(voice): egress gate (reuses check_injection_expressed) + Ech
 - Test: `tests/test_voice.py`
 
 **Interfaces:**
-- Consumes: `Model.classify_entry`; `egress_safe` (Task 2).
+- Consumes: `Model.classify_entry`; `egress_safe_reply` (Task 2).
 - Produces: `door(model, exp, opening: str, recent: list[tuple[str, str]]) -> tuple[EntryClass, str | None]`. Returns `(EntryClass.substantive, None)` to enter the engine; otherwise `(entry_class, reply)` where `reply` is egress-safe (a fixed safe contract line replaces any leaking author reply).
 - Produces: module constant `SAFE_CONTRACT: str`.
 
@@ -288,6 +313,9 @@ git commit -m "feat(voice): egress gate (reuses check_injection_expressed) + Ech
 
 ```python
 from retnovation.types import EntryClass, EntryClassification
+# NOTE: _intake / _exp / FakeLeakModel / the `voice` import already exist from Task 2 — reuse them,
+# do not redefine (ruff F811). EntryClass/EntryClassification are also imported in Task 1's block;
+# consolidate the import at the top of the file.
 
 
 class FakeDoorModel(FakeModel):
@@ -296,10 +324,6 @@ class FakeDoorModel(FakeModel):
         self._entry = EntryClassification(entry_class=entry_class, reply=reply)
     def classify_entry(self, prompt, opening, recent):
         return self._entry
-
-
-def _intake():
-    return __import__("retnovation.model", fromlist=["IntakeClassification"]).IntakeClassification(frame_states={}, trap_states={})
 
 
 def test_door_substantive_enters_engine():
@@ -349,7 +373,7 @@ def door(
     ec = model.classify_entry(exp.prompt, opening, recent)
     if ec.entry_class is EntryClass.substantive:
         return (EntryClass.substantive, None)
-    reply = ec.reply if (ec.reply and egress_safe(model, exp, ec.reply)) else SAFE_CONTRACT
+    reply = ec.reply if (ec.reply and egress_safe_reply(model, exp, ec.reply)) else SAFE_CONTRACT
     return (ec.entry_class, reply)
 ```
 
@@ -789,9 +813,11 @@ Expected: FAIL — `_emit` returns `{"kind": "error", ...}` for the unknown `doo
 Run: `PYTHONPATH=src .venv/bin/python -m pytest tests/test_web_api.py -q`
 Expected: PASS.
 
-- [ ] **Step 5: Update the frontend `index.html` to render `door`**
+- [ ] **Step 5: Update the frontend `index.html` to render `door` + fix the double-Submit bug (review #6)**
 
-In `advance(r)`, add a `door` branch that renders the conversational turn and re-collects into `/open` (the same phase as the opening). Replace the `advance` function with:
+Three edits. (a) Add a `door` branch to `advance(r)`. (b) **Patch `renderProblem`'s submit handler to disable its input on submit** — the D1-era handler does NOT disable, so after a door turn there are two live Submit buttons and the stale one re-posts the prior text. (c) Add `renderDoor` (also disabling on submit), re-collecting into `/open` (the Doorman runs in the opening phase).
+
+(a) Replace the `advance` function:
 
 ```javascript
 function advance(r){
@@ -806,21 +832,30 @@ function renderDoor(text){
   const ta=el('<textarea placeholder="Take a position on the problem."></textarea>');
   const btn=el('<button>Submit</button>');
   btn.onclick=async()=>{ if(!ta.value.trim()) return hint(btn);
+    ta.disabled=true; btn.disabled=true;
     const r=await post('/api/session/single/open',{text:ta.value}); advance(r); };
   app.appendChild(ta); app.appendChild(btn);
 }
 ```
 
-(`renderDoor` posts to `/open` because the Doorman runs in the opening phase. Leave `renderProblem`, `renderPush`, `hint`, `renderSeed` unchanged.)
+(b) In `renderProblem`, replace the submit handler so it disables on submit (after the blank guard):
+
+```javascript
+  btn.onclick=async()=>{ if(!ta.value.trim()) return hint(btn);
+    ta.disabled=true; btn.disabled=true;
+    const r=await post('/api/session/single/open',{text:ta.value}); advance(r); };
+```
+
+(Leave `renderPush`, `hint`, `renderSeed` unchanged — `renderPush` already disables on submit.)
 
 - [ ] **Step 6: Syntax-check the frontend, lint, full suite**
 
 Run:
 ```bash
-/usr/bin/python3 -c "import re;s=open('src/retnovation/web/static/index.html').read();import subprocess,tempfile,shutil,os;m=re.search(r'<script>(.*)</script>',s,re.S);f=tempfile.NamedTemporaryFile('w',suffix='.js',delete=False);f.write(m.group(1));f.close();n=shutil.which('node');print('node:',('OK' if (n and subprocess.run([n,'--check',f.name]).returncode==0) else 'SKIP/FAIL'))"
+/usr/bin/python3 -c "import re,subprocess,tempfile,shutil,sys;s=open('src/retnovation/web/static/index.html').read();m=re.search(r'<script>(.*)</script>',s,re.S);f=tempfile.NamedTemporaryFile('w',suffix='.js',delete=False);f.write(m.group(1));f.close();n=shutil.which('node');print('node: SKIP (no node)') if not n else print('node: OK' if subprocess.run([n,'--check',f.name]).returncode==0 else 'node: SYNTAX ERROR')"
 .venv/bin/ruff format . && .venv/bin/ruff check . && PYTHONPATH=src .venv/bin/python -m pytest -q
 ```
-Expected: node OK; ruff clean; full suite green.
+Expected: `node: OK` (node is installed here); ruff clean; full suite green. A `node: SYNTAX ERROR` is a blocker — fix before committing.
 
 - [ ] **Step 7: Commit**
 
@@ -887,19 +922,60 @@ def test_echo_push_budget_on_a_long_turn():
     long_reply = "I would hold the line. " * 60
     out = m.echo_push("Which mistake can you actually walk back?", [("student", long_reply)])
     assert out and isinstance(out, str)  # no truncation-to-empty / no raise (L-17)
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_echo_gate_does_not_flag_a_faithful_revoice(tmp_path):
+    """The REAL no-op detector (review #3/#7): the added-revelation gate, judged by the REAL model
+    against the REAL frame_details, must PASS a faithful re-voice (same challenge, no named move) —
+    else Echo silently falls back to the verbatim push every turn and D3 is never fixed. Every
+    offline substring fake misses this; only the real judge over real content catches it."""
+    from datetime import datetime, timezone
+    from retnovation.aim import aim, derive_core
+    from retnovation.cli import build_store
+    from retnovation.content_loader import load_library, load_progression
+    from retnovation.experience import select_experience
+    from retnovation.scheduler import propose_open_ended
+    from retnovation.types import Regime
+    from retnovation.web import voice
+
+    store = build_store(str(tmp_path / "live.db"))
+    try:
+        core = derive_core(aim())
+        now = datetime.now(timezone.utc)
+        state, ledger, corpus = store.load_state(now), store.load_ledger(), store.load_corpus()
+        exps = [e for e in load_library() if e.regime is Regime.open_ended]
+        spec, _ = propose_open_ended(state, exps, load_progression(), now).problem_menu()[0]
+        exp = select_experience(core, state, ledger, corpus, spec)
+    finally:
+        store.close()
+    m = AnthropicModel()
+    f = exp.rubric.frames[0]
+    push = m.generate_push(exp, "frame", f.frame_code, stress=False)
+    # a faithful re-voice: same challenge, references the student's words, names NO principle
+    faithful_revoice = (
+        "You leaned on being able to fix it later — is undoing this number actually as cheap as "
+        "the cost of getting it wrong in the first place?"
+    )
+    added = any(
+        voice._performs(m, fr.frame_detail, faithful_revoice)
+        and not voice._performs(m, fr.frame_detail, push)
+        for fr in exp.rubric.frames
+    )
+    assert added is False, "egress flags a faithful re-voice as added revelation — Echo would no-op"
 ```
 
 - [ ] **Step 2: Run it (skips cleanly without a key; run live with the key)**
 
 Run (offline, confirms clean skip): `PYTHONPATH=src .venv/bin/python -m pytest tests/test_voice_live.py -q`
-Expected: `2 skipped` (or `2 passed` when run with `set -a && . ./.env && set +a` first).
-If run live and `false_positives` is non-empty, **tune `entry.md`** (sharpen the `substantive` definition) until zero — do not weaken the test.
+Expected: `3 skipped` (or `3 passed` when run with `set -a && . ./.env && set +a` first).
+If run live and `false_positives` is non-empty, **tune `entry.md`** (sharpen the `substantive` definition) until zero. If `test_echo_gate_does_not_flag_a_faithful_revoice` fails, the egress is over-flagging — sharpen the egress framing (do NOT weaken either test).
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add tests/test_voice_live.py
-git commit -m "test(voice): @live golden-set zero-false-positive calibration + echo budget sanity (L-17)"
+git commit -m "test(voice): @live golden-set zero-false-positive + echo budget + faithful-revoice no-op detector"
 ```
 
 ---
@@ -917,9 +993,11 @@ git commit -m "test(voice): @live golden-set zero-false-positive calibration + e
 - §12 phasing: Concierge explicitly NOT in this plan. ✓
 - **Known v1 limitation (from spec scope):** mid-loop confusion typed as a *reply* is not re-anchored — it goes to the engine as a reply (Echo handles display only). Documented; Phase-2 territory.
 
-**2. Placeholder scan.** No TBD/TODO; every code step shows complete code. The `FakeModel.__new__` construction in Task 2's test is intentional (avoids a fixture) and a subagent may replace it with a 2-line factory of identical behavior.
+**2. Placeholder scan.** No TBD/TODO; every code step shows complete code.
 
-**3. Type consistency.** `EntryClass`/`EntryClassification` (Task 1) are used identically in Tasks 3–7. `classify_entry(prompt, opening, recent)` and `echo_push(push_text, recent)` signatures match across Protocol/AnthropicModel/FakeModel/voice/session_runner. `egress_safe`/`echo`/`door`/`SAFE_CONTRACT` names are consistent. `check_injection_expressed(injection, framed_output) -> InjectionExpressed(expressed, evidence)` matches the existing definition.
+**3. Type consistency.** `EntryClass`/`EntryClassification` (Task 1) are used identically in Tasks 3–7. `classify_entry(prompt, opening, recent)` and `echo_push(push_text, recent)` signatures match across Protocol/AnthropicModel/FakeModel/voice/session_runner. `_performs`/`egress_safe_reply`/`echo`/`door`/`SAFE_CONTRACT` names are consistent. `check_injection_expressed(injection, framed_output) -> InjectionExpressed(expressed, evidence)` matches the existing definition.
+
+**4. Adversarial review folded (2026-06-29).** A code-running plan review VERIFIED the mechanics clean (transparency byte-identity, fixture codes vs the real rubric, `_require` stub, acyclic imports, Protocol additivity — `FakeLiftModel` deliberately NOT stubbed, additive ≠ signature change so L-10 doesn't bind). Three findings folded: (#3, central) the Echo egress is now ADDED-REVELATION (judge vs the canonical push baseline, not the bare `frame_detail`) so a faithful probe is not falsely flagged → Echo can't silently no-op; (#6) Task 7 fixes the double-Submit DOM bug (`renderProblem`/`renderDoor` disable on submit); (#7) Task 8 adds the live faithful-revoice no-op detector. Doorman replies keep the flat egress (they perform zero moves — no false-positive risk).
 
 ---
 
