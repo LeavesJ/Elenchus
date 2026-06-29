@@ -14,6 +14,17 @@ from .session_runner import SessionRegistry
 _STATIC = Path(__file__).parent / "static"
 _SID = "single"  # one user, one session (MVP)
 
+# D1: a blank opening/reply must never reach classify_intake/classify_response — the live
+# Anthropic API rejects empty content with a 400 ("user messages must have non-empty content"),
+# which the worker surfaces as a terminal error and bricks the session. Guard at the HTTP
+# boundary (defense-in-depth alongside the frontend) so the engine is never called with blank
+# input and the session stays alive. (Placeholder copy; the conversational front door supersedes
+# this with real orientation.)
+_BLANK_NUDGE = {
+    "kind": "nudge",
+    "message": "Take a position — even a rough first instinct. An empty answer can't be read.",
+}
+
 
 class _Choice(BaseModel):
     index: int | None = None
@@ -70,10 +81,14 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
 
     @app.post("/api/session/{sid}/open")
     def open_read(sid: str, body: _Text):
+        if not body.text.strip():
+            return _BLANK_NUDGE
         return _emit(reg, *reg.step(_SID, body.text))
 
     @app.post("/api/session/{sid}/reply")
     def reply(sid: str, body: _Text):
+        if not body.text.strip():
+            return _BLANK_NUDGE
         return _emit(reg, *reg.step(_SID, body.text))
 
     return app

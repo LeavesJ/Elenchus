@@ -54,3 +54,46 @@ def test_full_session_and_l13_surface(tmp_path, make_fake):
     # terrain entries are learner_view (no frame_codes key)
     for region in r["terrain"]:
         assert "frame_codes" not in region
+
+
+def test_blank_open_is_nudged_not_bricked(tmp_path, make_fake):
+    """D1: a blank/whitespace opening must not reach the model (the live Anthropic 400
+    'user messages must have non-empty content') nor brick the session. FakeModel tolerates
+    empty input (it never calls the API), so this asserts the GUARD behavior, not the live
+    crash: blank input is nudged and the session stays at the opening stage."""
+    app = create_app(db_path=str(tmp_path / "w.db"), model_factory=make_fake)
+    client = TestClient(app)
+    assert client.post("/api/session").json()["kind"] == "menu"
+    r = client.post(
+        "/api/session/s/choose", json={"ledger_ref": "veldra:embedded_anchor_lock_in"}
+    ).json()
+    assert r["kind"] == "problem"
+
+    # blank openings are nudged, never forwarded to the engine
+    assert client.post("/api/session/s/open", json={"text": ""}).json()["kind"] == "nudge"
+    assert client.post("/api/session/s/open", json={"text": "   "}).json()["kind"] == "nudge"
+
+    # the session is still at the opening stage: a real opening now proceeds
+    r = client.post(
+        "/api/session/s/open", json={"text": "reasoning that already holds the move"}
+    ).json()
+    assert r["kind"] in ("push", "done")
+
+
+def test_blank_reply_is_nudged_not_bricked(tmp_path, make_fake):
+    """D1: a blank reply mid-loop must not reach the model nor brick the session."""
+    app = create_app(db_path=str(tmp_path / "w.db"), model_factory=make_fake)
+    client = TestClient(app)
+    client.post("/api/session")
+    client.post("/api/session/s/choose", json={"ledger_ref": "veldra:embedded_anchor_lock_in"})
+    r = client.post(
+        "/api/session/s/open", json={"text": "reasoning that already holds the move"}
+    ).json()
+    assert r["kind"] == "push"
+
+    # a blank reply is nudged; the session is not advanced
+    assert client.post("/api/session/s/reply", json={"text": ""}).json()["kind"] == "nudge"
+
+    # a real reply now proceeds
+    r = client.post("/api/session/s/reply", json={"text": "mechanism"}).json()
+    assert r["kind"] in ("push", "done")
