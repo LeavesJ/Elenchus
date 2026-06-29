@@ -216,3 +216,29 @@ def test_shadow_on_license_continuity_self_resolves():
         }
     )
     assert served(strong) == "license_continuity"  # self-resolves: commit reachable again
+
+
+def test_loop_guardian_embed_unprompted_on_continuity_lock_in():
+    # Loop-side equivalence guardian (P2 analogue of test_session1_...): embed present_reasoned at
+    # intake on the isolate; one trap tripped so the loop ACTUALLY runs a probe on another target;
+    # embed must still land in reasoned_unprompted and never be probed. A judgment-loop edit that
+    # lets a present-at-intake frame be probed/lowered turns this red — the enforcement the
+    # rubric-shaped guard (assert_intake_equivalence) structurally cannot provide.
+    exp = load_experience("continuity_lock_in")
+    intake = IntakeClassification(
+        frame_states={"embed_credentials_as_a_list": FrameState.present_reasoned},
+        trap_states={
+            "shipped_the_one_shot_term": TrapState.tripped,
+            "over_built_the_escape_hatch": TrapState.not_tripped,
+            "treated_the_shipped_choice_as_amendable": TrapState.not_tripped,
+        },
+    )
+    model = FakeModel(intake, {"shipped_the_one_shot_term": _closed()})
+    work = Work(opening="reasoning that already holds the move", respond=lambda push: "mechanism")
+    a = assess(exp, work, model)
+    probed = {p.target_code for p in a.trajectory}
+    assert "embed_credentials_as_a_list" in a.reasoned_unprompted
+    assert "embed_credentials_as_a_list" not in probed
+    assert (
+        "shipped_the_one_shot_term" in probed
+    )  # the loop did run a probe — guardian is non-trivial
