@@ -11,6 +11,11 @@ from ..orchestration import run_session
 from ..types import EntryClass, Outcome, Regime, Selection, Work
 from . import voice
 
+# Liveness bound: after this many consecutive non-substantive door turns, stop re-collecting and
+# fall through — treat the latest text as the RAW opening and enter the engine. Without it, a user
+# who keeps typing non-substantive input (or a mis-classifying model) pins the session open forever.
+_DOOR_MAX_NONSUBSTANTIVE = 3
+
 
 class _Channel:
     def __init__(self):
@@ -58,12 +63,20 @@ class SessionRegistry:
                         ("problem", {"prompt": exp.prompt, "ledger_ref": exp.ledger_ref})
                     )
                     recent: list[tuple[str, str]] = []
+                    nonsubstantive = 0
                     while True:
                         text = ch.to_worker.get()
-                        recent.append(("student", text))
+                        # door() takes the current text as `opening`; pass recent = PRIOR turns only
+                        # so the latest message isn't rendered twice in the classifier prompt.
                         entry, reply = voice.door(model, exp, text, recent)
+                        recent.append(("student", text))
                         if entry is EntryClass.substantive:
                             opening = text  # RAW opening to the engine — bridge stays transparent
+                            break
+                        nonsubstantive += 1
+                        if nonsubstantive >= _DOOR_MAX_NONSUBSTANTIVE:
+                            # cap reached: stop re-collecting, treat the latest text as the opening
+                            opening = text
                             break
                         ch.from_worker.put(("door", {"text": reply}))
                         recent.append(("Vera", reply))

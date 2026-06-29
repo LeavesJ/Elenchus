@@ -1,5 +1,36 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — Doorman + Echo: pre-multi-user hardening (deferred Minors; TDD; suite 270/8)
+- Applied the three liveness/quality/cost Minors the whole-branch review deferred. All in the conversational
+  layer (`session_runner.present()`); the judgment-loop engine + `voice.py` stay byte-UNTOUCHED; the
+  bridge-transparency equivalence test (`done.assessment == direct run_session`) stays green.
+- **(1) Bounded the Doorman re-collect loop (liveness).** The `while True` had no cap, so a user who keeps
+  typing non-substantive input (or a mis-classifying model) could pin the session open indefinitely — a
+  single-user-can-hang-a-session vector under multi-user. Added `_DOOR_MAX_NONSUBSTANTIVE = 3`: after the
+  cap the loop stops re-collecting and falls through, treating the latest text as the RAW opening and
+  entering the engine (bridge stays transparent; one-emission-per-step contract preserved — the cap break
+  emits nothing, the engine's first push is the step's single emission). TDD: `test_door_loop_is_bounded_
+  after_repeated_nonsubstantive_turns` (always-greeting model → 2 door turns then fall-through to `push`).
+- **(2) Fixed the recent[] duplication (quality/cost).** `present()` appended `("student", text)` BEFORE
+  calling `voice.door(... text, recent)`, and `door`→`classify_entry` takes the current message as
+  `opening` AND the (now current-inclusive) `recent` → the latest turn was rendered twice in the classifier
+  prompt. Reordered the append to AFTER the `door()` call so `recent` carries PRIOR turns only; the current
+  message appears once (as `opening`). The `respond`/`echo` path is unaffected — `recent` still ends with
+  `("student", opening)` on both break paths. TDD: `test_door_does_not_duplicate_current_message_in_recent`
+  (recording model asserts the opening string appears exactly once across `opening`+`recent`).
+- **(3) Egress fan-out cache — evaluated, declined with reason (cost).** The two optimizations the item names
+  are already in place: `egress_safe_reply` short-circuits on first leak via `any(...)` (voice.py:33), and
+  `echo` returns on the first added-revelation (voice.py:47) with `_performs(candidate) and not
+  _performs(push)` already computing the push baseline ONLY for moves the candidate performs. The net-new
+  ask — a session-scoped memo of `_performs(push)` — was **not** added: its inputs (door replies, pushes,
+  re-voices) differ every turn in the live path, so a `(move, text)` memo has a ≈0 live hit-rate and would
+  not reduce the per-turn cost (N = #frames+#traps distinct checks) that motivated the item — it would add a
+  proxy/cache surface for no live payoff (YAGNI). The only lever that would actually cut per-turn cost is
+  parallelizing the fan-out (async), which is out of scope here; flagged for the user if cost becomes pressing.
+- Scope: `src/retnovation/web/session_runner.py` (+constant, +cap break, +append reorder),
+  `tests/test_session_runner.py` (+2 tests). Signal-integrity untouched: the unprompted-read signal is
+  frames-only and the engine grades its own canonical push. `pytest` 270 passed / 8 skipped, `ruff` clean.
+
 ## 2026-06-29 — Engaged agent "Doorman + Echo" v1 BUILT (subagent-driven; suite 268/8; whole-branch READY-TO-MERGE)
 - D2/D3 resolved — a conversational layer over the byte-UNTOUCHED judgment-loop engine:
   - **Doorman** (`classify_entry`, frame-blind 6-class) handles entry (greeting/meta/confusion/resistance/

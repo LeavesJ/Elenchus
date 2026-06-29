@@ -122,3 +122,84 @@ def test_engine_records_canonical_push_not_echo(tmp_path):
     for push in data["assessment"].trajectory:
         assert not push.text.startswith("ECHO::")  # the engine RECORDS the canonical push
         assert push.text == "[push:frame]"  # FakeModel.generate_push canonical output
+
+
+def _irreversible_anchor_intake() -> IntakeClassification:
+    return IntakeClassification(
+        frame_states={
+            "embed_credentials_as_a_list": FrameState.present_reasoned,
+            "choose_the_failure_default_deliberately": FrameState.absent,
+        },
+        trap_states={
+            "deferred_the_one_time_choice": TrapState.not_tripped,
+            "assumed_the_happy_path": TrapState.not_tripped,
+        },
+    )
+
+
+def _four_closed() -> dict[str, list[ResponseClassification]]:
+    return {
+        "choose_the_failure_default_deliberately": [
+            ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+            for _ in range(4)
+        ]
+    }
+
+
+class _AlwaysGreetingModel(FakeModel):
+    """Never enters the engine at the door — every turn classifies as a (non-substantive) greeting."""
+
+    def classify_entry(self, prompt, opening, recent):
+        return EntryClassification(
+            entry_class=EntryClass.greeting, reply="Take a real position to begin."
+        )
+
+
+def _greeting_factory() -> FakeModel:
+    return _AlwaysGreetingModel(_irreversible_anchor_intake(), _four_closed())
+
+
+def test_door_loop_is_bounded_after_repeated_nonsubstantive_turns(tmp_path):
+    """Liveness: a user (or a mis-classifying model) who never gives a substantive opening must not
+    pin the session in the door loop forever. After a small cap the loop stops re-collecting, treats
+    the latest text as the RAW opening, and enters the engine (bridge stays transparent)."""
+    reg = SessionRegistry(str(tmp_path / "d.db"), model_factory=_greeting_factory)
+    tag, _ = reg.start("sd", now=NOW)
+    assert tag == "menu"
+    menu_idx = reg.menu_index("sd", "veldra:embedded_anchor_lock_in")
+    tag, _ = reg.step("sd", menu_idx)
+    assert tag == "problem"
+    # the first non-substantive turns are re-collected as conversational door turns
+    assert reg.step("sd", "hi")[0] == "door"
+    assert reg.step("sd", "hello again")[0] == "door"
+    # the cap turn stops re-collecting and falls through into the engine instead of a 3rd door turn
+    tag, _ = reg.step("sd", "still just chatting")
+    assert tag == "push"  # entered the engine (bounded), not another door turn
+
+
+class _RecordingDoorModel(FakeModel):
+    """Records the (opening, recent) passed to classify_entry; always substantive (enters at once)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.entry_calls: list[tuple[str, list[tuple[str, str]]]] = []
+
+    def classify_entry(self, prompt, opening, recent):
+        self.entry_calls.append((opening, list(recent)))
+        return EntryClassification(entry_class=EntryClass.substantive, reply="")
+
+
+def test_door_does_not_duplicate_current_message_in_recent(tmp_path):
+    """The current turn must reach classify_entry exactly once — as `opening`, not also as the last
+    item of `recent`. Before the fix present() appended ('student', text) BEFORE calling door(), so
+    the latest message was rendered twice in the classifier prompt (once as opening, once in recent)."""
+    model = _RecordingDoorModel(_irreversible_anchor_intake(), _four_closed())
+    reg = SessionRegistry(str(tmp_path / "e.db"), model_factory=lambda: model)
+    reg.start("se", now=NOW)
+    menu_idx = reg.menu_index("se", "veldra:embedded_anchor_lock_in")
+    reg.step("se", menu_idx)
+    reg.step("se", "my opening position")
+    opening, recent = model.entry_calls[-1]
+    assert opening == "my opening position"
+    flat = [opening] + [t for _, t in recent]
+    assert flat.count("my opening position") == 1  # appears once, not duplicated into recent
