@@ -1,5 +1,25 @@
 # Retnovation — DEVLOG
 
+## 2026-06-28 — SP3 @live content-elicitation run — CLAIM CONFIRMED (13/13), over-scaffold caveat recorded
+- Ran the gated probe (artifact gitignored: `data/elicitation/20260629T031154Z.json`; ~26 Opus calls; P1=8 / P2=5).
+- **Result: 13/13 embed `present_reasoned`, 0 refusals, 0 traps** (P1 irreversible_anchor 8/8; P2 continuity_lock_in
+  5/5). The deferred SP3 content claim is empirically CONFIRMED: real frame-naive Opus (`generate_output`,
+  `injection=None`) produces openings the REAL intake classifier reads as embed `present_reasoned` on both problems
+  — the session-1 unprompted read SP3 only *asserted* now has live evidence.
+- Verbatim adjudication (human, per SP1 "automate the run, not the verdict"): the openings are GENUINE, sophisticated
+  embed reasoning, not hollow/trap. P1#0 reaches embed via a delegating-root indirection ("rotation happens *below*
+  the frozen anchor") while rejecting the naive list — conclusion-agnostic `present_reasoned`, substantively embed.
+  P2#2 commits "a defined change mechanism, not a denial of change" — provisioning the optionality into the clause now.
+- **Open calibration finding (recorded, NOT acted on — user chose accept & close):** 13/13 + zero traps is
+  suspiciously clean, and several openings name the framing ("the framing in your prompt is the whole game"; "a trap
+  disguised as a sales-cycle deadline") — an over-scaffold (L-6) smell. AMBIGUOUS: over-scaffolded, OR the prompt is
+  fair and Opus is simply strong enough to reach it where a HUMAN learner wouldn't (the moat forbids naming the
+  frame/procedure — which these don't — not surfacing the situation's tension). The probe can't separate these; a
+  stripped-prompt re-probe (deferred) would. Consistent with SP2 (base Opus wrong on unscaffolded GENERATIVE tasks;
+  SP3 scaffolds the DECISION). A future content pass could tighten the prompts if desired.
+- **THREAD CLOSED.** Frame-mining arc remains open at: promote embed to durable (2nd public case), mine more spine
+  frames, UI/UX. (En-route fix: `generate_output` max_tokens — see next entry.)
+
 ## 2026-06-28 — fix(elicitation): learner max_tokens budget (first @live run surfaced the 1024-cap truncation)
 - The first gated @live run FAILED: `generate_output`'s hardcoded `max_tokens=1024` is too small for the SP3
   decision prompts. Diagnostic on the real prompt: stop_reason `max_tokens` with a 3094-char answer TRUNCATED at

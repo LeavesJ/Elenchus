@@ -130,3 +130,17 @@ Read this checklist before every code change. Update it after every correction o
   record. (The spec's own §6 said "human gates left unevaluated" for rejects; the implemented type didn't
   encode it — a spec/impl drift the test suite couldn't catch because no test constructed a reject without
   gates.)
+- **L-17 A shared helper's hardcoded resource budget, tuned for its original caller, silently breaks a new
+  caller with different output characteristics — and the break may surface only in the live path.**
+  `AnthropicModel.generate_output` hardcoded `max_tokens=1024`, correct for SP1's short lift outputs ("write a
+  120-word pitch"). Reused by the SP3 elicitation probe on long reasoned-decision prompts, 1024 truncated the
+  opening (`stop_reason=max_tokens` with a partial answer) or — when adaptive thinking fired — consumed the whole
+  budget and left NO text block, raising `ModelError("no text...")`. Non-deterministic between the two faces.
+  EVERY offline fake test passed (fakes return canned text, never hit the cap); it surfaced ONLY on the first
+  @live run. Truncation was also a measurement risk: an opening cut off before the embed insight reads as absent
+  for a non-genuine reason. Fix: make the budget a keyword param (`max_tokens: int = 1024`) defaulting to the old
+  value (lift byte-identical), with the new caller passing a larger `LEARNER_MAX_TOKENS`. Prevention: when reusing
+  a shared helper for a caller whose output size/shape differs materially, check its hardcoded budgets/limits
+  against the new need and parameterize them (default preserving existing callers) rather than assuming the
+  original constant fits; and for live-only behavior, run a cheap single-call sanity BEFORE a full multi-call
+  batch — it catches the break without burning the whole run (and the tokens).
