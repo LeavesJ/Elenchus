@@ -1,5 +1,17 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — spec: Engaged agent "Doorman + Echo" (D2/D3 design, pending review)
+- Brainstorm outcome for D2/D3. User steer: an *engaged* agent — more than a
+  front-door+listening-probe shell, not a generic assistant ("not Claude 2.0"), not a full reframe.
+- A 5-architecture panel (workflow, each adversarially critiqued against the real engine for
+  moat-leak + signal-integrity) → recommended **Doorman + Echo**: a conversational front door
+  (`classify_entry`, frame-blind, 6-way) + a display-only push re-skin (`echo_push`) over the
+  byte-untouched engine, guarded by a **semantic L-13 egress gate** (reuses the
+  `check_injection_expressed` pattern), with a named instructor persona (working name "Vera", NOT
+  the dev-side "Felix"). Engine + bridge untouched; Echo display-only (engine grades its own
+  canonical `push_text`). Phase 2 (future): escalate to a tool-calling "Concierge" on this substrate.
+- Spec: `docs/superpowers/specs/2026-06-29-engaged-agent-doorman-echo-design.md`. Next: user review → writing-plans.
+
 ## 2026-06-29 — Live agent diagnostic (26-input battery) + fix(web): blank-input guard (D1)
 - **Founder dogfood finding** (the handoff's open item): typing `hi` got "continuous gibberish."
   A read-only diagnostic harness drove the REAL engine over 26 degenerate/adversarial openings on
