@@ -26,6 +26,12 @@
 - **Deferred (Phase-2 / pre-multi-user, tracked):** bound the Doorman re-collect loop (turn cap); cache/
   short-circuit the egress fan-out (N live calls/turn); trim the `recent[]` latest-message duplication; add
   echo challenge-preservation fidelity. Phase 2 itself = escalate toward the tool-calling "Concierge."
+- **MERGED + PUSHED** (origin/main @ `2b0fda8`). **@live calibration CONFIRMED (real Opus, 3/3, 40s):**
+  `classify_entry` golden-set = ZERO false-positives (all 10 low-signal inputs incl. `hi`/`help`/`idk`/
+  injection → non-substantive → the Doorman orients, no deaf probe; all 3 genuine-terse answers →
+  substantive) — the live proof D2's "gibberish" is gone; `echo_push` budget holds on a long turn (L-17);
+  the faithful-revoice no-op detector passes (real model does NOT over-flag → Echo is genuinely responsive,
+  not a silent verbatim fallback). The engaged agent works against the real model.
 
 ## 2026-06-29 — plan: Engaged agent "Doorman + Echo" (8 TDD tasks, pending adversarial review)
 - Spec approved (persona "Vera", scope as specced). Implementation plan written:
