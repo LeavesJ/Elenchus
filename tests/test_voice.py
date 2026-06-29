@@ -100,3 +100,33 @@ def test_egress_safe_reply_flags_a_move_naming_string():
     m = FakeLeakModel(_intake(), {})
     assert voice.egress_safe_reply(m, _exp(), "harmless orientation?") is True
     assert voice.egress_safe_reply(m, _exp(), "LEAK here") is False
+
+
+class FakeDoorModel(FakeModel):
+    def __init__(self, intake, entry_class, reply):
+        super().__init__(intake, {})
+        self._entry = EntryClassification(entry_class=entry_class, reply=reply)
+
+    def classify_entry(self, prompt, opening, recent):
+        return self._entry
+
+
+def test_door_substantive_enters_engine():
+    m = FakeDoorModel(_intake(), EntryClass.substantive, "")
+    cls, reply = voice.door(m, _exp(), "I'd hold the line because...", [])
+    assert cls is EntryClass.substantive and reply is None
+
+
+def test_door_greeting_returns_authored_reply():
+    m = FakeDoorModel(_intake(), EntryClass.greeting, "Welcome — take a position to begin.")
+    cls, reply = voice.door(m, _exp(), "hi", [])
+    assert cls is EntryClass.greeting and reply == "Welcome — take a position to begin."
+
+
+def test_door_replaces_leaking_reply_with_safe_contract():
+    m = FakeDoorModel(_intake(), EntryClass.confusion, "lead with what you refuse to do")
+    m.check_injection_expressed = lambda inj, out: InjectionExpressed(
+        expressed="refuse" in out, evidence="x"
+    )
+    cls, reply = voice.door(m, _exp(), "I don't get it", [])
+    assert cls is EntryClass.confusion and reply == voice.SAFE_CONTRACT

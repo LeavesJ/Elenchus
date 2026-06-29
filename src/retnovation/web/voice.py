@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from ..model import Model
-from ..types import Experience
+from ..types import EntryClass, Experience
+
+SAFE_CONTRACT = (
+    "I won't explain the move or hand you the answer — that's the point. "
+    "Take a real position on the problem and reason it out, and I'll push."
+)
 
 
 def _performs(model: Model, move: str, text: str) -> bool:
@@ -35,3 +40,15 @@ def echo(model: Model, exp: Experience, push_text: str, recent: list[tuple[str, 
         ):
             return push_text  # added revelation beyond the push -> hard fallback
     return candidate
+
+
+def door(
+    model: Model, exp: Experience, opening: str, recent: list[tuple[str, str]]
+) -> tuple[EntryClass, str | None]:
+    """Front door: classify the turn and either enter the engine (substantive) or author an
+    egress-safe conversational reply. A leaking author reply is replaced by SAFE_CONTRACT."""
+    ec = model.classify_entry(exp.prompt, opening, recent)
+    if ec.entry_class is EntryClass.substantive:
+        return (EntryClass.substantive, None)
+    reply = ec.reply if (ec.reply and egress_safe_reply(model, exp, ec.reply)) else SAFE_CONTRACT
+    return (ec.entry_class, reply)
