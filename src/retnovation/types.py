@@ -455,6 +455,30 @@ class ProbeResult(BaseModel):
         return out
 
 
+class RegionRender(str, Enum):
+    seed = "seed"
+    rendered = "rendered"
+
+
+class Region(BaseModel):
+    region_id: str
+    frame_codes: list[str]  # author-side membership — STRIPPED from the learner-facing view (L-13)
+    problems: list[str]
+    vitality: float | None  # None when render == seed (sub-threshold; nothing to decode)
+    render: RegionRender
+
+
+class TerrainView(BaseModel):
+    regions: list[Region]
+
+    def learner_view(self) -> list[dict]:
+        # L-13: never expose frame_codes to the learner; only an opaque id + render + (coarse) vitality
+        return [
+            {"region_id": r.region_id, "render": r.render.value, "vitality": r.vitality}
+            for r in self.regions
+        ]
+
+
 class Provenance(BaseModel):
     source_type: Literal["owned", "public"] = "owned"  # public = forward-room, untested this arc
     pointer: str
