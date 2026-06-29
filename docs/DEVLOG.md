@@ -1,5 +1,30 @@
 # Retnovation — DEVLOG
 
+## 2026-06-28 — SP3 live content-elicitation probe — BUILT (subagent-driven; suite 237 passed / 5 skipped)
+- New PURE `src/retnovation/elicitation.py` (Model-protocol-only, no I/O): `run_elicitation_probe` (bare
+  `generate_output(prompt, None)` → real `classify_intake`, refusal-aware — refused runs are recorded, intake
+  skipped, and excluded from the present-reasoned denominator); `assert_intake_equivalence` (the RUBRIC half of
+  the proof — refuses decision_frame / target-as-binding / target-not-in-rubric / None); `assert_no_frame_code_leak`
+  (L-13 floor). `ProbeRun`/`ProbeSummary`/`ProbeResult` (+ `summarize()`) added to `types.py`.
+- `src/retnovation/run_elicitation.py`: gated I/O entrypoint → gitignored `data/elicitation/<utc>.json` (verbatim,
+  never committed) + abstracted summary (aggregates only; no verbatim). `python -m retnovation.run_elicitation`.
+- Tests: `tests/test_elicitation.py` (aggregation incl. multi-experience grouping, refusal-skips-intake, guard
+  refusals, and the L-13 floor on the REAL prompts — always-run / non-live); `tests/test_elicitation_acceptance.py`
+  (@live smoke, self-skips without a key, loose invariants only — NO verdict assertion, SP1 "automate the run not
+  the verdict").
+- **Loop-side equivalence guardians** pin the LOOP half the rubric guard cannot: the new **P2** analogue in
+  `tests/test_sp3_progression.py` pins the end-to-end invariant on `continuity_lock_in` (embed present_reasoned at
+  intake → in `reasoned_unprompted`, never probed, while the loop probes a tripped trap); the pre-existing **P1**
+  guardian (irreversible_anchor, choose_failure absent+probed) is what drives `_select_target`'s present-frame skip
+  (`judgment_loop.py:52`) — P2 converges before that line, so the two are complementary, not redundant.
+- Built subagent-driven (6 plan tasks + a review-rec multi-group test). OPUS reviewers on the guard, the probe,
+  both doctrine tests, and the whole branch = **Ready-to-merge YES**: the intake↔`reasoned_unprompted` equivalence
+  (both halves), module purity, `injection=None` on every learner call, the refusal path, confidentiality, and
+  no-verdict-over-reach were each reproduced under adversarial tracing. ruff clean; suite 237 passed / 5 skipped (@live).
+- NEXT — gated MANUAL with the user: the ~26-call @live run, then human adjudication of the verbatim + verdicts
+  (reachable / hard-*at-intake* / borderline ⇒ rerun), then DEVLOG the calibration finding. The probe measures
+  hard-AT-INTAKE; the recoverable-under-pressure case is invisible by design.
+
 ## 2026-06-28 — SP3 elicitation probe — implementation plan written
 - `docs/superpowers/plans/2026-06-27-sp3-live-content-elicitation.md` — 7 tasks (subagent-driven): probe
   result types; `assert_intake_equivalence` + L-13 `assert_no_frame_code_leak` guards; `run_elicitation_probe`
