@@ -36,7 +36,7 @@ async function start(){
 function renderMenu(problems){
   app.innerHTML = '<div class="muted">Choose a problem to work. You are never told the move to make.</div>';
   const m = el('<div class="menu"></div>');
-  problems.forEach((p,i)=>{ const b=el(`<button>${p}</button>`); b.onclick=()=>choose(i); m.appendChild(b); });
+  problems.forEach((p,i)=>{ const b=el(`<button>${String(p).replace(/</g,'&lt;')}</button>`); b.onclick=()=>choose(i); m.appendChild(b); });
   app.appendChild(m);
 }
 async function choose(index){
@@ -54,7 +54,7 @@ function renderProblem(prompt){
 function advance(r){
   if(r.kind==='push') return renderPush(r.text);
   if(r.kind==='done') return renderSeed(r.terrain);
-  app.appendChild(el(`<div class="muted">error: ${r.message||''}</div>`));
+  app.appendChild(el(`<div class="muted">error: ${String(r.message||'').replace(/</g,'&lt;')}</div>`));
 }
 function renderPush(text){
   app.appendChild(el(`<div class="push">${text.replace(/</g,'&lt;')}</div>`));
