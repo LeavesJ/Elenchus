@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from .types import Rubric
+from .model import Model
+from .types import Experience, ProbeResult, ProbeRun, Rubric
 
 DEFAULT_TARGET = "embed_credentials_as_a_list"
 
@@ -35,3 +36,43 @@ def assert_no_frame_code_leak(prompt: str, frame_codes: list[str]) -> None:
     leaked = [c for c in frame_codes if c in prompt]
     if leaked:
         raise ValueError(f"L-13 floor: frame code(s) {leaked} appear in the learner-facing prompt")
+
+
+def run_elicitation_probe(
+    experiences: list[Experience],
+    model: Model,
+    *,
+    runs_by_id: dict[str, int],
+    target_frame_code: str = DEFAULT_TARGET,
+) -> ProbeResult:
+    """Pure orchestration over the Model protocol. For each experience: assert the equivalence
+    + L-13 preconditions once, then per run capture a bare frame-naive opening and its real
+    intake classification. A refused opening is recorded and its intake skipped."""
+    runs: list[ProbeRun] = []
+    for exp in experiences:
+        assert_intake_equivalence(exp.rubric, target_frame_code)
+        assert_no_frame_code_leak(exp.prompt, [f.frame_code for f in exp.rubric.frames])
+        for i in range(runs_by_id[exp.experience_id]):
+            output = model.generate_output(exp.prompt, None)  # bare = no system = frame-naive
+            if output.refused:
+                runs.append(
+                    ProbeRun(
+                        experience_id=exp.experience_id,
+                        run_index=i,
+                        opening=output.text,
+                        refused=True,
+                    )
+                )
+                continue
+            intake = model.classify_intake(exp, output.text)
+            runs.append(
+                ProbeRun(
+                    experience_id=exp.experience_id,
+                    run_index=i,
+                    opening=output.text,
+                    refused=False,
+                    frame_states=dict(intake.frame_states),
+                    trap_states=dict(intake.trap_states),
+                )
+            )
+    return ProbeResult(target_frame_code=target_frame_code, runs=runs)

@@ -5,10 +5,13 @@ from retnovation.elicitation import (
     DEFAULT_TARGET,
     assert_intake_equivalence,
     assert_no_frame_code_leak,
+    run_elicitation_probe,
 )
+from retnovation.model import IntakeClassification
 from retnovation.types import (
     Frame,
     FrameState,
+    GeneratedOutput,
     Mode,
     ProbeResult,
     ProbeRun,
@@ -94,3 +97,67 @@ def test_no_frame_code_leak_passes_real_prompts():
 def test_no_frame_code_leak_raises_on_a_planted_code():
     with pytest.raises(ValueError, match="frame code"):
         assert_no_frame_code_leak("decide using embed_credentials_as_a_list now", [TARGET])
+
+
+class _FakeProbeModel:
+    """generate_output pops scripted outputs in order; classify_intake returns a fixed intake
+    keyed by the opening text. Raises if classify_intake is called on a refused (empty) opening."""
+
+    def __init__(self, outputs, intake_by_text):
+        self._outputs = list(outputs)
+        self._intake_by_text = intake_by_text
+        self.classify_calls = 0
+
+    def generate_output(self, scenario_prompt, injection):
+        assert injection is None  # frame-naive by construction (bare = the SP2 control call)
+        return self._outputs.pop(0)
+
+    def classify_intake(self, exp, opening):
+        self.classify_calls += 1
+        return self._intake_by_text[opening]
+
+
+def _intake(target_state, traps):
+    return IntakeClassification(
+        frame_states={"embed_credentials_as_a_list": target_state},
+        trap_states=traps,
+    )
+
+
+def test_probe_records_states_and_verbatim_per_run():
+    exp = load_experience("continuity_lock_in")
+    model = _FakeProbeModel(
+        outputs=[GeneratedOutput(text="op-0"), GeneratedOutput(text="op-1")],
+        intake_by_text={
+            "op-0": _intake(
+                FrameState.present_reasoned, {"shipped_the_one_shot_term": TrapState.not_tripped}
+            ),
+            "op-1": _intake(FrameState.absent, {"shipped_the_one_shot_term": TrapState.tripped}),
+        },
+    )
+    result = run_elicitation_probe([exp], model, runs_by_id={"continuity_lock_in": 2})
+    assert isinstance(result, ProbeResult) and len(result.runs) == 2
+    assert [r.opening for r in result.runs] == ["op-0", "op-1"]
+    assert result.runs[0].frame_states["embed_credentials_as_a_list"] is FrameState.present_reasoned
+    assert result.runs[1].trap_states["shipped_the_one_shot_term"] is TrapState.tripped
+
+
+def test_probe_records_refusal_and_skips_intake():
+    exp = load_experience("continuity_lock_in")
+    model = _FakeProbeModel(
+        outputs=[GeneratedOutput(text="", refused=True)],
+        intake_by_text={},  # classify_intake would KeyError if called — proves it is skipped
+    )
+    result = run_elicitation_probe([exp], model, runs_by_id={"continuity_lock_in": 1})
+    assert result.runs[0].refused is True
+    assert result.runs[0].frame_states == {}
+    assert model.classify_calls == 0
+
+
+def test_probe_enforces_the_equivalence_guard():
+    # a cs_technical experience has rubric=None -> guard refuses before any model call
+    from retnovation.content_loader import load_checkable_experience
+
+    exp = load_checkable_experience("consensus_safety_liveness")  # checkable -> rubric is None
+    with pytest.raises(ValueError):
+        run_elicitation_probe([exp], _FakeProbeModel([], {}), runs_by_id={exp.experience_id: 1})
