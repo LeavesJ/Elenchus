@@ -1,3 +1,6 @@
+import json
+from datetime import datetime, timezone
+
 import pytest
 
 from retnovation.content_loader import load_experience
@@ -161,3 +164,23 @@ def test_probe_enforces_the_equivalence_guard():
     exp = load_checkable_experience("consensus_safety_liveness")  # checkable -> rubric is None
     with pytest.raises(ValueError):
         run_elicitation_probe([exp], _FakeProbeModel([], {}), runs_by_id={exp.experience_id: 1})
+
+
+def test_run_writes_artifact_and_returns_result(tmp_path):
+    from retnovation import run_elicitation
+
+    model = _FakeProbeModel(
+        outputs=[GeneratedOutput(text="op-x")],
+        intake_by_text={"op-x": _intake(FrameState.present_reasoned, {})},
+    )
+    path, result = run_elicitation.run(
+        model,
+        runs_by_id={"continuity_lock_in": 1},
+        data_dir=tmp_path,
+        now=datetime(2026, 6, 27, 12, 0, tzinfo=timezone.utc),
+    )
+    assert path == tmp_path / "20260627T120000Z.json"
+    assert path.exists()
+    on_disk = json.loads(path.read_text())
+    assert on_disk["runs"][0]["opening"] == "op-x"
+    assert isinstance(result, ProbeResult)
