@@ -47,6 +47,20 @@ class TrapState(str, Enum):
     repaired = "repaired"
 
 
+class EntryClass(str, Enum):
+    substantive = "substantive"
+    greeting = "greeting"
+    meta = "meta"
+    confusion = "confusion"
+    resistance = "resistance"
+    low_signal = "low_signal"
+
+
+class EntryClassification(BaseModel):
+    entry_class: EntryClass
+    reply: str
+
+
 class StopReason(str, Enum):
     converged = "converged"
     bounded_error_violation = "bounded_error_violation"

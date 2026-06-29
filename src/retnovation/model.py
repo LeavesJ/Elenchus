@@ -8,6 +8,8 @@ from .content_loader import load_prompt
 from .types import (
     CheckableGrade,
     CheckableQuestion,
+    EntryClass,
+    EntryClassification,
     Experience,
     FrameState,
     GeneratedOutput,
@@ -64,6 +66,10 @@ class Model(Protocol):
     def check_injection_expressed(
         self, injection: str, framed_output: str
     ) -> InjectionExpressed: ...
+    def classify_entry(
+        self, prompt: str, opening: str, recent: list[tuple[str, str]]
+    ) -> "EntryClassification": ...
+    def echo_push(self, push_text: str, recent: list[tuple[str, str]]) -> str: ...
 
 
 class FakeModel:
@@ -111,6 +117,19 @@ class FakeModel:
         if scripted:
             return scripted.pop(0)
         return SharperVerdict(sharper=True, reason="(default agree)")
+
+    def classify_entry(
+        self, prompt: str, opening: str, recent: list[tuple[str, str]]
+    ) -> EntryClassification:
+        # Offline double: every opening is a real attempt (keeps the engine path unchanged).
+        return EntryClassification(entry_class=EntryClass.substantive, reply="")
+
+    def echo_push(self, push_text: str, recent: list[tuple[str, str]]) -> str:
+        return push_text  # identity: the engine's canonical push is what the user sees
+
+    def check_injection_expressed(self, injection: str, framed_output: str) -> InjectionExpressed:
+        # Safe by default; voice tests that need a leak use FakeLeakModel (Task 2).
+        return InjectionExpressed(expressed=False, evidence="(fake: no leak)")
 
 
 class FakeLiftModel:
