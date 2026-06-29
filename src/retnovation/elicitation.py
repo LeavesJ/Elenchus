@@ -4,6 +4,11 @@ from .model import Model
 from .types import Experience, ProbeResult, ProbeRun, Rubric
 
 DEFAULT_TARGET = "embed_credentials_as_a_list"
+# The learner answers a full reasoned decision; the SP1 lift default (1024) truncates these longer
+# openings (and, when adaptive thinking fires, can starve the text block entirely -> no-text error).
+# A larger budget lets the opening complete. injection stays None, so frame-naiveness is unchanged —
+# max_tokens is a budget, not a primer.
+LEARNER_MAX_TOKENS = 8192
 
 
 def assert_intake_equivalence(rubric: Rubric | None, target_frame_code: str) -> None:
@@ -44,6 +49,7 @@ def run_elicitation_probe(
     *,
     runs_by_id: dict[str, int],
     target_frame_code: str = DEFAULT_TARGET,
+    learner_max_tokens: int = LEARNER_MAX_TOKENS,
 ) -> ProbeResult:
     """Pure orchestration over the Model protocol. For each experience: assert the equivalence
     + L-13 preconditions once, then per run capture a bare frame-naive opening and its real
@@ -53,7 +59,8 @@ def run_elicitation_probe(
         assert_intake_equivalence(exp.rubric, target_frame_code)
         assert_no_frame_code_leak(exp.prompt, [f.frame_code for f in exp.rubric.frames])
         for i in range(runs_by_id[exp.experience_id]):
-            output = model.generate_output(exp.prompt, None)  # bare = no system = frame-naive
+            # bare = injection None = no system = frame-naive; larger budget so the opening completes
+            output = model.generate_output(exp.prompt, None, max_tokens=learner_max_tokens)
             if output.refused:
                 runs.append(
                     ProbeRun(

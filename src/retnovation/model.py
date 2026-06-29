@@ -55,7 +55,9 @@ class Model(Protocol):
     def grade_sharper(
         self, exp: Experience, kind: str, code: str, push: str, response: str
     ) -> SharperVerdict: ...
-    def generate_output(self, scenario_prompt: str, injection: str | None) -> GeneratedOutput: ...
+    def generate_output(
+        self, scenario_prompt: str, injection: str | None, *, max_tokens: int = 1024
+    ) -> GeneratedOutput: ...
     def rate_preference(
         self, scenario_prompt: str, output_a: str, output_b: str
     ) -> PreferenceRating: ...
@@ -120,7 +122,7 @@ class FakeLiftModel:
         self._ratings = ratings
         self._expressed = expressed
 
-    def generate_output(self, scenario_prompt, injection):
+    def generate_output(self, scenario_prompt, injection, *, max_tokens=1024):
         return self._outputs[(scenario_prompt, injection is not None)]
 
     def rate_preference(self, scenario_prompt, output_a, output_b):
@@ -320,10 +322,12 @@ class AnthropicModel:
         )
         return _require(resp)
 
-    def generate_output(self, scenario_prompt: str, injection: str | None) -> GeneratedOutput:
+    def generate_output(
+        self, scenario_prompt: str, injection: str | None, *, max_tokens: int = 1024
+    ) -> GeneratedOutput:
         kwargs = dict(
             model=self._model,
-            max_tokens=1024,
+            max_tokens=max_tokens,
             messages=[{"role": "user", "content": scenario_prompt}],
             **_PARAMS,
         )

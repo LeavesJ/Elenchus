@@ -111,7 +111,7 @@ class _FakeProbeModel:
         self._intake_by_text = intake_by_text
         self.classify_calls = 0
 
-    def generate_output(self, scenario_prompt, injection):
+    def generate_output(self, scenario_prompt, injection, *, max_tokens=1024):
         assert injection is None  # frame-naive by construction (bare = the SP2 control call)
         return self._outputs.pop(0)
 
@@ -155,6 +155,27 @@ def test_probe_records_refusal_and_skips_intake():
     assert result.runs[0].refused is True
     assert result.runs[0].frame_states == {}
     assert model.classify_calls == 0
+
+
+def test_probe_uses_learner_max_tokens_budget():
+    # The learner budget must thread to generate_output — lift's 1024 default truncates these longer
+    # decision-prompt openings (or starves the text block when thinking fires). Pins the production default.
+    from retnovation.elicitation import LEARNER_MAX_TOKENS
+
+    exp = load_experience("continuity_lock_in")
+    seen: list[int] = []
+
+    class _RecordingModel:
+        def generate_output(self, scenario_prompt, injection, *, max_tokens=1024):
+            assert injection is None
+            seen.append(max_tokens)
+            return GeneratedOutput(text="op")
+
+        def classify_intake(self, exp, opening):
+            return _intake(FrameState.present_reasoned, {})
+
+    run_elicitation_probe([exp], _RecordingModel(), runs_by_id={"continuity_lock_in": 1})
+    assert seen == [LEARNER_MAX_TOKENS]
 
 
 def test_probe_enforces_the_equivalence_guard():

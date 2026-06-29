@@ -1,5 +1,18 @@
 # Retnovation — DEVLOG
 
+## 2026-06-28 — fix(elicitation): learner max_tokens budget (first @live run surfaced the 1024-cap truncation)
+- The first gated @live run FAILED: `generate_output`'s hardcoded `max_tokens=1024` is too small for the SP3
+  decision prompts. Diagnostic on the real prompt: stop_reason `max_tokens` with a 3094-char answer TRUNCATED at
+  the cap; the failed run hit the other face — adaptive thinking consumed the budget, leaving no text block →
+  `ModelError("no text in generate_output response")`. (SP1's lift scenarios were short, so 1024 never bit.)
+  Truncation is also a measurement risk: an opening cut off before the embed insight surfaces would read as
+  absent for a non-genuine reason.
+- Fix: `generate_output` gains a keyword `max_tokens: int = 1024` (Model protocol + AnthropicModel + FakeLiftModel)
+  — lift stays byte-identical (default unchanged). `elicitation.LEARNER_MAX_TOKENS = 8192`; `run_elicitation_probe`
+  threads it via a new `learner_max_tokens` param. `injection=None` is untouched → frame-naiveness preserved
+  (max_tokens is a budget, not a primer); the spec's "exact same call" wording corrected. New wiring test pins the
+  production budget. Suite 238 passed / 5 skipped. Core-path change → OPUS adversarial review before merge.
+
 ## 2026-06-28 — SP3 live content-elicitation probe — BUILT (subagent-driven; suite 237 passed / 5 skipped)
 - New PURE `src/retnovation/elicitation.py` (Model-protocol-only, no I/O): `run_elicitation_probe` (bare
   `generate_output(prompt, None)` → real `classify_intake`, refusal-aware — refused runs are recorded, intake

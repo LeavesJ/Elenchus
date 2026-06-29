@@ -135,8 +135,13 @@ A thin module, **pure orchestration over the `Model` protocol — no doctrine, n
   the abstracted summary. **Run by the human**, gated. No `pyproject` console-script entry needed.
 
 The "learner" is **bare**: `generate_output(prompt, None)` sends the prompt as a bare user
-message with no system prompt — frame-naive by construction, and *the exact call SP2 used for
-the frame-naive control*, making the probe directly interpretable against the lift screen.
+message with no system prompt — frame-naive by construction, the same `injection=None` call shape
+SP2 used for the frame-naive control, making the probe directly interpretable against the lift
+screen. It differs from the lift control in one budget detail: a larger `max_tokens`
+(`LEARNER_MAX_TOKENS`) than the lift default, because the decision-prompt openings run far longer
+than the lift scenarios' short outputs and the 1024 default truncates them (or, when adaptive
+thinking fires, starves the text block entirely — surfaced on the first @live run). `max_tokens`
+is a budget, not a primer, so frame-naiveness is unchanged.
 
 ## Scope & sampling
 
