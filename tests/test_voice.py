@@ -107,6 +107,19 @@ def test_egress_safe_reply_flags_a_move_naming_string():
     assert voice.egress_safe_reply(m, _exp(), "LEAK here") is False
 
 
+def test_egress_also_covers_rubric_traps():
+    # a learner-facing reply that PERFORMS a trap move ("never name the move", L-5) must be flagged
+    # unsafe — the egress gate covers traps, not only frames. (_exp()'s trap_detail below.)
+    class _TrapLeak(FakeModel):
+        def check_injection_expressed(self, injection, framed_output):
+            return InjectionExpressed(
+                expressed=(injection == "Bend the offer to avoid saying no."), evidence="x"
+            )
+
+    m = _TrapLeak(_intake(), {})
+    assert voice.egress_safe_reply(m, _exp(), "anything") is False
+
+
 class FakeDoorModel(FakeModel):
     def __init__(self, intake, entry_class, reply):
         super().__init__(intake, {})
