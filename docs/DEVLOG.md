@@ -1,5 +1,41 @@
 # Retnovation — DEVLOG
 
+## 2026-06-30 — feat(presentation): persona/subject/role across voice AND visual (the rigidity fix + a content-resolved identity seam)
+- **The dogfood that started it.** A founder browser session showed Vera's voice was a **rigid, stubborn AI
+  template** — every turn the same five-beat machine (em-dash hinge, repeated "pick one and tell me X"). A
+  real beta user reported the same. Two roots: voice was a **hardcoded global constant** (`concierge.md` =
+  "You are Vera…"), which is also what blocks the roadmap (voice must vary by subject/role/experience as the
+  set expands); and the comprehension gear shipped the prior day had **hardened a per-turn template**.
+- **Decision (brainstorm → cross-channel elevation → spec → plan):** resolve a **presentation profile**
+  `{voice, visual}` from content (L-1) off one axis — `aim().posture → subject → persona`, `Experience.role →
+  register + atmosphere`. Three composed voice layers replace the one string: **invariant craft** (the moat +
+  the gear as a *conditional tool* + a real **variety mechanism** — vary shape/length, no em-dash hinge, ≥4
+  divergent exemplars), **persona-by-subject** (Vera, dry sparring partner), **role-register-by-experience**
+  (CEO/CTO as **world/setting idiom, never the move** — frame-orthogonal by construction). The **visual
+  facet** is a public theme (persona mark + role atmosphere) served two-phase and applied to the **chat
+  surface only** — the founder steered "this is a flashy product, the frontend must be represented." Engine +
+  terrain byte-untouched.
+- **Built controller-implements, 6 tasks, green per commit:** (T1) `Experience.role` + tag the 5 problems
+  ceo/cto; (T2) `voice_craft.md` + `personas/vera.md` + `voice/role_{ceo,cto}.md` + themes +
+  `resolve_presentation` (additive); (T3) the cutover — composed voice prepended, prompts reduced to
+  task-only, gear **RELOCATED not dropped** (verified reaching turn AND converse), `posture` threaded through
+  `voice.*` + `ch.record`, `model.concierge_*` gain keyword `voice`, 8 test doubles updated; (T4) the visual
+  theme served two-phase (persona+subject at menu, role at problem-entry) + applied (persona mark + role
+  atmosphere, terrain untouched); (T5) `@live` CEO/CTO divergence.
+- **Honest moat framing (review-corrected).** The role atmosphere is **not "zero moat cost"** — it is a
+  *stable, machine-applied* 2-way signal that, on the thin corpus, correlates with frame-membership-sets: a
+  **bounded, corpus-dependent domain-location leak** of the Cartographer §4d family (reveals "which world,"
+  never "which move on this problem"), shrinking as the corpus fills. The frame-overlap guard now
+  **corpus-derives** the move-words from the live frame/trap vocabulary (spec §9), not a fixed list.
+- **Reviews:** voice-cutover OPUS review **APPROVED** (gear preserved on turn+converse, registers
+  frame-orthogonal in meaning, graceful, engine/transparency untouched), 1 minor folded (corpus-derived
+  guard). Self-review catches during the build: `role_cto.md` no longer lists the move-words (would prime the
+  model + trip the guard); the cutover's @live gear tests must pass the composed voice (the gear left
+  concierge.md). **Verified:** offline **300 passed / 17 skipped**, ruff clean; `@live` 5/5 (gear hard-stop /
+  re-anchor / egress, honest close, **CEO/CTO registers diverge + no move-leak**). NEXT: OPUS whole-branch
+  review → founder felt dogfood (CEO `decision_under_stakes` amber/boardroom vs CTO `irreversible_anchor`
+  teal/systems — same Vera, different world) → merge the whole engaged agent.
+
 ## 2026-06-29 — feat(engaged-agent): comprehension gear + user-owned closure + terrain at the close
 - **The dogfood that started it.** A founder browser session on `irreversible_anchor` (a baked-in trust
   anchor that can't be rotated) — where the user answered with a gene-editing/stem-cell analogy and never
