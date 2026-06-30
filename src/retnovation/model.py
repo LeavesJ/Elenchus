@@ -167,7 +167,7 @@ _PARAMS = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}
 
 # Medium effort for the batched egress screen only (claude-api: effort is low|medium|high, default
 # high; adaptive thinking stays ON). MEASURED: with adaptive thinking, high is already fast on the
-# simple calls (classify_entry ~1.3s, echo_push ~1.5s) — lowering them buys nothing and slightly
+# simple calls (classify_entry ~1.3s, concierge_turn ~1.5s) — lowering them buys nothing and slightly
 # hurts, so they keep _PARAMS. The real latency win was BATCHING the egress (4 serial per-move
 # checks ~11s -> one screen ~2.5s, §screen_moves), not effort. Medium shaves the screen 3.6->2.5s
 # and the @live no-op + leak-catch confirm it stays accurate. Judgment calls all keep _PARAMS.

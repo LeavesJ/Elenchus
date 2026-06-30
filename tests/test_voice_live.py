@@ -48,10 +48,12 @@ def test_classify_entry_golden_set_zero_false_positives():
 
 
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
-def test_echo_push_budget_on_a_long_turn():
+def test_concierge_turn_budget_on_a_long_turn():
     m = AnthropicModel()
     long_reply = "I would hold the line. " * 60
-    out = m.echo_push("Which mistake can you actually walk back?", [("student", long_reply)])
+    out = m.concierge_turn(
+        _PROMPT, "Which mistake can you actually walk back?", [("student", long_reply)]
+    )
     assert out and isinstance(out, str)  # no truncation-to-empty / no raise (L-17)
 
 
@@ -116,3 +118,57 @@ def test_echo_gate_catches_a_named_move(tmp_path):
     leak = f"The move here is to {f.frame_detail.rstrip('.').lower()} — just do that."
     added = bool(voice._performed(m, exp, leak) - voice._performed(m, exp, push))
     assert added is True, "egress missed an explicitly named move — the L-13 backstop has a hole"
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_concierge_turn_engages_the_users_words(tmp_path):
+    """The regression that started this build: the probe must respond to what the user ACTUALLY
+    said, not march a blind rubric angle. Given a distinctive reply, the turn must reference it and
+    still press (Socratic question) — not pivot to an unrelated angle that ignores the user."""
+    exp = _first_open_exp(str(tmp_path / "engage.db"))
+    m = AnthropicModel()
+    f = exp.rubric.frames[0]
+    push = m.generate_push(exp, "frame", f.frame_code, stress=False)
+    reply = "I think verifiable audits and data settle this across every industry."
+    turn = m.concierge_turn(exp.prompt, push, [("student", reply)])
+    low = turn.lower()
+    assert "?" in turn  # it presses, Socratically
+    assert any(w in low for w in ("audit", "data", "you")), (
+        "turn ignores the student's actual words"
+    )
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_concierge_turn_acknowledges_an_objection(tmp_path):
+    """When the user says the question is irrelevant, the turn must ENGAGE that — author something
+    distinct from the bare push (it adapted), not silently re-fire the same canonical push."""
+    exp = _first_open_exp(str(tmp_path / "obj.db"))
+    m = AnthropicModel()
+    f = exp.rubric.frames[0]
+    push = m.generate_push(exp, "frame", f.frame_code, stress=False)
+    turn = m.concierge_turn(
+        exp.prompt,
+        push,
+        [
+            ("student", "I'd hold and rely on audits."),
+            ("Vera", push),
+            ("student", "Your question is irrelevant to what I said."),
+        ],
+    )
+    assert turn.strip() and turn.strip() != push.strip()  # authored a distinct, adapted turn
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_concierge_turn_never_names_the_move_and_no_invented_name(tmp_path):
+    """Moat: a faithful engaged turn passes the egress (no added revelation vs the push); and Vera
+    does not address the user by a fabricated name (the 'Sam' dogfood artifact)."""
+    from retnovation.web import voice
+
+    exp = _first_open_exp(str(tmp_path / "moat.db"))
+    m = AnthropicModel()
+    f = exp.rubric.frames[0]
+    push = m.generate_push(exp, "frame", f.frame_code, stress=False)
+    turn = m.concierge_turn(exp.prompt, push, [("student", "I'd hold the line on price.")])
+    added = bool(voice._performed(m, exp, turn) - voice._performed(m, exp, push))
+    assert added is False, "engaged turn leaked a move beyond the push"
+    assert "Sam" not in turn  # no invented name

@@ -69,7 +69,7 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
 
     @app.post("/api/session/{sid}/choose")
     def choose(sid: str, body: _Choice):
-        return _emit(reg, *reg.step(_SID, body.index or 0))
+        return _emit(reg, *reg.step(_SID, body.index if body.index is not None else 0))
 
     @app.post("/api/session/{sid}/say")
     def say(sid: str, body: _Text):
