@@ -184,3 +184,15 @@ Read this checklist before every code change. Update it after every correction o
   time low/medium/high (n≥3; they're noisy) on the ACTUAL call before changing it, and look first for redundant
   serial round-trips to collapse. A counterfactual timing of the old path (per-move @ high) vs the new (batched) is
   what proved the win — bake that comparison into the change; don't claim a speedup you didn't measure.
+- **L-21 A review subagent that runs the suite on the SHARED working tree, dispatched while the controller keeps
+  editing, will report false failures from the half-applied tree — isolate the reviewer.** During the engaged-agent
+  build (controller-implements + parallel review subagents), the T1 terrain reviewer ran `pytest` on the live tree
+  while the controller was mid-T3 editing `session_runner.py`/`voice.py`/`model.py`; it saw "8 failures in
+  test_session_runner/test_web_api, one that passes in isolation but fails in the full run" and correctly flagged
+  them as likely-unrelated. They were an ARTIFACT: at that instant the tree was inconsistent (a caller referenced
+  `voice.opening`/`concierge_open` before the source defined them). Every committed state was green (282→284→288);
+  re-running at the clean HEAD confirmed 0 failures and no random-ordering plugin. Prevention: dispatch review
+  subagents that run tests with `isolation: "worktree"` (a frozen checkout at the reviewed commit, immune to the
+  controller's later edits), OR instruct them to review the COMMIT via `git show <sha>` and run only that commit's
+  own tests — never `pytest` the live tree — and to treat any full-suite failure as possibly later in-progress work,
+  not the commit under review. "Passes in isolation, fails in the full run" during an active build is the tell.

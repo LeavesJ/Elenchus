@@ -498,7 +498,7 @@ def _vitality_bucket(v: float | None) -> int | None:
         return None
     if v < 0.5:
         return 1
-    if v < 0.83:
+    if v < 0.83:  # ~5/6: separates the 0.8 blend from the 0.867 blend over _VITALITY {0.2,0.6,1.0}
         return 2
     return 3
 
