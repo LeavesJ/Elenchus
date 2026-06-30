@@ -2,6 +2,7 @@ experience_id: continuity_lock_in
 display_title: "Continuity terms a buyer wants pinned"
 ledger_ref: "veldra:license_fork_risk"
 regime: open_ended
+role: ceo
 mode: genuinely_open
 binding_constraint: null
 prompt: >

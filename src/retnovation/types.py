@@ -160,6 +160,9 @@ class Experience(BaseModel):
     rubric: Rubric | None = None
     checkable: CheckableSet | None = None
     scene: Scene | None = None
+    role: str | None = (
+        None  # presentation role (ceo|cto|…); resolves the voice register + atmosphere
+    )
 
     @model_validator(mode="after")
     def _regime_payload_invariant(self) -> "Experience":

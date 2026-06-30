@@ -84,6 +84,7 @@ def load_experience(name: str, root: Path | None = None) -> Experience:
         rubric=rubric,
         ledger_ref=data["ledger_ref"],
         regime=Regime(data["regime"]),
+        role=data.get("role"),
     )
 
 

@@ -2,6 +2,7 @@ experience_id: proof_before_promise
 display_title: "Proof before the first-customer promise"
 ledger_ref: "veldra:first_customer_proof_loop"
 regime: open_ended
+role: cto
 mode: bounded_error
 binding_constraint: >
   You may not commit to a capability the system has not actually demonstrated end to end;

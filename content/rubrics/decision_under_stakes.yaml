@@ -2,6 +2,7 @@ experience_id: decision_under_stakes
 display_title: "Pricing power in a concentrated market"
 ledger_ref: "veldra:concentrated_market_pricing_power"
 regime: open_ended
+role: ceo
 mode: genuinely_open
 binding_constraint: null
 prompt: >

@@ -2,6 +2,7 @@ experience_id: license_continuity
 display_title: "A contract ambiguity mid-rollout"
 ledger_ref: "veldra:license_fork_risk"
 regime: open_ended
+role: ceo
 mode: genuinely_open
 binding_constraint: null
 prompt: >
