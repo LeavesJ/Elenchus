@@ -40,9 +40,12 @@ def _default_model():
 
 def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
     if tag == "menu":
-        return {"kind": "menu", "problems": data["problems"]}
+        return {"kind": "menu", "problems": data["problems"], "theme": data.get("theme", {})}
     if tag == "say":  # every Concierge-authored visible turn (opening, re-invite, probe)
-        return {"kind": "say", "text": data["text"]}
+        out = {"kind": "say", "text": data["text"]}
+        if "theme" in data:  # the opening say carries the role atmosphere (two-phase)
+            out["theme"] = data["theme"]
+        return out
     if tag == "done":  # the engine converged — but the SESSION does not end; the user owns closure
         return {"kind": "done", "terminal": True}
     if tag == "close":  # user-driven end: the honest close + the frozen-at-convergence terrain

@@ -57,7 +57,9 @@ class SessionRegistry:
                     # open-ended experience, so the generic fallback is belt-and-suspenders only.
                     labels = [titles.get(s.ledger_ref, "Untitled problem") for s, _ in menu]
                     refs = [s.ledger_ref for s, _ in menu]  # server-side only; never sent to client
-                    ch.from_worker.put(("menu", {"problems": labels, "refs": refs}))
+                    # Phase 1 of the visual theme: persona + subject (posture), no role yet (no exp).
+                    theme = voice.resolve_presentation(posture, None)["visual"]
+                    ch.from_worker.put(("menu", {"problems": labels, "refs": refs, "theme": theme}))
                     idx = ch.to_worker.get()
                     spec, receipt = menu[idx]
                     top_spec, top_rcpt = proposal.top
@@ -74,7 +76,11 @@ class SessionRegistry:
                     # The Concierge authors every visible turn. Opening = scenario verbatim + the
                     # static invite (turn 0 has no dialogue to ground on); the gate only decides
                     # when a real position has arrived so the engine can start grading.
-                    ch.from_worker.put(("say", {"text": voice.opening(model, exp, posture)}))
+                    # Phase 2: the role atmosphere is known now (exp.role) — rides the opening say.
+                    role_theme = voice.resolve_presentation(posture, exp)["visual"]
+                    ch.from_worker.put(
+                        ("say", {"text": voice.opening(model, exp, posture), "theme": role_theme})
+                    )
                     recent: list[tuple[str, str]] = []
                     nonsubstantive = 0
                     while True:

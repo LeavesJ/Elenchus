@@ -32,8 +32,15 @@
   .end{align-self:center;margin-top:8px;background:#0f1a2b;border:1px solid #2b4a6b;color:#cfe;
     border-radius:10px;padding:8px 16px;font:inherit;cursor:pointer}
   .end:disabled{opacity:.5;cursor:default}
+  #wrap{--accent:#5a6a85}
+  .accent-amber{--accent:#ba7517} .accent-teal{--accent:#1d9e75} .accent-slate{--accent:#5a6a85}
+  .you{background:var(--accent)!important}
+  #mark{position:fixed;top:12px;left:14px;width:26px;height:26px;border-radius:50%;
+    background:var(--accent);color:#06101e;display:flex;align-items:center;justify-content:center;
+    font-weight:600;font-size:14px;opacity:.9}
 </style></head>
 <body><div id="wrap">
+  <div id="mark" hidden></div>
   <div id="thread"></div>
   <form id="composer" hidden>
     <textarea id="input" placeholder="Take a position. Reason it out." rows="1"></textarea>
@@ -57,9 +64,16 @@ function thinking(){ const d=document.createElement('div'); d.className='thinkin
   d.innerHTML='Vera is thinking<span>.</span><span>.</span><span>.</span>'; thread.appendChild(d);
   thread.scrollTop=thread.scrollHeight; return d; }
 function showComposer(on){ composer.hidden=!on; if(on){ input.disabled=false; send.disabled=false; input.focus(); } }
+function applyTheme(t){ if(!t) return;
+  const w=document.getElementById('wrap'); w.className='';
+  if(t.accent) w.classList.add('accent-'+t.accent);
+  const mk=document.getElementById('mark');
+  if(t.persona_mark){ mk.textContent=t.persona_mark; mk.hidden=false;
+    if(t.atmosphere_label) mk.title=t.atmosphere_label; } }
 
 async function start(){
   const r = await post('/api/session');
+  applyTheme(r.theme);
   renderMenu(r.problems);
 }
 function renderMenu(problems){
@@ -75,7 +89,7 @@ async function choose(i, menuEl){
   advance(r);
 }
 function advance(r){
-  if(r.kind==='say'){ bubble('vera', r.text); showComposer(true); return; }
+  if(r.kind==='say'){ applyTheme(r.theme); bubble('vera', r.text); showComposer(true); return; }
   if(r.kind==='done'){ mode='converse'; showComposer(true); endButton(); return; }
   if(r.kind==='close'){ renderClose(r); return; }
   if(r.kind==='nudge'){ muted(r.message); showComposer(true); return; }
