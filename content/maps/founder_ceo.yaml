@@ -1,5 +1,6 @@
 path_type: posture
 posture: founder_ceo
+persona: vera
 process_frames:
   - choose_the_failure_default_deliberately
   - lead_with_what_you_refuse_to_do

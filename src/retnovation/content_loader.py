@@ -160,3 +160,26 @@ def load_lift_candidates(
 ) -> list[MinedCandidate]:
     data = yaml.safe_load((_root(root) / "lift" / f"{name}.yaml").read_text())
     return [MinedCandidate(**c) for c in data["candidates"]]
+
+
+def load_persona_text(name: str, root: Path | None = None) -> str:
+    return (_root(root) / "personas" / f"{name}.md").read_text()
+
+
+def load_role_text(name: str, root: Path | None = None) -> str:
+    return (_root(root) / "voice" / f"role_{name}.md").read_text()
+
+
+def load_theme(subdir: str, name: str, root: Path | None = None) -> dict:
+    p = _root(root) / subdir / f"{name}.theme.yaml"
+    return yaml.safe_load(p.read_text()) if p.exists() else {}
+
+
+def persona_for_posture(posture: str | None, root: Path | None = None) -> str:
+    """The persona declared on the posture map (L-1); 'vera' is the floor for unknown/missing postures."""
+    if not posture:
+        return "vera"
+    p = _root(root) / "maps" / f"{posture}.yaml"
+    if not p.exists():
+        return "vera"
+    return str(yaml.safe_load(p.read_text()).get("persona", "vera"))

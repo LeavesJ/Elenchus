@@ -95,6 +95,34 @@ def converse(model: Model, exp: Experience, recent: list[tuple[str, str]], user_
     return turn(model, exp, "", recent + [("student", user_text)])
 
 
+def resolve_presentation(posture: str | None, exp: Experience | None) -> dict:
+    """Resolve the presentation profile from content: voice = persona + role_register + craft (composed,
+    graceful), visual = a public theme {persona_mark, accent, atmosphere_label}. role comes from
+    exp.role (None -> no role layer); persona from the posture map (unknown -> vera floor)."""
+    from ..content_loader import (
+        load_persona_text,
+        load_prompt,
+        load_role_text,
+        load_theme,
+        persona_for_posture,
+    )
+
+    persona = persona_for_posture(posture)
+    role = getattr(exp, "role", None) if exp is not None else None
+    parts = [load_persona_text(persona)]
+    if role:
+        parts.append(load_role_text(role))
+    parts.append(load_prompt("voice_craft"))
+    voice_text = "\n\n".join(parts)
+
+    visual = {"persona_mark": "V", "accent": "slate", "atmosphere_label": "neutral"}
+    visual.update(load_theme("personas", persona))
+    if role:
+        visual.update(load_theme("voice", f"role_{role}"))
+    visual = {k: visual[k] for k in ("persona_mark", "accent", "atmosphere_label")}
+    return {"voice": voice_text, "visual": visual}
+
+
 def display_titles() -> dict[str, str]:
     """Map each open-ended experience's ledger_ref -> a human picker label. Keyed by the internal
     ref (server-side join key); the VALUE is the rubric's display_title, or a humanized
