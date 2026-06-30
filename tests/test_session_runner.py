@@ -98,7 +98,7 @@ class _ConciergeFidelityModel(FakeModel):
     def classify_entry(self, prompt, opening, recent):
         return EntryClassification(entry_class=EntryClass.substantive, reply="")
 
-    def concierge_turn(self, problem, push, recent):
+    def concierge_turn(self, problem, push, recent, *, voice=""):
         return "SHOWN::" + push  # probe mode: re-voice the canonical push (display only)
 
 

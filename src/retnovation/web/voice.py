@@ -51,12 +51,19 @@ def gate(model: Model, exp: Experience, opening: str, recent: list[tuple[str, st
     return model.classify_entry(exp.prompt, opening, recent).entry_class
 
 
-def turn(model: Model, exp: Experience, push: str, recent: list[tuple[str, str]]) -> str:
+def turn(
+    model: Model,
+    exp: Experience,
+    push: str,
+    recent: list[tuple[str, str]],
+    posture: str | None = None,
+) -> str:
     """Author one engaged visible turn. push != "" -> PROBE: pursue the engine's angle, grounded in
     the student's words; egress = added-revelation vs the push baseline, fallback the verbatim push.
     push == "" -> RE-INVITE: acknowledge + invite a real position; egress = flat (perform no move),
     fallback SAFE_CONTRACT. A refused/empty author also takes the fallback."""
-    text = model.concierge_turn(exp.prompt, push, recent)
+    v = resolve_presentation(posture, exp)["voice"]
+    text = model.concierge_turn(exp.prompt, push, recent, voice=v)
     if not text:
         return push or SAFE_CONTRACT
     if push:
@@ -68,31 +75,41 @@ def turn(model: Model, exp: Experience, push: str, recent: list[tuple[str, str]]
     return text
 
 
-def close(model: Model, exp: Experience, recent: list[tuple[str, str]]) -> str:
+def close(
+    model: Model, exp: Experience, recent: list[tuple[str, str]], posture: str | None = None
+) -> str:
     """Author the closing synthesis (reflect the student's reasoning back; no score, no named move).
     Flat egress; fallback to a safe static close on refusal/empty/leak."""
-    text = model.concierge_close(exp.prompt, recent)
+    v = resolve_presentation(posture, exp)["voice"]
+    text = model.concierge_close(exp.prompt, recent, voice=v)
     if not text or not egress_safe_reply(model, exp, text):
         return _STATIC_CLOSE
     return text
 
 
-def opening(model: Model, exp: Experience) -> str:
+def opening(model: Model, exp: Experience, posture: str | None = None) -> str:
     """Author the concrete opening turn (turn 0 — no dialogue yet): present the problem vividly so a
     cold student has a foothold (obs #4), frame hidden, specifics from the problem text only. Flat
     egress; fallback to the verbatim problem + the static invite on refusal/empty/leak so the
     scenario is never lost. (Named `opening`, not `open`, to avoid shadowing the builtin.)"""
-    text = model.concierge_open(exp.prompt)
+    v = resolve_presentation(posture, exp)["voice"]
+    text = model.concierge_open(exp.prompt, voice=v)
     if not text or not egress_safe_reply(model, exp, text):
         return exp.prompt + "\n\n" + _INVITE
     return text
 
 
-def converse(model: Model, exp: Experience, recent: list[tuple[str, str]], user_text: str) -> str:
+def converse(
+    model: Model,
+    exp: Experience,
+    recent: list[tuple[str, str]],
+    user_text: str,
+    posture: str | None = None,
+) -> str:
     """Post-convergence, engine-free continuation: acknowledge the user's latest and keep them
     reasoning — no engine push (the diagnostic is done), frame-blind. Reuses the re-invite turn
-    (flat egress, fallback SAFE_CONTRACT); the comprehension gear in concierge.md governs here too."""
-    return turn(model, exp, "", recent + [("student", user_text)])
+    (flat egress, fallback SAFE_CONTRACT); the comprehension gear in the craft governs here too."""
+    return turn(model, exp, "", recent + [("student", user_text)], posture=posture)
 
 
 def resolve_presentation(posture: str | None, exp: Experience | None) -> dict:

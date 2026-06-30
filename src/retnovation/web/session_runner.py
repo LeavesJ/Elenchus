@@ -45,7 +45,9 @@ class SessionRegistry:
             store = None
             try:
                 store = build_store(self._db_path)
-                core = derive_core(aim())
+                a = aim()
+                core = derive_core(a)
+                posture = a.posture  # resolves the presentation profile (voice + visual theme)
                 model = self._model_factory()
 
                 def decide(proposal):
@@ -72,7 +74,7 @@ class SessionRegistry:
                     # The Concierge authors every visible turn. Opening = scenario verbatim + the
                     # static invite (turn 0 has no dialogue to ground on); the gate only decides
                     # when a real position has arrived so the engine can start grading.
-                    ch.from_worker.put(("say", {"text": voice.opening(model, exp)}))
+                    ch.from_worker.put(("say", {"text": voice.opening(model, exp, posture)}))
                     recent: list[tuple[str, str]] = []
                     nonsubstantive = 0
                     while True:
@@ -87,7 +89,9 @@ class SessionRegistry:
                             # cap reached: stop re-collecting, treat the latest text as the opening
                             opening = text
                             break
-                        reinvite = voice.turn(model, exp, "", recent)  # push="" -> re-invite
+                        reinvite = voice.turn(
+                            model, exp, "", recent, posture
+                        )  # push="" -> re-invite
                         ch.from_worker.put(("say", {"text": reinvite}))
                         recent.append(("Vera", reinvite))
                     captured["exp"], captured["recent"] = exp, recent
@@ -95,7 +99,7 @@ class SessionRegistry:
                     def respond(push):
                         # Display the engaged, dialogue-grounded turn; the engine still grades the
                         # CANONICAL push vs the RAW reply (bridge transparency preserved).
-                        shown = voice.turn(model, exp, push, recent)
+                        shown = voice.turn(model, exp, push, recent, posture)
                         ch.from_worker.put(("say", {"text": shown}))
                         recent.append(("Vera", shown))
                         student = ch.to_worker.get()
@@ -121,6 +125,7 @@ class SessionRegistry:
                     # close is no longer authored here — it moves to the user-owned /close path.
                     ch.record = {
                         "model": model,
+                        "posture": posture,
                         "exp": captured["exp"],
                         "recent": captured["recent"],
                         "terrain": project_terrain(state, now).learner_view(),
@@ -165,7 +170,7 @@ class SessionRegistry:
         rec = self._ch[session_id].record
         if rec is None:
             return ("error", {"message": "session has not converged"})
-        reply = voice.converse(rec["model"], rec["exp"], rec["recent"], value)
+        reply = voice.converse(rec["model"], rec["exp"], rec["recent"], value, rec["posture"])
         rec["recent"].append(("student", value))
         rec["recent"].append(("Vera", reply))
         return ("say", {"text": reply})
@@ -176,5 +181,5 @@ class SessionRegistry:
         rec = self._ch[session_id].record
         if rec is None:
             return ("error", {"message": "session has not converged"})
-        close_text = voice.close(rec["model"], rec["exp"], rec["recent"])
+        close_text = voice.close(rec["model"], rec["exp"], rec["recent"], rec["posture"])
         return ("close", {"close": close_text, "terrain": rec["terrain"]})

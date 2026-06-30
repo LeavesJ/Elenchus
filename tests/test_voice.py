@@ -52,7 +52,7 @@ class FakeLeakModel(FakeModel):
     """concierge_turn emits a 'LEAK' string; screen_moves flags any 'LEAK' text as PERFORMING every
     screened move. Drives the egress fallback in both probe and re-invite modes."""
 
-    def concierge_turn(self, problem, push, recent):
+    def concierge_turn(self, problem, push, recent, *, voice=""):
         return "LEAK: lead with what you refuse to do"
 
     def screen_moves(self, moves, text):
@@ -69,7 +69,7 @@ class _PerMoveModel(FakeModel):
         super().__init__(intake, {})
         self._flags = flags
 
-    def concierge_turn(self, problem, push, recent):
+    def concierge_turn(self, problem, push, recent, *, voice=""):
         return "CANDIDATE"
 
     def screen_moves(self, moves, text):
@@ -138,7 +138,7 @@ def test_turn_reinvite_uses_flat_gate_and_safe_contract_on_leak():
 
 def test_turn_empty_concierge_output_falls_back():
     class _Empty(FakeModel):
-        def concierge_turn(self, problem, push, recent):
+        def concierge_turn(self, problem, push, recent, *, voice=""):
             return ""
 
     m = _Empty(_intake(), {})
@@ -194,7 +194,7 @@ def test_close_returns_synthesis_when_safe():
 
 def test_close_falls_back_on_leak():
     class _LeakClose(FakeLeakModel):
-        def concierge_close(self, problem, recent):
+        def concierge_close(self, problem, recent, *, voice=""):
             return "LEAK the move"
 
     m = _LeakClose(_intake(), {})
@@ -222,7 +222,7 @@ def test_converse_falls_back_to_safe_contract_on_leak():
 
 def test_opening_returns_authored_text_when_safe():
     class _Open(FakeModel):
-        def concierge_open(self, problem):
+        def concierge_open(self, problem, *, voice=""):
             return "Picture the contract on your desk, unsigned. What do you do, and why?"
 
     m = _Open(_intake(), {})
@@ -231,7 +231,7 @@ def test_opening_returns_authored_text_when_safe():
 
 def test_opening_falls_back_to_problem_plus_invite_on_leak():
     class _LeakOpen(FakeLeakModel):
-        def concierge_open(self, problem):
+        def concierge_open(self, problem, *, voice=""):
             return "LEAK the move in the opening"
 
     m = _LeakOpen(_intake(), {})
@@ -240,7 +240,7 @@ def test_opening_falls_back_to_problem_plus_invite_on_leak():
 
 def test_opening_falls_back_on_empty():
     class _EmptyOpen(FakeModel):
-        def concierge_open(self, problem):
+        def concierge_open(self, problem, *, voice=""):
             return ""
 
     m = _EmptyOpen(_intake(), {})

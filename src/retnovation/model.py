@@ -70,9 +70,13 @@ class Model(Protocol):
     def classify_entry(
         self, prompt: str, opening: str, recent: list[tuple[str, str]]
     ) -> "EntryClassification": ...
-    def concierge_turn(self, problem: str, push: str, recent: list[tuple[str, str]]) -> str: ...
-    def concierge_close(self, problem: str, recent: list[tuple[str, str]]) -> str: ...
-    def concierge_open(self, problem: str) -> str: ...
+    def concierge_turn(
+        self, problem: str, push: str, recent: list[tuple[str, str]], *, voice: str = ""
+    ) -> str: ...
+    def concierge_close(
+        self, problem: str, recent: list[tuple[str, str]], *, voice: str = ""
+    ) -> str: ...
+    def concierge_open(self, problem: str, *, voice: str = "") -> str: ...
     def screen_moves(self, moves: list[str], text: str) -> "EgressScreen": ...
 
 
@@ -128,13 +132,13 @@ class FakeModel:
         # Offline double: every opening is a real attempt (keeps the engine path unchanged).
         return EntryClassification(entry_class=EntryClass.substantive, reply="")
 
-    def concierge_turn(self, problem, push, recent):
+    def concierge_turn(self, problem, push, recent, *, voice=""):
         return push or "take a real position"  # probe: echo the brief; reinvite: a safe invite
 
-    def concierge_close(self, problem, recent):
+    def concierge_close(self, problem, recent, *, voice=""):
         return "[close synthesis]"
 
-    def concierge_open(self, problem):
+    def concierge_open(self, problem, *, voice=""):
         return "[open]"
 
     def check_injection_expressed(self, injection: str, framed_output: str) -> InjectionExpressed:
@@ -359,9 +363,11 @@ class AnthropicModel:
         )
         return _require(resp)
 
-    def concierge_turn(self, problem: str, push: str, recent: list[tuple[str, str]]) -> str:
-        # Frame-blind: the problem + dialogue + the engine's SAFE push only (never rubric internals).
-        system = load_prompt("concierge")
+    def concierge_turn(
+        self, problem: str, push: str, recent: list[tuple[str, str]], *, voice: str = ""
+    ) -> str:
+        # Frame-blind: problem + dialogue + the SAFE push only. `voice` = composed persona+role+craft.
+        system = (voice + "\n\n" if voice else "") + load_prompt("concierge")
         brief = (
             f"Next angle to pursue (turn it into a question; never state it):\n{push}"
             if push
@@ -382,10 +388,10 @@ class AnthropicModel:
                 return block.text
         return ""
 
-    def concierge_close(self, problem: str, recent: list[tuple[str, str]]) -> str:
-        system = load_prompt(
-            "concierge_close"
-        )  # frame-blind: dialogue only, reflect reasoning back
+    def concierge_close(
+        self, problem: str, recent: list[tuple[str, str]], *, voice: str = ""
+    ) -> str:
+        system = (voice + "\n\n" if voice else "") + load_prompt("concierge_close")
         user = f"Problem:\n{problem}\n\n{_render_turns(recent)}Write the closing synthesis."
         resp = self._get_client().messages.create(
             model=self._model,
@@ -401,8 +407,8 @@ class AnthropicModel:
                 return block.text
         return ""
 
-    def concierge_open(self, problem: str) -> str:
-        system = load_prompt("concierge_open")  # frame-blind: the problem text only
+    def concierge_open(self, problem: str, *, voice: str = "") -> str:
+        system = (voice + "\n\n" if voice else "") + load_prompt("concierge_open")
         resp = self._get_client().messages.create(
             model=self._model,
             max_tokens=_ECHO_MAX_TOKENS,
