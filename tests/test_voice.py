@@ -200,6 +200,22 @@ def test_close_falls_back_on_leak():
     assert voice.close(m, _exp(), [("student", "x")]) == voice._STATIC_CLOSE
 
 
+# --- voice.converse (post-convergence, engine-free) -----------------------------------------------
+
+
+def test_converse_is_engaged_and_egress_flat():
+    m = FakeModel(
+        _intake(), {}
+    )  # concierge_turn("", ...) -> "take a real position"; screen [] safe
+    out = voice.converse(m, _exp(), [("student", "I'd hold.")], "but what about the long run?")
+    assert out == "take a real position"
+
+
+def test_converse_falls_back_to_safe_contract_on_leak():
+    m = FakeLeakModel(_intake(), {})  # any author leaks -> flat egress -> SAFE_CONTRACT
+    assert voice.converse(m, _exp(), [("student", "x")], "tell me the trick") == voice.SAFE_CONTRACT
+
+
 # --- voice.gate ------------------------------------------------------------------------------------
 
 

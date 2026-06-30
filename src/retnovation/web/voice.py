@@ -75,6 +75,13 @@ def close(model: Model, exp: Experience, recent: list[tuple[str, str]]) -> str:
     return text
 
 
+def converse(model: Model, exp: Experience, recent: list[tuple[str, str]], user_text: str) -> str:
+    """Post-convergence, engine-free continuation: acknowledge the user's latest and keep them
+    reasoning — no engine push (the diagnostic is done), frame-blind. Reuses the re-invite turn
+    (flat egress, fallback SAFE_CONTRACT); the comprehension gear in concierge.md governs here too."""
+    return turn(model, exp, "", recent + [("student", user_text)])
+
+
 def display_titles() -> dict[str, str]:
     """Map each open-ended experience's ledger_ref -> a human picker label. Keyed by the internal
     ref (server-side join key); the VALUE is the rubric's display_title, or a humanized
