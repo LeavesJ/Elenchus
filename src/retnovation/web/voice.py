@@ -66,3 +66,21 @@ def door(
         return (EntryClass.substantive, None)
     reply = ec.reply if (ec.reply and egress_safe_reply(model, exp, ec.reply)) else SAFE_CONTRACT
     return (ec.entry_class, reply)
+
+
+def display_titles() -> dict[str, str]:
+    """Map each open-ended experience's ledger_ref -> a human picker label. Keyed by the internal
+    ref (server-side join key); the VALUE is the rubric's display_title, or a humanized
+    experience_id fallback. The veldra: ref must never reach the client as a label."""
+    from ..content_loader import load_library
+    from ..types import Regime
+
+    out: dict[str, str] = {}
+    for e in load_library():
+        if e.regime is not Regime.open_ended:
+            continue
+        title = (e.rubric.display_title if e.rubric and e.rubric.display_title else None) or (
+            e.experience_id.replace("_", " ").capitalize()
+        )
+        out[e.ledger_ref] = title
+    return out

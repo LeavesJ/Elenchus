@@ -1,4 +1,5 @@
 experience_id: irreversible_anchor
+display_title: "Shipping something you can't take back"
 ledger_ref: "veldra:embedded_anchor_lock_in"
 regime: open_ended
 mode: genuinely_open

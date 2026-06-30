@@ -37,6 +37,7 @@ def load_rubric(name: str, root: Path | None = None) -> Rubric:
         mode=data["mode"],
         binding_constraint=data.get("binding_constraint"),
         decision_frame=data.get("decision_frame"),
+        display_title=data.get("display_title"),
     )
 
 
@@ -75,6 +76,7 @@ def load_experience(name: str, root: Path | None = None) -> Experience:
         mode=Mode(data["mode"]),
         binding_constraint=data.get("binding_constraint"),
         decision_frame=data.get("decision_frame"),
+        display_title=data.get("display_title"),
     )
     return Experience(
         experience_id=data["experience_id"],

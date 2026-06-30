@@ -102,6 +102,7 @@ class Rubric(BaseModel):
     mode: Mode
     binding_constraint: str | None = None
     decision_frame: str | None = None
+    display_title: str | None = None  # human picker label; never the ledger_ref / veldra: slug
 
     @model_validator(mode="after")
     def _decision_frame_in_frames(self) -> "Rubric":

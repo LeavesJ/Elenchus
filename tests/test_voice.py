@@ -292,3 +292,19 @@ def test_concierge_close_is_frame_blind_and_returns_text():
 def test_concierge_turn_refusal_returns_empty():
     m = AnthropicModel(client=_RefusingClient())
     assert m.concierge_turn("P", "brief", [("student", "x")]) == ""
+
+
+def test_fakemodel_concierge_doubles():
+    m = _fake()
+    assert m.concierge_turn("p", "brief", []) == "brief"  # probe: echoes the brief
+    assert m.concierge_turn("p", "", []) == "take a real position"  # reinvite: safe invite
+    assert m.concierge_close("p", []) == "[close synthesis]"
+
+
+def test_display_titles_have_no_veldra_and_cover_open_ended():
+    titles = voice.display_titles()
+    assert titles, "expected at least one open-ended experience title"
+    for ref, title in titles.items():
+        assert ref.startswith("veldra:")  # keyed by the internal ref (server-side only)
+        assert "veldra" not in title.lower()  # the VALUE never leaks the source
+        assert title and title[0].isupper()
