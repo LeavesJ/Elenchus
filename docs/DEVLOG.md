@@ -1,5 +1,51 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — feat(engaged-agent): comprehension gear + user-owned closure + terrain at the close
+- **The dogfood that started it.** A founder browser session on `irreversible_anchor` (a baked-in trust
+  anchor that can't be rotated) — where the user answered with a gene-editing/stem-cell analogy and never
+  engaged the real decision — exposed a **stance-level** failure, not a bug. Seven observations, two
+  clusters, one root: the agent *withholds without first demonstrating understanding* (reads as DODGING +
+  DUMB-at-domain), *follows the user into a wrong frame* instead of re-grounding, and *the engine
+  unilaterally closes mid-argument*. Cardinal sin: at turn 5 the user said "I don't think you're
+  understanding my anchor" and the agent barreled into the next push, confirming "you don't get me." Root:
+  the engine drives and the user rides — reverse it. (Full diagnosis: spec
+  `2026-06-29-engaged-agent-comprehension-and-user-owned-closure-design.md`.)
+- **Decision (brainstorm → spec → plan, all committed):** layer the fix on the **byte-untouched engine**.
+  Verified the design against the merged tree (10-way read-only pass) and hardened it with an adversarial
+  3-lens spec review (two criticals + six importants folded in) BEFORE writing the plan. Built
+  controller-implements + independent OPUS review subagents (the drop-resistant strategy), green per commit.
+- **What shipped (7 tasks):** (1) **Comprehension gear** in `content/prompts/concierge.md` — demonstrate
+  understanding before withholding (reflect the user's *concern*, then push), re-anchor to the concrete
+  problem when they drift into an analogy, STOP-and-restate when they say "you don't understand me";
+  prompt-only, no extra per-turn call (L-20). (2) **Concrete opening** — new `voice.opening` + `concierge_open`
+  author turn 0 vividly from the problem text (foothold, frame-blind), verbatim-fallback on leak/empty. (3)
+  **User-owned closure** — the engine's `done` is now an internal signal (`{kind:done, terminal:true}`); a
+  persisted `SessionRecord` (model, exp, dialogue, frozen terrain) serves post-convergence turns and the
+  close ENGINE-FREE via new `reg.converse`/`reg.close` that never touch the terminal-guarded `step()`; the
+  chat stays open with an "End session" affordance; the close is authored from the full dialogue. (4)
+  **Terrain at the close** — re-surfaced `project_terrain().learner_view()` as the visual payoff, with the
+  L-13 wire **hardened**: positional `region_id` (was a frame-hash), order by public bucketed vitality (node
+  position no longer re-encodes the secret frame order), 3-level vitality buckets; a rename-invariance test
+  proves non-invertibility. (5) **Egress hardening** — `screen_moves` budget 1024→4096 (L-17: medium-effort
+  adaptive thinking truncated the L-13 backstop and the guard bricked the turn; surfaced @live).
+- **Invariants held:** engine `orchestration.py`/`assessment/judgment_loop.py` byte-untouched throughout
+  (empty diff vs main); bridge-transparency `test_runner_assessment_equals_direct_run_session` green (close
+  moved to /close, assessment byte-equality unchanged); converse/close are engine-free and mutate no state;
+  terminal-guard coexists (step() still errors after done while converse/close work from the record); no
+  `veldra:` ref or rubric on the wire.
+- **Verified:** offline **290 passed / 15 skipped**, ruff + format clean. `@live`: gear hard-stop /
+  re-anchor / egress-after-doctrine all pass; the existing engagement / objection / no-leak / no-name moat
+  suite + golden-set all green; egress truncation gone. Health smoke: documented launch
+  (`PYTHONPATH=src .venv/bin/python -m retnovation.web`) boots, `GET /api/health → {"ok":true}`, `GET / → 200`
+  serving the converse-mode surface. Per-task OPUS reviews: T1 APPROVED, T4 APPROVED-WITH-MINORS (one fence
+  applied, one fail-closed note deferred), closure review in flight at write time.
+- **Honest residuals (not cured):** obs #6 — an off-track reply already graded before the re-anchor isn't
+  retroactively un-graded (trajectory grading absorbs the recovery; the ≥2/≥2 gate means a single corrupted
+  reply can't light a region). Terrain node-COUNT / cross-session accretion leaks coarse rubric-coverage
+  shape — accepted for the MVP (capping node count is a future option). A `screen_moves` runaway above 4096
+  still fail-closes to a 500 (correct posture; optional degrade-to-push deferred). **NEXT:** founder felt
+  dogfood (re-run the gene-editing analogy); OPUS whole-branch review → finishing-a-development-branch.
+
 ## 2026-06-29 — feat(concierge): the engaged agent fronts the (byte-untouched) engine
 - **Dogfood failure that started it:** the founder ran a real session and the agent gave answers "completely
   irrelevant to user input — zero engagement," and the picker showed raw `veldra:` refs. Root cause (confirmed by
