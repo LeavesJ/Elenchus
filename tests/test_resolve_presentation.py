@@ -39,11 +39,39 @@ def test_visual_theme_keys_enum_and_frame_free():
 
 
 def test_no_register_or_persona_word_shares_a_frame_detail_word():
+    # belt: the core move-words never appear in a register/persona/craft layer
     forbidden = {"reversible", "rollback", "optionality", "irreversible", "default", "amend"}
     for name in ("vera", "role_ceo", "role_cto", "voice_craft"):
         text = _layer_text(name).lower()
         hits = {w for w in forbidden if re.search(rf"\b{w}\b", text)}
         assert not hits, f"{name} leaks move-words: {hits}"
+
+
+def test_registers_do_not_reuse_the_live_frame_vocabulary():
+    # Spec §9: derive the move-word denylist from the frame_detail/trap_detail vocabulary of EVERY
+    # tagged problem (len>=6 content-words = the move-bearing words; short common words excluded),
+    # so the guard tracks the corpus and catches register DRIFT, not just a fixed list. The allowlist
+    # covers benign long *world* words both legitimately share (not the move itself).
+    from retnovation.content_loader import load_library
+
+    # The complete set of benign world/common words the registers and the move-statements share on
+    # the current corpus; the distinctive move-words (reversible, optionality, provision, boundary,
+    # defaulting, amended) are in the frames but NOT in any register, so a register drifting to one
+    # WILL trip this. Re-derive `allow` if a frame edit adds a new benign shared word.
+    allow = {"before", "decision", "instead", "naming", "product", "shipped", "single", "without"}
+    move_words: set[str] = set()
+    for e in load_library():
+        if not e.rubric:
+            continue
+        for d in [f.frame_detail for f in e.rubric.frames] + [
+            t.trap_detail for t in e.rubric.traps
+        ]:
+            move_words |= {w for w in re.findall(r"[a-z]+", d.lower()) if len(w) >= 6}
+    move_words -= allow
+    for name in ("vera", "role_ceo", "role_cto", "voice_craft"):
+        words = set(re.findall(r"[a-z]+", _layer_text(name).lower()))
+        hits = words & move_words
+        assert not hits, f"{name} reuses live frame-move words: {sorted(hits)}"
 
 
 def _layer_text(name):
