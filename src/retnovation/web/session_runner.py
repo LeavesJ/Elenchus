@@ -16,12 +16,16 @@ from . import voice
 # who keeps typing non-substantive input (or a mis-classifying model) pins the session open forever.
 _DOOR_MAX_NONSUBSTANTIVE = 3
 
+# The Concierge's opening invite (static — turn 0 has no dialogue to ground on).
+_INVITE = "The call's yours. Take a position and reason it out — I'll push, I won't hand it over."
+
 
 class _Channel:
     def __init__(self):
         self.to_worker: queue.Queue = queue.Queue()
         self.from_worker: queue.Queue = queue.Queue()
         self.last_menu: list[str] = []
+        self.last_menu_refs: list[str] = []  # server-side only (menu_index); never sent to client
         self.terminal: bool = False
 
 
@@ -47,7 +51,12 @@ class SessionRegistry:
 
                 def decide(proposal):
                     menu = proposal.problem_menu()
-                    ch.from_worker.put(("menu", {"problems": [s.ledger_ref for s, _ in menu]}))
+                    titles = voice.display_titles()
+                    # Clean human labels; never the ledger_ref (veldra: slug). titles covers every
+                    # open-ended experience, so the generic fallback is belt-and-suspenders only.
+                    labels = [titles.get(s.ledger_ref, "Untitled problem") for s, _ in menu]
+                    refs = [s.ledger_ref for s, _ in menu]  # server-side only; never sent to client
+                    ch.from_worker.put(("menu", {"problems": labels, "refs": refs}))
                     idx = ch.to_worker.get()
                     spec, receipt = menu[idx]
                     top_spec, top_rcpt = proposal.top
@@ -58,19 +67,20 @@ class SessionRegistry:
                         outcome=Outcome.accepted if spec is top_spec else Outcome.redirected,
                     )
 
+                captured: dict = {}
+
                 def present(exp):
-                    ch.from_worker.put(
-                        ("problem", {"prompt": exp.prompt, "ledger_ref": exp.ledger_ref})
-                    )
+                    # The Concierge authors every visible turn. Opening = scenario verbatim + the
+                    # static invite (turn 0 has no dialogue to ground on); the gate only decides
+                    # when a real position has arrived so the engine can start grading.
+                    ch.from_worker.put(("say", {"text": exp.prompt + "\n\n" + _INVITE}))
                     recent: list[tuple[str, str]] = []
                     nonsubstantive = 0
                     while True:
                         text = ch.to_worker.get()
-                        # door() takes the current text as `opening`; pass recent = PRIOR turns only
-                        # so the latest message isn't rendered twice in the classifier prompt.
-                        entry, reply = voice.door(model, exp, text, recent)
+                        ec = voice.gate(model, exp, text, recent)
                         recent.append(("student", text))
-                        if entry is EntryClass.substantive:
+                        if ec is EntryClass.substantive:
                             opening = text  # RAW opening to the engine — bridge stays transparent
                             break
                         nonsubstantive += 1
@@ -78,12 +88,17 @@ class SessionRegistry:
                             # cap reached: stop re-collecting, treat the latest text as the opening
                             opening = text
                             break
-                        ch.from_worker.put(("door", {"text": reply}))
-                        recent.append(("Vera", reply))
+                        reinvite = voice.turn(model, exp, "", recent)  # push="" -> re-invite
+                        ch.from_worker.put(("say", {"text": reinvite}))
+                        recent.append(("Vera", reinvite))
+                    captured["exp"], captured["recent"] = exp, recent
 
                     def respond(push):
-                        shown = voice.echo(model, exp, push, recent)
-                        ch.from_worker.put(("push", {"text": shown}))
+                        # Display the engaged, dialogue-grounded turn; the engine still grades the
+                        # CANONICAL push vs the RAW reply (bridge transparency preserved).
+                        shown = voice.turn(model, exp, push, recent)
+                        ch.from_worker.put(("say", {"text": shown}))
+                        recent.append(("Vera", shown))
                         student = ch.to_worker.get()
                         recent.append(("student", student))
                         return student  # RAW reply to the engine — canonical push is what it grades
@@ -100,7 +115,12 @@ class SessionRegistry:
                     decide=decide,
                     decide_core=lambda c: [],
                 )
-                ch.from_worker.put(("done", {"state": state, "assessment": assessment}))
+                close_text = (
+                    voice.close(model, captured["exp"], captured["recent"]) if captured else ""
+                )
+                ch.from_worker.put(
+                    ("done", {"state": state, "assessment": assessment, "close": close_text})
+                )
             except Exception as e:  # surface, never hang the client
                 ch.from_worker.put(("error", {"message": repr(e)}))
             finally:
@@ -111,6 +131,7 @@ class SessionRegistry:
         tag, data = ch.from_worker.get()
         if tag == "menu":
             ch.last_menu = data["problems"]
+            ch.last_menu_refs = data.get("refs", [])
         if tag in ("done", "error"):
             ch.terminal = True
         return tag, data
@@ -123,9 +144,10 @@ class SessionRegistry:
         tag, data = ch.from_worker.get()
         if tag == "menu":
             ch.last_menu = data["problems"]
+            ch.last_menu_refs = data.get("refs", [])
         if tag in ("done", "error"):
             ch.terminal = True
         return tag, data
 
     def menu_index(self, session_id: str, ledger_ref: str) -> int:
-        return self._ch[session_id].last_menu.index(ledger_ref)
+        return self._ch[session_id].last_menu_refs.index(ledger_ref)

@@ -70,7 +70,6 @@ class Model(Protocol):
     def classify_entry(
         self, prompt: str, opening: str, recent: list[tuple[str, str]]
     ) -> "EntryClassification": ...
-    def echo_push(self, push_text: str, recent: list[tuple[str, str]]) -> str: ...
     def concierge_turn(self, problem: str, push: str, recent: list[tuple[str, str]]) -> str: ...
     def concierge_close(self, problem: str, recent: list[tuple[str, str]]) -> str: ...
     def screen_moves(self, moves: list[str], text: str) -> "EgressScreen": ...
@@ -127,9 +126,6 @@ class FakeModel:
     ) -> EntryClassification:
         # Offline double: every opening is a real attempt (keeps the engine path unchanged).
         return EntryClassification(entry_class=EntryClass.substantive, reply="")
-
-    def echo_push(self, push_text: str, recent: list[tuple[str, str]]) -> str:
-        return push_text  # identity: the engine's canonical push is what the user sees
 
     def concierge_turn(self, problem, push, recent):
         return push or "take a real position"  # probe: echo the brief; reinvite: a safe invite
@@ -351,23 +347,6 @@ class AnthropicModel:
             **_PARAMS,  # measured ~1.3s at high; lowering effort here is slower, not faster
         )
         return _require(resp)
-
-    def echo_push(self, push_text: str, recent: list[tuple[str, str]]) -> str:
-        system = load_prompt("echo")  # frame-blind: the push + recent turns only
-        user = f"{_render_turns(recent)}Push to re-voice:\n{push_text}"
-        resp = self._get_client().messages.create(
-            model=self._model,
-            max_tokens=_ECHO_MAX_TOKENS,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-            **_PARAMS,  # measured ~1.5s at high; medium was no faster and re-voice quality matters
-        )
-        if getattr(resp, "stop_reason", None) == "refusal":
-            return push_text  # never block the loop on a refusal; show the canonical push
-        for block in resp.content:
-            if getattr(block, "type", None) == "text":
-                return block.text
-        return push_text  # no text block -> fall back to the canonical push (never raise here)
 
     def concierge_turn(self, problem: str, push: str, recent: list[tuple[str, str]]) -> str:
         # Frame-blind: the problem + dialogue + the engine's SAFE push only (never rubric internals).

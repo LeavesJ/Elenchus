@@ -38,34 +38,41 @@ def egress_safe_reply(model: Model, exp: Experience, text: str) -> bool:
     return not _performed(model, exp, text)
 
 
-def echo(model: Model, exp: Experience, push_text: str, recent: list[tuple[str, str]]) -> str:
-    """Re-voice the engine's canonical push onto the user's words (display only). Gate = ADDED
-    REVELATION: fall back to the verbatim push only if the re-voice performs a hidden move the
-    canonical push did NOT already perform. The push baseline is essential — a faithful probe
-    legitimately orbits the angle's vocabulary, so judging the re-voice against the bare move
-    detail would force a verbatim fallback every turn (Echo silently no-ops; review #3). One screen
-    on the candidate; the push is screened only when the candidate already looks leaky."""
-    candidate = model.echo_push(push_text, recent)
-    if not candidate:
-        return push_text
-    performed = _performed(model, exp, candidate)
-    if not performed:
-        return candidate
-    if performed - _performed(model, exp, push_text):  # added revelation beyond the push
-        return push_text  # hard fallback to the verbatim push
-    return candidate
+_STATIC_CLOSE = (
+    "That's the read. You took a position and reasoned the trade-offs — that's the work."
+)
 
 
-def door(
-    model: Model, exp: Experience, opening: str, recent: list[tuple[str, str]]
-) -> tuple[EntryClass, str | None]:
-    """Front door: classify the turn and either enter the engine (substantive) or author an
-    egress-safe conversational reply. A leaking author reply is replaced by SAFE_CONTRACT."""
-    ec = model.classify_entry(exp.prompt, opening, recent)
-    if ec.entry_class is EntryClass.substantive:
-        return (EntryClass.substantive, None)
-    reply = ec.reply if (ec.reply and egress_safe_reply(model, exp, ec.reply)) else SAFE_CONTRACT
-    return (ec.entry_class, reply)
+def gate(model: Model, exp: Experience, opening: str, recent: list[tuple[str, str]]) -> EntryClass:
+    """Entrance gate only: has the student taken a real position yet? (The engine needs a
+    substantive opening before it can grade.) Authoring is voice.turn — never classify_entry.reply."""
+    return model.classify_entry(exp.prompt, opening, recent).entry_class
+
+
+def turn(model: Model, exp: Experience, push: str, recent: list[tuple[str, str]]) -> str:
+    """Author one engaged visible turn. push != "" -> PROBE: pursue the engine's angle, grounded in
+    the student's words; egress = added-revelation vs the push baseline, fallback the verbatim push.
+    push == "" -> RE-INVITE: acknowledge + invite a real position; egress = flat (perform no move),
+    fallback SAFE_CONTRACT. A refused/empty author also takes the fallback."""
+    text = model.concierge_turn(exp.prompt, push, recent)
+    if not text:
+        return push or SAFE_CONTRACT
+    if push:
+        if _performed(model, exp, text) - _performed(model, exp, push):  # added revelation
+            return push
+        return text
+    if not egress_safe_reply(model, exp, text):
+        return SAFE_CONTRACT
+    return text
+
+
+def close(model: Model, exp: Experience, recent: list[tuple[str, str]]) -> str:
+    """Author the closing synthesis (reflect the student's reasoning back; no score, no named move).
+    Flat egress; fallback to a safe static close on refusal/empty/leak."""
+    text = model.concierge_close(exp.prompt, recent)
+    if not text or not egress_safe_reply(model, exp, text):
+        return _STATIC_CLOSE
+    return text
 
 
 def display_titles() -> dict[str, str]:
