@@ -52,7 +52,10 @@ def test_concierge_turn_budget_on_a_long_turn():
     m = AnthropicModel()
     long_reply = "I would hold the line. " * 60
     out = m.concierge_turn(
-        _PROMPT, "Which mistake can you actually walk back?", [("student", long_reply)]
+        _PROMPT,
+        "Which mistake can you actually walk back?",
+        [("student", long_reply)],
+        voice=_voice(None),
     )
     assert out and isinstance(out, str)  # no truncation-to-empty / no raise (L-17)
 
@@ -79,6 +82,15 @@ def _first_open_exp(db_path):
         return select_experience(core, state, ledger, corpus, spec)
     finally:
         store.close()
+
+
+def _voice(exp):
+    """The composed presentation voice (persona+role+craft) the production path prepends. Post-cutover
+    the gear + persona live HERE, not in concierge.md, so @live tests of gear/persona behavior must
+    pass it to model.concierge_turn (exp=None -> vera+craft, no role layer)."""
+    from retnovation.web import voice
+
+    return voice.resolve_presentation("founder_ceo", exp)["voice"]
 
 
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
@@ -130,7 +142,7 @@ def test_concierge_turn_engages_the_users_words(tmp_path):
     f = exp.rubric.frames[0]
     push = m.generate_push(exp, "frame", f.frame_code, stress=False)
     reply = "I think verifiable audits and data settle this across every industry."
-    turn = m.concierge_turn(exp.prompt, push, [("student", reply)])
+    turn = m.concierge_turn(exp.prompt, push, [("student", reply)], voice=_voice(exp))
     low = turn.lower()
     assert "?" in turn  # it presses, Socratically
     assert any(w in low for w in ("audit", "data", "you")), (
@@ -154,6 +166,7 @@ def test_concierge_turn_acknowledges_an_objection(tmp_path):
             ("Vera", push),
             ("student", "Your question is irrelevant to what I said."),
         ],
+        voice=_voice(exp),
     )
     assert turn.strip() and turn.strip() != push.strip()  # authored a distinct, adapted turn
 
@@ -168,7 +181,9 @@ def test_concierge_turn_never_names_the_move_and_no_invented_name(tmp_path):
     m = AnthropicModel()
     f = exp.rubric.frames[0]
     push = m.generate_push(exp, "frame", f.frame_code, stress=False)
-    turn = m.concierge_turn(exp.prompt, push, [("student", "I'd hold the line on price.")])
+    turn = m.concierge_turn(
+        exp.prompt, push, [("student", "I'd hold the line on price.")], voice=_voice(exp)
+    )
     added = bool(voice._performed(m, exp, turn) - voice._performed(m, exp, push))
     assert added is False, "engaged turn leaked a move beyond the push"
     assert "Sam" not in turn  # no invented name
@@ -190,6 +205,7 @@ def test_gear_hard_stops_on_you_dont_understand(tmp_path):
             ("Vera", push),
             ("student", "I don't think you're understanding my anchor at all."),
         ],
+        voice=_voice(exp),
     )
     assert turn.strip() and turn.strip() != push.strip()  # it adapted, did not re-fire the push
     assert "you" in turn.lower()  # it engages THEM, not a fresh angle
@@ -212,6 +228,7 @@ def test_gear_reanchors_an_off_track_analogy(tmp_path):
                 "It's like gene editing — you splice the DNA and the cell just expresses it.",
             )
         ],
+        voice=_voice(exp),
     )
     assert "?" in turn  # it presses
     # it does not merely echo the analogy's vocabulary back as the subject
@@ -227,7 +244,9 @@ def test_gear_still_passes_egress_after_doctrine_change(tmp_path):
     m = AnthropicModel()
     f = exp.rubric.frames[0]
     push = m.generate_push(exp, "frame", f.frame_code, stress=False)
-    turn = m.concierge_turn(exp.prompt, push, [("student", "I'd hold the line and not budge.")])
+    turn = m.concierge_turn(
+        exp.prompt, push, [("student", "I'd hold the line and not budge.")], voice=_voice(exp)
+    )
     assert bool(voice._performed(m, exp, turn) - voice._performed(m, exp, push)) is False
 
 
@@ -264,3 +283,28 @@ def test_close_does_not_ratify_an_off_track_analogy(tmp_path):
             "hasn't",
         )
     ), f"close did not flag the un-engaged decision (may have ratified the analogy): {close!r}"
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_ceo_and_cto_registers_diverge_and_neither_leaks_the_move():
+    """The CEO/CTO proof, operationalized: the SAME student reply through a CEO-tagged and a
+    CTO-tagged problem yields role idiom that diverges, and neither register names a move-word."""
+    from retnovation.content_loader import load_experience
+    from retnovation.web import voice
+
+    m = AnthropicModel()
+    ceo = load_experience("decision_under_stakes")
+    cto = load_experience("irreversible_anchor")
+    reply = [("student", "I'd just pick the obvious one and move on.")]
+
+    def _push(exp):
+        f = exp.rubric.frames[0]
+        return m.generate_push(exp, "frame", f.frame_code, stress=False)
+
+    t_ceo = voice.turn(m, ceo, _push(ceo), reply, "founder_ceo").lower()
+    t_cto = voice.turn(m, cto, _push(cto), reply, "founder_ceo").lower()
+    ceo_idiom = any(w in t_ceo for w in ("board", "market", "margin", "customer", "quarter"))
+    cto_idiom = any(w in t_cto for w in ("ship", "deploy", "field", "on call", "on-call", "team"))
+    assert ceo_idiom or cto_idiom, f"no role idiom surfaced:\nCEO {t_ceo!r}\nCTO {t_cto!r}"
+    for t in (t_ceo, t_cto):
+        assert not any(w in t for w in ("reversible", "rollback", "optionality"))
