@@ -40,8 +40,10 @@ two content-resolved facets off the *same* axis:
 One axis, two channels, so the register you *hear* and the atmosphere you *see* are always coherent. Both
 facets are **content** (L-1), resolved server-side; the voice facet feeds `model.concierge_*`, the visual
 facet (a small, public theme object) is served to the frontend. The engine is byte-untouched; the egress
-backstops every voice; and — load-bearing — **the entire presentation identity sits *above* the hidden
-frame** (§6), so theming carries zero moat cost.
+backstops every voice; and **the entire presentation identity sits *above* the per-problem move** — it
+reveals "which world," never "which move on this problem." That is a **bounded, corpus-dependent
+domain-location leak** of the Cartographer §4d family (the accepted-leak class), not zero — honest framing,
+detailed in §6.
 
 ## 3. Data model + resolution
 
@@ -49,8 +51,11 @@ frame** (§6), so theming carries zero moat cost.
   Graceful: unknown/missing posture falls back to `vera` (the single-voice floor), never raising.
 - **Role → register + atmosphere** from a new `Experience.role` (`"ceo" | "cto" | None`), loaded from the
   rubric YAML. `None` composes the base persona, no role layer.
-- **The profile** = `{ voice: <composed system text>, visual: <theme object> }`, resolved once per
-  (posture, exp). **Decided** (was open): `role` lives on `Experience`.
+- **The profile** = `{ voice: <composed system text>, visual: <theme object> }`, resolved in **two
+  phases** because role is only known after a problem is picked: **persona + subject at menu time**
+  (`posture` known, no `exp` yet), **+ role at problem-entry** (`exp`/`role` bound in `present()`). The menu
+  surface is therefore correctly persona/subject-themed and role-neutral; the role atmosphere arrives as you
+  enter a problem. **Decided** (was open): `role` lives on `Experience`.
 
 ## 4. The voice facet — rigidity fix + Vera's persona (the variety mechanism)
 
@@ -99,36 +104,53 @@ is validated against the `frame_detail` vocabulary of **every** problem tagged t
 The visual facet is the **same identity, seen**. It stacks across three scopes, built in stages that match
 the Cartographer's own ("nascent seed now, rich world later"):
 
-- **Persona = the guide's constant mark (now).** A small, consistent visual identity for Vera (mark,
+- **Persona = the guide's constant mark (build now).** A small, consistent visual identity for Vera (mark,
   typographic voice) so you always know who you're talking to — invariant across roles.
-- **Role = the room's atmosphere (now, light).** The chat surface is themed by the role's atmosphere — an
-  accent ramp + ambient palette (CEO = warm/boardroom; CTO = cool/systems) — pure CSS, driven by the
-  resolved theme object the API serves. This is the "build it now" layer (the founder-approved mockup:
-  one persona, two role-worlds, voice + atmosphere coherent).
-- **Subject = the world's biome (later, with the terrain).** As the Cartographer matures, the *world* themes
-  by subject — your founder-strategy territory vs your CS-systems territory as distinct biomes, so
-  multi-domain breadth becomes a felt, ownable artifact. **Now**, a light hook only: the nascent-seed
-  terrain reveal is tinted by the session's subject. The rich subject-biome 3D world is a later increment.
+- **Role = the room's atmosphere (build now, light).** The chat surface is themed by the role's atmosphere —
+  an accent ramp + ambient palette (CEO = warm/boardroom; CTO = cool/systems) — **pure frontend CSS over the
+  served theme; it touches only the chat surface, never the terrain.** This is the founder-approved mockup:
+  one persona, two role-worlds, voice + atmosphere coherent.
+- **Subject = the world's biome (STAGED, with the terrain — not now).** As the Cartographer matures, the
+  *world* themes by subject — your founder-strategy territory vs your CS-systems territory as distinct
+  biomes, so multi-domain breadth becomes a felt, ownable artifact. **Deferred from the now-layer**, for two
+  reasons the review surfaced: (a) at user-zero there is one subject and one nascent seed, so a subject tint
+  is a cosmetically **inert no-op wash** (consistent with §8a "don't glamour-shot the empty state"); (b)
+  "tint the reveal by subject" risks an implementer threading subject *per-region* through `terrain.py`,
+  re-opening the invertibility the just-shipped hardening (positional ids, bucketed vitality,
+  rename-invariance) closed. When it lands: a **session-level frontend wash keyed on the public `posture`**
+  is safe; any **per-region/biome** tint must pass the Cartographer §4b per-region density guard first
+  (mirroring the §5#5 hazard-cluster treatment) and the wire payload gains no subject/biome field.
 
 **The theme object (public, served to the frontend).** `resolve_presentation(...).visual` returns a small
-JSON theme: `{ persona_mark, accent_ramp, surface_tints, atmosphere_label }` — palette/identity only. The
-frontend (`web/static/index.html`) applies it via CSS variables. No engine call; no rubric; no frame.
+JSON theme: `{ persona_mark, accent_ramp, surface_tints, atmosphere_label }` — palette/identity only.
+`atmosphere_label` is drawn from a **fixed enum of world tokens** authored in `role_*.md` (e.g. `boardroom`,
+`systems`), never derived from a rubric/`frame_detail`. The frontend (`web/static/index.html`) applies it via
+CSS variables. **Delivered through the single `_emit` egress whitelist, built from `posture`/`role` only —
+never sourced from `ch.record`** (which holds the rubric); two-phase (§3): persona+subject on the
+session-start/menu payload, role atmosphere on the first `say` after `choose`.
 
-**L-13 layering (why the flashy layer is free).** The hidden thing is the **frame** (the move). Persona,
-subject, and role are **public**: the learner picks their domain; the problem prompt already reveals its
-setting (a shipping problem *is* a CTO setting); the persona is branding. They sit **above** the protected
-layer. So theming the surface by role and the world by subject **reveals nothing about the move** — the
-frame stays inside the lossy terrain projection + the egress. This is the *same* principle that keeps the
-voice register safe (world/setting = public; the move = hidden): the presentation identity is the *skin*,
-the frame is the *secret*. The visual facet therefore layers **on top of** the Cartographer's existing L-13
-protections (which guard the frame via the lossy projection + the per-region density guard, §4 of the
-Cartographer spec), never into them. Zero moat cost.
+**L-13 layering — the honest bound (NOT zero).** The hidden thing is the **frame** (the move on a problem).
+Persona, subject, and role are **public**: the learner picks their domain; the problem prompt already reveals
+its setting (a shipping problem *is* a CTO setting); the persona is branding. They sit **above** the
+per-problem move that L-13 protects on the live read — so the theme reveals nothing about the move on the
+problem in front of you, the same way the voice register does (world = public; the move = hidden). **But it
+is not zero-leak.** The role atmosphere is a *stable, machine-applied* 2-way signal (warm/cool) an observer
+can read **across** a session history without reading prompts — and on the thin current corpus that signal
+**correlates with frame-membership-sets** (e.g. `lead_with_what_you_refuse_to_do` and
+`commit_under_the_deadline` appear only under CEO-tagged problems, so "cool" is a negative signal for them).
+This is exactly the Cartographer's §4a corpus-dependence hazard on the role axis: a **bounded,
+corpus-dependent domain-location leak** of the §4d accepted-leak family — it reveals "which world / which
+frame-bucket," never "which move on this problem," and it **strengthens toward non-invertible as both role
+buckets fill with shared frames.** The honest claim is therefore the Cartographer's, not "free": the leak is
+bounded below the rate of genuine learning and shrinks with corpus growth. (The voice register's
+frame-orthogonality guard, §5, is the *voice* dual of this; §9 adds the *visual* dual.)
 
 **Coherence with the Cartographer.** The terrain's frame-protection (lossy projection, density guard,
-two-phase timing) is untouched. Subject-theming adds a *public* dimension (which biome) on top — like the
-Cartographer's accepted "depth-location is public, move-identity is hidden" (§4d there). Every future
-interactive feature inherits the resolved profile, so persona/subject/role coherence carries across the
-roadmap for free.
+two-phase timing) is **byte-untouched** — the now-layer visual is chat-surface-only and never reaches
+`terrain.py`/`learner_view()`. Subject-theming (the staged layer) adds a *public* dimension (which biome) on
+top, like §4d's "depth-location public, move-identity hidden," and is gated by §4b when per-region. Every
+future interactive feature inherits the resolved profile, so persona/subject/role coherence carries across
+the roadmap.
 
 ## 7. Composition + threading (engine untouched)
 
@@ -153,9 +175,13 @@ roadmap for free.
 - `session_runner.py`: bind `a = aim()`; thread `a.posture`; **add `posture` to `ch.record`** so the
   post-convergence `converse()`/`close()` resolve the **same** profile (voice + visual) — otherwise the
   identity flips at the convergence boundary.
-- `web/app.py` + `web/static/index.html`: the API serves the `visual` theme (on `menu`/`say`/`close`
-  payloads, or once at session start); the frontend applies it via CSS variables (persona mark + role
-  atmosphere) and tints the nascent-seed terrain reveal by subject. Public theme only; no frame.
+- `web/app.py` + `web/static/index.html`: the API serves the `visual` theme **through the single `_emit`
+  egress whitelist**, built from `posture`/`role` only and **never sourced from `ch.record`** (which holds
+  the rubric). Two-phase: **persona + subject** on the session-start/menu payload (`posture` known); **role
+  atmosphere** on the first `say` after `choose` (where `exp` is bound in `present()`). The frontend applies
+  the theme via CSS variables to the **chat surface only** (persona mark + role atmosphere). **The
+  now-layer does NOT touch the terrain reveal** — `terrain.py`/`learner_view()`/the wire payload are
+  byte-unchanged; subject/biome tint is the staged layer (§6).
 
 Frame-blindness is *semantic*: persona/role/craft carry no `frame_code` and no paraphrase of a
 `frame_detail` they touch; the visual theme carries only palette/identity. Bridge transparency is
@@ -168,8 +194,12 @@ unaffected (`FakeModel.concierge_turn` echoes the push regardless of `voice`).
   the frontend.
 - **Comprehension gear preserved** on the turn AND converse paths (string-presence tests).
 - **Moat / L-13 (semantic, both channels):** voice carries no frame paraphrase; the visual theme is
-  palette/identity only — persona/subject/role are public, above the frame; the terrain's frame-protection
-  is untouched.
+  palette/identity only (no `frame_code`/rubric/`veldra:` ref; `atmosphere_label` from a fixed enum) —
+  persona/subject/role are public, above the per-problem move. The residual role-atmosphere↔frame-set
+  correlation is an **accepted, corpus-dependent, shrinking** leak (§6), not zero.
+- **Terrain byte-untouched in the now-layer:** the role/persona theme is applied **frontend-only** to the
+  chat surface; `terrain.py`, `regions_to_view`, `learner_view()`, and the wire payload gain no
+  subject/biome field. (The staged per-biome tint, when it lands, passes the §4b density guard.)
 - **Persona mark constant** across roles within a subject (the guide is recognizable).
 - **Bridge transparency:** `test_runner_assessment_equals_direct_run_session` stays green.
 - **Graceful floor:** a `None` role / unknown posture composes a valid profile (voice + a default theme),
@@ -182,10 +212,16 @@ unaffected (`FakeModel.concierge_turn` echoes the push regardless of `voice`).
   three gear behaviors; **no `frame_code` and no role/persona/exemplar content-word shares with any
   `frame_detail` it touches** (lexical guard over the full tagged set); `model.concierge_*` accept `voice`
   and it reaches the request; egress + transparency stay green.
-- **Offline (visual):** `resolve_presentation(...).visual` returns a theme with the expected public keys and
-  **no frame_code / no rubric / no `veldra:` ref**; the persona mark is identical across a CEO-tagged and a
-  CTO-tagged experience (constant guide); a CEO vs CTO experience yields **different** atmospheres; the
-  frontend renders the theme (a thin DOM/CSS-variable assertion or an index.html shape check).
+- **Offline (visual):** `resolve_presentation(...).visual` keys are exactly
+  `{persona_mark, accent_ramp, surface_tints, atmosphere_label}` with **no `frame_code` / no rubric / no
+  `veldra:` ref**, `atmosphere_label` ∈ the fixed enum, and the theme is **not sourced from `ch.record`**
+  (no rubric/exp field reachable); the **persona mark is identical** across a CEO- and a CTO-tagged
+  experience (constant guide); the theme is **two-phase** (menu payload carries persona+subject, no role;
+  the post-`choose` `say` carries role). Note: that a CEO vs CTO experience yields *different* atmospheres is
+  the intended behavior — it is **not** asserted as "safe," because that divergence *is* the bounded §6 leak;
+  the safety assertion is the frame-free/enum/whitelist checks above, plus the visual dual of the lexical
+  guard: **no theme field is a function of `frame_code`** (trivially true since it keys on `role`), recorded
+  alongside the accepted role↔frame-set residual.
 - **@live (the real proof):** CEO vs CTO authored turns have **disjoint idiom-token sets** and neither leaks
   a frame paraphrase (judge); sentence-shape **variety** across N>2 turns; multi-turn engine-free converse
   judged for *cumulative* leak under each role.
@@ -196,10 +232,13 @@ unaffected (`FakeModel.concierge_turn` echoes the push regardless of `voice`).
 ## 10. Scope — build now vs. stage
 
 - **Build now:** the voice facet (rigidity fix + persona + CEO/CTO registers) AND the **light visual layer**
-  (persona mark + role atmosphere themed surface from the served theme; subject-tinted nascent-seed reveal).
-- **Stage for later (with the terrain's maturation):** the subject-themed 3D world (founder vs CS biomes),
-  transfer/constellation theming, richer persona presence (avatar/motion). The CS persona is blocked on a CS
-  *open-ended* rubric existing (`cs_systems` is `path_type: domain`, no rubric).
+  — persona mark + role atmosphere themed onto the **chat surface only**, from the served theme. (No terrain
+  touch.)
+- **Stage for later (with the terrain's maturation):** the **subject-themed world** (founder vs CS biomes) —
+  deferred from now because it's inert at user-zero and risks the per-region terrain coupling (§6); a
+  session-level wash is safe when it lands, per-biome tint passes the §4b guard. Plus transfer/constellation
+  theming and richer persona presence (avatar/motion). The CS persona is blocked on a CS *open-ended* rubric
+  existing (`cs_systems` is `path_type: domain`, no rubric).
 - **Out of scope:** per-experience persona override; re-authoring the problem prompts; a voice post-filter
   (future fallback). `entry.md` is a 4th hardcoded "Vera" but its reply is discarded on the web path
   (`voice.gate` reads only `.entry_class`) — safe to leave, noted for the CS expansion.
@@ -217,8 +256,10 @@ unaffected (`FakeModel.concierge_turn` echoes the push regardless of `voice`).
 - **Register frame-orbiting:** the offline lexical guard + @live paraphrase judge; world-not-analysis keeps
   it orthogonal.
 - **Refactor drops the gear:** the relocation inventory + gear-presence tests on turn AND converse.
-- **Visual over-reach:** the now-layer is CSS theming only; the rich subject-world is explicitly staged, so
-  we don't ship a glamour shot over near-empty state (the Cartographer's own §8 discipline).
+- **Visual over-reach:** the now-layer is chat-surface CSS only; the subject-world is staged, so we don't
+  ship a glamour shot over near-empty state (the Cartographer's §8 discipline).
+- **Role-atmosphere domain leak (accepted):** the warm/cool tint correlates with frame-sets on a thin corpus
+  (§6) — bounded, corpus-dependent, shrinking; framed honestly (not "zero"), the §4d-family residual.
 
 ## 13. Review trail
 
@@ -231,5 +272,11 @@ resolver; exemplars on neutral stubs; composition order pinned; `entry.md`/`cs_s
 noted. **Cross-channel elevation (founder steer):** the design now resolves a presentation *profile* (voice
 + visual facets) off one axis; the visual facet (persona mark + role atmosphere now, subject-themed world
 later) is L-13-safe because persona/subject/role sit above the frame (the same world-not-the-move principle
-as the register), layering on top of the Cartographer's frame-protection, not into it. Architecture and the
-founder's decisions unchanged.
+as the register), layering on top of the Cartographer's frame-protection, not into it. **Visual-facet
+review (1 focused lens, SHIP-WITH-FIXES) folded:** dropped the overclaimed "zero moat cost" for an honest
+bounded/corpus-dependent domain-location leak (the role-atmosphere↔frame-set correlation, §4a/§4d family);
+**deferred the subject-tint** from the now-layer (inert at user-zero + per-region terrain-coupling risk),
+making the now-layer chat-surface-only; theme delivered via the `_emit` whitelist from public fields,
+**two-phase** (persona+subject at menu, role at problem-entry); `atmosphere_label` constrained to a fixed
+enum; an explicit "terrain byte-untouched, tint frontend-only" invariant; the §9 offline check no longer
+*certifies* the CEO/CTO divergence as safe. Architecture and the founder's decisions unchanged.
