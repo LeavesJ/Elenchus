@@ -71,6 +71,8 @@ class Model(Protocol):
         self, prompt: str, opening: str, recent: list[tuple[str, str]]
     ) -> "EntryClassification": ...
     def echo_push(self, push_text: str, recent: list[tuple[str, str]]) -> str: ...
+    def concierge_turn(self, problem: str, push: str, recent: list[tuple[str, str]]) -> str: ...
+    def concierge_close(self, problem: str, recent: list[tuple[str, str]]) -> str: ...
     def screen_moves(self, moves: list[str], text: str) -> "EgressScreen": ...
 
 
@@ -128,6 +130,12 @@ class FakeModel:
 
     def echo_push(self, push_text: str, recent: list[tuple[str, str]]) -> str:
         return push_text  # identity: the engine's canonical push is what the user sees
+
+    def concierge_turn(self, problem, push, recent):
+        return push or "take a real position"  # probe: echo the brief; reinvite: a safe invite
+
+    def concierge_close(self, problem, recent):
+        return "[close synthesis]"
 
     def check_injection_expressed(self, injection: str, framed_output: str) -> InjectionExpressed:
         # Safe by default; voice tests that need a leak use FakeLeakModel (Task 2).
@@ -360,6 +368,48 @@ class AnthropicModel:
             if getattr(block, "type", None) == "text":
                 return block.text
         return push_text  # no text block -> fall back to the canonical push (never raise here)
+
+    def concierge_turn(self, problem: str, push: str, recent: list[tuple[str, str]]) -> str:
+        # Frame-blind: the problem + dialogue + the engine's SAFE push only (never rubric internals).
+        system = load_prompt("concierge")
+        brief = (
+            f"Next angle to pursue (turn it into a question; never state it):\n{push}"
+            if push
+            else "The student has not taken a real position yet — acknowledge what they said and invite one."
+        )
+        user = f"Problem:\n{problem}\n\n{_render_turns(recent)}{brief}"
+        resp = self._get_client().messages.create(
+            model=self._model,
+            max_tokens=_ECHO_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            **_PARAMS,
+        )
+        if getattr(resp, "stop_reason", None) == "refusal":
+            return ""  # never block the loop; voice falls back to the push or a safe contract
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        return ""
+
+    def concierge_close(self, problem: str, recent: list[tuple[str, str]]) -> str:
+        system = load_prompt(
+            "concierge_close"
+        )  # frame-blind: dialogue only, reflect reasoning back
+        user = f"Problem:\n{problem}\n\n{_render_turns(recent)}Write the closing synthesis."
+        resp = self._get_client().messages.create(
+            model=self._model,
+            max_tokens=_ECHO_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            **_PARAMS,
+        )
+        if getattr(resp, "stop_reason", None) == "refusal":
+            return ""
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        return ""
 
     def grade_answer(
         self, exp: Experience, question: CheckableQuestion, answer: str

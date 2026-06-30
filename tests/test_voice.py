@@ -238,3 +238,57 @@ def test_echo_push_is_frame_blind_and_returns_text():
     assert "lead_with_what_you_refuse_to_do" not in blob and "Rubric" not in blob
     # the canonical push IS the input to re-voice
     assert "Which mistake can you walk back?" in blob
+
+
+class _RefusingClient(_StubClient):
+    def create(self, **kw):
+        self.last = kw
+        return _Resp(content=[], stop_reason="refusal")
+
+
+def test_concierge_turn_is_frame_blind_and_returns_text():
+    stub = _StubClient(
+        text="You said data settles it — but whose audit do they trust when it is your number?"
+    )
+    m = AnthropicModel(client=stub)
+    out = m.concierge_turn(
+        "The pricing problem text.",
+        "Which mistake here can you actually walk back?",
+        [("student", "Verifiable audits and data are what's essential.")],
+    )
+    assert out.startswith("You said data settles it")
+    blob = str(stub.last)
+    assert (
+        "lead_with_what_you_refuse_to_do" not in blob
+        and "frame_detail" not in blob
+        and "Rubric" not in blob
+    )
+    # the safe push (brief) and the problem ARE inputs
+    assert (
+        "Which mistake here can you actually walk back?" in blob
+        and "The pricing problem text." in blob
+    )
+
+
+def test_concierge_turn_reinvite_mode_has_no_brief():
+    stub = _StubClient(text="That is a fair worry — but what would you actually do, and why?")
+    m = AnthropicModel(client=stub)
+    out = m.concierge_turn("Problem P.", "", [("student", "what do you want from me")])
+    assert out.startswith("That is a fair worry")
+    assert "what do you want from me" in str(stub.last)
+
+
+def test_concierge_close_is_frame_blind_and_returns_text():
+    stub = _StubClient(
+        text="You committed to holding the line and bet on data; you are exposed if the audit is contested."
+    )
+    m = AnthropicModel(client=stub)
+    out = m.concierge_close("Problem P.", [("student", "I'd hold and rely on audits.")])
+    assert out.startswith("You committed to holding the line")
+    blob = str(stub.last)
+    assert "frame_detail" not in blob and "Rubric" not in blob
+
+
+def test_concierge_turn_refusal_returns_empty():
+    m = AnthropicModel(client=_RefusingClient())
+    assert m.concierge_turn("P", "brief", [("student", "x")]) == ""
