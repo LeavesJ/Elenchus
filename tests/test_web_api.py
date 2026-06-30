@@ -137,3 +137,27 @@ def test_index_html_is_a_chat_shell():
     assert 'id="thread"' in html and 'id="composer"' in html  # chat thread + sticky composer
     assert "your terrain begins" not in html  # the stacked 4-block framing is gone
     assert "veldra" not in html.lower()  # no leak in the static shell
+
+
+def test_converse_and_close_endpoints(tmp_path, make_fake):
+    app = create_app(db_path=str(tmp_path / "ce.db"), model_factory=make_fake)
+    client = TestClient(app)
+    _, r = _choose_anchor(client)
+    r = client.post(
+        "/api/session/s/say", json={"text": "reasoning that already holds the move"}
+    ).json()
+    while r["kind"] == "say":
+        r = client.post("/api/session/s/say", json={"text": "mechanism"}).json()
+    assert r["kind"] == "done"
+
+    # blank converse is nudged (D1 guard), never reaches the model
+    assert client.post("/api/session/s/converse", json={"text": ""}).json()["kind"] == "nudge"
+    cv = client.post("/api/session/s/converse", json={"text": "what if I'm wrong?"}).json()
+    assert cv["kind"] == "say" and cv["text"]
+
+    cl = client.post("/api/session/s/close").json()
+    assert cl["kind"] == "close" and isinstance(cl["close"], str)
+    assert isinstance(cl["terrain"], list)
+    for row in cl["terrain"]:
+        assert set(row) == {"region_id", "render", "vitality"}  # L-13-safe wire shape
+        assert "embed_credentials_as_a_list" not in str(row)

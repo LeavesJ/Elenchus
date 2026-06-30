@@ -45,6 +45,8 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
         return {"kind": "say", "text": data["text"]}
     if tag == "done":  # terrain deferred for the MVP; the conversational close is the payoff
         return {"kind": "done", "close": data.get("close", "")}
+    if tag == "close":  # user-driven end: the honest close + the frozen-at-convergence terrain
+        return {"kind": "close", "close": data.get("close", ""), "terrain": data.get("terrain", [])}
     return {"kind": "error", "message": data.get("message", "")}
 
 
@@ -76,5 +78,15 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
         if not body.text.strip():
             return _BLANK_NUDGE  # blank input never reaches the engine (D1 guard)
         return _emit(reg, *reg.step(_SID, body.text))
+
+    @app.post("/api/session/{sid}/converse")
+    def converse(sid: str, body: _Text):
+        if not body.text.strip():
+            return _BLANK_NUDGE  # blank never reaches the model (D1 guard); engine-free path
+        return _emit(reg, *reg.converse(_SID, body.text))
+
+    @app.post("/api/session/{sid}/close")
+    def close_session(sid: str):
+        return _emit(reg, *reg.close(_SID))
 
     return app

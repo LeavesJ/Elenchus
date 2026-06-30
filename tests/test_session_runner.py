@@ -218,3 +218,28 @@ def test_gate_does_not_duplicate_current_message_in_recent(tmp_path):
     assert opening == "my opening position"
     flat = [opening] + [t for _, t in recent]
     assert flat.count("my opening position") == 1  # appears once, not duplicated into recent
+
+
+def test_converse_and_close_work_after_done_without_the_worker(tmp_path, make_fake):
+    """Post-convergence is engine-free: the worker is terminal (step errors), yet converse — served
+    from the persisted record — succeeds, and close returns the honest close + the frozen terrain."""
+    reg = SessionRegistry(str(tmp_path / "cv.db"), model_factory=make_fake)
+    tag, _ = reg.start("scv", now=NOW)
+    menu_idx = reg.menu_index("scv", _ANCHOR)
+    tag, _ = reg.step("scv", menu_idx)
+    tag, data = reg.step("scv", "reasoning that already holds the move")
+    while tag == "say":
+        tag, data = reg.step("scv", "mechanism")
+    assert tag == "done"
+
+    # the worker is terminal: step errors, but converse (engine-free, from the record) succeeds
+    assert reg.step("scv", "more")[0] == "error"
+    tag_c, data_c = reg.converse("scv", "but what about the long run?")
+    assert tag_c == "say" and isinstance(data_c["text"], str) and data_c["text"]
+
+    # the user-owned close returns the honest close + the frozen, frame-blind terrain
+    tag_cl, data_cl = reg.close("scv")
+    assert tag_cl == "close" and "close" in data_cl and isinstance(data_cl["terrain"], list)
+    for blob in (data_c["text"], data_cl["close"], str(data_cl["terrain"])):
+        assert "embed_credentials_as_a_list" not in blob
+        assert "choose_the_failure_default_deliberately" not in blob

@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from ..aim import aim, derive_core
 from ..cli import build_store
 from ..orchestration import run_session
+from ..terrain import project_terrain
 from ..types import EntryClass, Outcome, Regime, Selection, Work
 from . import voice
 
@@ -24,6 +25,7 @@ class _Channel:
         self.last_menu: list[str] = []
         self.last_menu_refs: list[str] = []  # server-side only (menu_index); never sent to client
         self.terminal: bool = False
+        self.record: dict | None = None  # post-convergence: model+exp+recent+terrain (engine-free)
 
 
 class SessionRegistry:
@@ -112,6 +114,16 @@ class SessionRegistry:
                     decide=decide,
                     decide_core=lambda c: [],
                 )
+                if captured:
+                    # Persist the record BEFORE queuing done (and before store.close in finally) so
+                    # it is live the instant the client can request converse/close. Holds the rubric
+                    # (in exp) server-side for the egress screen; never serialized to the client.
+                    ch.record = {
+                        "model": model,
+                        "exp": captured["exp"],
+                        "recent": captured["recent"],
+                        "terrain": project_terrain(state, now).learner_view(),
+                    }
                 close_text = (
                     voice.close(model, captured["exp"], captured["recent"]) if captured else ""
                 )
@@ -148,3 +160,23 @@ class SessionRegistry:
 
     def menu_index(self, session_id: str, ledger_ref: str) -> int:
         return self._ch[session_id].last_menu_refs.index(ledger_ref)
+
+    def converse(self, session_id: str, value) -> tuple[str, dict]:
+        """Post-convergence engaged turn — engine-free, served from the record; never touches the
+        terminal-guarded worker queue. Appends both turns so the next converse sees the full thread."""
+        rec = self._ch[session_id].record
+        if rec is None:
+            return ("error", {"message": "session has not converged"})
+        reply = voice.converse(rec["model"], rec["exp"], rec["recent"], value)
+        rec["recent"].append(("student", value))
+        rec["recent"].append(("Vera", reply))
+        return ("say", {"text": reply})
+
+    def close(self, session_id: str) -> tuple[str, dict]:
+        """User-owned close: author the honest close from the FULL dialogue (incl. post-convergence
+        turns) and return it with the frozen-at-convergence terrain. Engine-free; no step()."""
+        rec = self._ch[session_id].record
+        if rec is None:
+            return ("error", {"message": "session has not converged"})
+        close_text = voice.close(rec["model"], rec["exp"], rec["recent"])
+        return ("close", {"close": close_text, "terrain": rec["terrain"]})
