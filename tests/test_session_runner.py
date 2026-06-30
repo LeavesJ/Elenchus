@@ -65,7 +65,8 @@ def test_runner_assessment_equals_direct_run_session(tmp_path, make_fake, steer)
     while tag == "say":  # each probe is a display-only "say"
         tag, data = reg.step("s1", "mechanism")
     assert tag == "done"
-    assert "close" in data  # the conversational close is authored on completion
+    # close moved to the user-owned /close path; the done payload still carries the assessment, and
+    # bridge transparency (assessment byte-equality) is unchanged.
     runner_assess = data["assessment"]
     assert (
         runner_assess.model_dump() == direct_assess.model_dump()

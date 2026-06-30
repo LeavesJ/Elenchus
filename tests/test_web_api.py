@@ -46,12 +46,16 @@ def test_full_session_and_l13_surface(tmp_path, make_fake):
         seen.append(r["text"])
         r = client.post("/api/session/s/say", json={"text": "mechanism"}).json()
 
-    assert r["kind"] == "done"
-    assert "close" in r and isinstance(r["close"], str)
-    assert "terrain" not in r  # deferred for the MVP
-    seen.append(r["close"])
+    assert r["kind"] == "done" and r.get("terminal") is True
+    assert "close" not in r  # the engine's 'done' no longer closes — the user owns the exit
+    # the user ends the session -> honest close + the (now SURFACED) frozen terrain
+    cl = client.post("/api/session/s/close").json()
+    assert cl["kind"] == "close" and isinstance(cl["close"], str)
+    assert isinstance(cl["terrain"], list)
+    seen.append(cl["close"])
+    seen.append(str(cl["terrain"]))
 
-    # L-13: no frame_code substring must appear in any dialogue payload (says + close)
+    # L-13: no frame_code substring must appear in any dialogue payload (says + close + terrain)
     for blob in seen:
         assert "embed_credentials_as_a_list" not in blob
         assert "choose_the_failure_default_deliberately" not in blob
@@ -137,6 +141,8 @@ def test_index_html_is_a_chat_shell():
     assert 'id="thread"' in html and 'id="composer"' in html  # chat thread + sticky composer
     assert "your terrain begins" not in html  # the stacked 4-block framing is gone
     assert "veldra" not in html.lower()  # no leak in the static shell
+    assert "/converse" in html and "End session" in html  # user-owned closure surface
+    assert "Your read is recorded" not in html  # the engine no longer stamps closure
 
 
 def test_converse_and_close_endpoints(tmp_path, make_fake):

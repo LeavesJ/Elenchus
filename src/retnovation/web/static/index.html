@@ -25,6 +25,13 @@
   #composer button{background:#155e63;color:#eafffb;border:0;border-radius:11px;padding:0 18px;font:inherit;cursor:pointer}
   #composer button:disabled{opacity:.5;cursor:default}
   #composer[hidden]{display:none}
+  .terrain{align-self:center;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin:10px 0 2px}
+  .node{width:18px;height:18px;border-radius:50%;background:#0f3a3f;box-shadow:0 0 6px #155e63}
+  .node.v2{background:#1d6f6f;box-shadow:0 0 12px #2bd4c4}
+  .node.v3{background:#2bd4c4;box-shadow:0 0 18px #5eead4}
+  .end{align-self:center;margin-top:8px;background:#0f1a2b;border:1px solid #2b4a6b;color:#cfe;
+    border-radius:10px;padding:8px 16px;font:inherit;cursor:pointer}
+  .end:disabled{opacity:.5;cursor:default}
 </style></head>
 <body><div id="wrap">
   <div id="thread"></div>
@@ -38,6 +45,7 @@ const thread = document.getElementById('thread');
 const composer = document.getElementById('composer');
 const input = document.getElementById('input');
 const send = document.getElementById('send');
+let mode='engine';  // 'engine' -> /say (gate + probes); 'converse' -> /converse (post-convergence)
 const post = (url, body) => fetch(url, {method:'POST', headers:{'content-type':'application/json'},
   body: body?JSON.stringify(body):null}).then(r=>r.json());
 const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -68,16 +76,35 @@ async function choose(i, menuEl){
 }
 function advance(r){
   if(r.kind==='say'){ bubble('vera', r.text); showComposer(true); return; }
-  if(r.kind==='done'){ if(r.close) bubble('vera', r.close); muted('Your read is recorded.'); showComposer(false); return; }
+  if(r.kind==='done'){ mode='converse'; showComposer(true); endButton(); return; }
+  if(r.kind==='close'){ renderClose(r); return; }
   if(r.kind==='nudge'){ muted(r.message); showComposer(true); return; }
   muted('error: '+(r.message||'')); showComposer(true);
+}
+function endButton(){
+  const b=document.createElement('button'); b.className='end'; b.type='button'; b.textContent='End session';
+  b.onclick=async()=>{ b.disabled=true; const t=thinking();
+    try{ const r=await post('/api/session/single/close'); t.remove(); renderClose(r); }
+    catch(_){ t.remove(); b.disabled=false; muted('connection lost — try again.'); } };
+  thread.appendChild(b); thread.scrollTop=thread.scrollHeight;
+}
+function renderClose(r){ if(r.close) bubble('vera', r.close); renderTerrain(r.terrain||[]); showComposer(false); }
+function renderTerrain(regions){
+  const rendered=regions.filter(x=>x.render==='rendered');
+  const wrap=document.createElement('div'); wrap.className='terrain';
+  rendered.forEach(x=>{ const n=document.createElement('span'); n.className='node v'+(x.vitality||1); wrap.appendChild(n); });
+  if(rendered.length) thread.appendChild(wrap);
+  muted(rendered.length ? (rendered.length+' area'+(rendered.length===1?'':'s')+' have taken shape.')
+                        : 'A seed was planted — it grows as you work more.');
+  thread.scrollTop=thread.scrollHeight;
 }
 composer.addEventListener('submit', async e=>{
   e.preventDefault();
   const text=input.value.trim(); if(!text) return;
   bubble('you', text); input.value=''; input.disabled=true; send.disabled=true;
   const t=thinking();
-  try { const r=await post('/api/session/single/say',{text}); t.remove(); advance(r); }
+  const url = mode==='converse' ? '/api/session/single/converse' : '/api/session/single/say';
+  try { const r=await post(url,{text}); t.remove(); advance(r); }
   catch(err){ t.remove(); muted('connection lost — is the server still running? try again.'); showComposer(true); }
 });
 input.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); composer.requestSubmit(); } });

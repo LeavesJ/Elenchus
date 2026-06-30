@@ -117,19 +117,17 @@ class SessionRegistry:
                 if captured:
                     # Persist the record BEFORE queuing done (and before store.close in finally) so
                     # it is live the instant the client can request converse/close. Holds the rubric
-                    # (in exp) server-side for the egress screen; never serialized to the client.
+                    # (in exp) server-side for the egress screen; never serialized to the client. The
+                    # close is no longer authored here — it moves to the user-owned /close path.
                     ch.record = {
                         "model": model,
                         "exp": captured["exp"],
                         "recent": captured["recent"],
                         "terrain": project_terrain(state, now).learner_view(),
                     }
-                close_text = (
-                    voice.close(model, captured["exp"], captured["recent"]) if captured else ""
-                )
-                ch.from_worker.put(
-                    ("done", {"state": state, "assessment": assessment, "close": close_text})
-                )
+                # The engine converged — but the SESSION does not end here. 'done' is an internal
+                # signal; the user owns closure (converse/close serve the rest from the record).
+                ch.from_worker.put(("done", {"state": state, "assessment": assessment}))
             except Exception as e:  # surface, never hang the client
                 ch.from_worker.put(("error", {"message": repr(e)}))
             finally:

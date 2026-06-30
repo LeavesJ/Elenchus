@@ -43,8 +43,8 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
         return {"kind": "menu", "problems": data["problems"]}
     if tag == "say":  # every Concierge-authored visible turn (opening, re-invite, probe)
         return {"kind": "say", "text": data["text"]}
-    if tag == "done":  # terrain deferred for the MVP; the conversational close is the payoff
-        return {"kind": "done", "close": data.get("close", "")}
+    if tag == "done":  # the engine converged — but the SESSION does not end; the user owns closure
+        return {"kind": "done", "terminal": True}
     if tag == "close":  # user-driven end: the honest close + the frozen-at-convergence terrain
         return {"kind": "close", "close": data.get("close", ""), "terrain": data.get("terrain", [])}
     return {"kind": "error", "message": data.get("message", "")}
