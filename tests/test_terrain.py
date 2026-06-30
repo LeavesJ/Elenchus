@@ -85,3 +85,45 @@ def test_connected_components_are_transitive():
     view = project_terrain(state, NOW)
     assert len(view.regions) == 1
     assert set(view.regions[0].frame_codes) == {"A", "B", "C"}
+
+
+def test_learner_view_is_non_invertible_under_frame_rename():
+    # A frame-code RENAME (strengths + problem structure fixed) must leave learner_view byte-identical:
+    # the wire carries no frame identity. (Node COUNT remains an accepted coarse-shape residual, §6.)
+    state = LearnerState(
+        frames={
+            "embed": _fs(Strength.strong, ["P1", "P2"]),
+            "choose_failure": _fs(Strength.forming, ["P1"]),
+        }
+    )
+    renamed = LearnerState(
+        frames={
+            "zzz_other": _fs(Strength.strong, ["P1", "P2"]),
+            "aaa_renamed": _fs(Strength.forming, ["P1"]),
+        }
+    )
+    v1 = project_terrain(state, NOW).learner_view()
+    v2 = project_terrain(renamed, NOW).learner_view()
+    assert v1 == v2  # rename invariant -> non-invertible wire
+
+    row = v1[0]
+    assert set(row) == {"region_id", "render", "vitality"}  # exactly the L-13-safe keys
+    assert row["region_id"] == "r0"  # positional ordinal, not the old 5-digit frame hash
+    assert "frame_codes" not in row
+    assert row["vitality"] in (None, 1, 2, 3)  # coarse bucket, not the raw mean
+
+
+def test_learner_view_orders_by_public_vitality_not_frame_order():
+    # Two disjoint rendered regions of different vitality: the brighter sorts first (r0), by PUBLIC
+    # vitality — independent of the frame codes' alphabetical order (a_weak* sorts before z_strong*).
+    state = LearnerState(
+        frames={
+            "z_strong_a": _fs(Strength.strong, ["P1", "P2"]),
+            "z_strong_b": _fs(Strength.strong, ["P1", "P2"]),  # region: vit 1.0 -> bucket 3
+            "a_weak_a": _fs(Strength.weak, ["P8", "P9"]),
+            "a_weak_b": _fs(Strength.weak, ["P8", "P9"]),  # region: vit 0.2 -> bucket 1
+        }
+    )
+    rows = project_terrain(state, NOW).learner_view()
+    assert [r["region_id"] for r in rows] == ["r0", "r1"]
+    assert rows[0]["vitality"] == 3 and rows[1]["vitality"] == 1  # brighter first

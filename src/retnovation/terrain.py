@@ -58,7 +58,7 @@ def project_terrain(
         )
         regions.append(
             Region(
-                region_id=f"r{abs(hash(tuple(comp))) % 100000:05d}",
+                region_id="",  # assigned positionally in regions_to_view (L-13: never frame-derived)
                 frame_codes=comp,
                 problems=sorted(problems),
                 vitality=vitality,
@@ -69,4 +69,13 @@ def project_terrain(
 
 
 def regions_to_view(regions: list[Region]) -> TerrainView:
-    return TerrainView(regions=sorted(regions, key=lambda r: r.region_id))
+    # L-13 wire ordering: order by PUBLIC signal only — rendered before seed, then vitality
+    # descending — so a node's POSITION carries no frame information (a frame-code rename leaves the
+    # learner_view payload identical). region_id is then a positional ordinal, never a hash of the
+    # frame set. Tied/seed order and the node COUNT remain an accepted coarse-shape residual (§6).
+    ordered = sorted(
+        regions, key=lambda r: (r.render is not RegionRender.rendered, -(r.vitality or 0.0))
+    )
+    return TerrainView(
+        regions=[r.model_copy(update={"region_id": f"r{i}"}) for i, r in enumerate(ordered)]
+    )

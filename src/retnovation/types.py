@@ -491,13 +491,30 @@ class Region(BaseModel):
     render: RegionRender
 
 
+def _vitality_bucket(v: float | None) -> int | None:
+    """Coarse 3-level wire bucket (None stays None for seeds). The exact mean would leak the strength
+    distribution; the >=2-frame blend (not the bucket) is what makes vitality non-invertible (L-13)."""
+    if v is None:
+        return None
+    if v < 0.5:
+        return 1
+    if v < 0.83:
+        return 2
+    return 3
+
+
 class TerrainView(BaseModel):
     regions: list[Region]
 
     def learner_view(self) -> list[dict]:
-        # L-13: never expose frame_codes to the learner; only an opaque id + render + (coarse) vitality
+        # L-13: never expose frame_codes; only an opaque POSITIONAL id + render + a COARSE vitality
+        # bucket. region_id is assigned positionally in regions_to_view (never a function of frames).
         return [
-            {"region_id": r.region_id, "render": r.render.value, "vitality": r.vitality}
+            {
+                "region_id": r.region_id,
+                "render": r.render.value,
+                "vitality": _vitality_bucket(r.vitality),
+            }
             for r in self.regions
         ]
 
