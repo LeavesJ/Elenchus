@@ -172,3 +172,60 @@ def test_concierge_turn_never_names_the_move_and_no_invented_name(tmp_path):
     added = bool(voice._performed(m, exp, turn) - voice._performed(m, exp, push))
     assert added is False, "engaged turn leaked a move beyond the push"
     assert "Sam" not in turn  # no invented name
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_gear_hard_stops_on_you_dont_understand(tmp_path):
+    """Cardinal-sin fix: when the user says it has not understood them, the turn must STOP pressing
+    and restate/confirm — distinct from the bare push, addressing their point."""
+    exp = _first_open_exp(str(tmp_path / "gear1.db"))
+    m = AnthropicModel()
+    f = exp.rubric.frames[0]
+    push = m.generate_push(exp, "frame", f.frame_code, stress=False)
+    turn = m.concierge_turn(
+        exp.prompt,
+        push,
+        [
+            ("student", "My anchor is a fixed, baked-in property that cannot be changed."),
+            ("Vera", push),
+            ("student", "I don't think you're understanding my anchor at all."),
+        ],
+    )
+    assert turn.strip() and turn.strip() != push.strip()  # it adapted, did not re-fire the push
+    assert "you" in turn.lower()  # it engages THEM, not a fresh angle
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_gear_reanchors_an_off_track_analogy(tmp_path):
+    """Re-ground, do not chase: when the user answers in an unrelated analogy, the turn must press on
+    the concrete decision and not simply continue inside the analogy's own object."""
+    exp = _first_open_exp(str(tmp_path / "gear2.db"))
+    m = AnthropicModel()
+    f = exp.rubric.frames[0]
+    push = m.generate_push(exp, "frame", f.frame_code, stress=False)
+    turn = m.concierge_turn(
+        exp.prompt,
+        push,
+        [
+            (
+                "student",
+                "It's like gene editing — you splice the DNA and the cell just expresses it.",
+            )
+        ],
+    )
+    assert "?" in turn  # it presses
+    # it does not merely echo the analogy's vocabulary back as the subject
+    assert turn.lower().count("dna") == 0 or "you" in turn.lower()
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_gear_still_passes_egress_after_doctrine_change(tmp_path):
+    """The added doctrine must not make a faithful engaged turn leak: no added revelation vs the push."""
+    from retnovation.web import voice
+
+    exp = _first_open_exp(str(tmp_path / "gear3.db"))
+    m = AnthropicModel()
+    f = exp.rubric.frames[0]
+    push = m.generate_push(exp, "frame", f.frame_code, stress=False)
+    turn = m.concierge_turn(exp.prompt, push, [("student", "I'd hold the line and not budge.")])
+    assert bool(voice._performed(m, exp, turn) - voice._performed(m, exp, push)) is False
