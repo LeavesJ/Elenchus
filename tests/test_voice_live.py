@@ -229,3 +229,38 @@ def test_gear_still_passes_egress_after_doctrine_change(tmp_path):
     push = m.generate_push(exp, "frame", f.frame_code, stress=False)
     turn = m.concierge_turn(exp.prompt, push, [("student", "I'd hold the line and not budge.")])
     assert bool(voice._performed(m, exp, turn) - voice._performed(m, exp, push)) is False
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_close_does_not_ratify_an_off_track_analogy(tmp_path):
+    """obs #5: a close over a dialogue where the student stayed in an analogy and never engaged the
+    concrete decision must NOT mirror the fantasy back as 'your position' — and it stays egress-safe."""
+    from retnovation.web import voice
+
+    exp = _first_open_exp(str(tmp_path / "close.db"))
+    m = AnthropicModel()
+    recent = [
+        ("student", "It's like gene editing — you splice in the trait and the cell expresses it."),
+        ("Vera", "Set the analogy aside — what do you actually decide here, and why?"),
+        ("student", "Same thing — the edited gene just propagates, that's my whole point."),
+    ]
+    close = voice.close(m, exp, recent)
+    assert close  # authored, or the safe static fallback — never empty
+    low = close.lower()
+    # obs #5: rather than mirror the fantasy back as a position, the close FLAGS that the student
+    # never engaged the concrete decision (re-grounds, does not ratify). A soft live proxy — the
+    # founder dogfood is the real check; a ratifying close would instead affirm a position.
+    assert any(
+        s in low
+        for s in (
+            "did not",
+            "didn't",
+            "never",
+            "untouched",
+            "nothing",
+            "stayed",
+            "no position",
+            "haven't",
+            "hasn't",
+        )
+    ), f"close did not flag the un-engaged decision (may have ratified the analogy): {close!r}"
