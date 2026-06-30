@@ -129,3 +129,11 @@ def test_low_signal_opening_gets_a_reinvite_then_real_opening_proceeds(tmp_path)
         "/api/session/s/say", json={"text": "reasoning that already holds the move"}
     ).json()
     assert r["kind"] in ("say", "done")
+
+
+def test_index_html_is_a_chat_shell():
+    client = TestClient(create_app(db_path=":memory:", model_factory=None))
+    html = client.get("/").text
+    assert 'id="thread"' in html and 'id="composer"' in html  # chat thread + sticky composer
+    assert "your terrain begins" not in html  # the stacked 4-block framing is gone
+    assert "veldra" not in html.lower()  # no leak in the static shell
