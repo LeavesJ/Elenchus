@@ -37,14 +37,26 @@
   re-anchor / egress-after-doctrine all pass; the existing engagement / objection / no-leak / no-name moat
   suite + golden-set all green; egress truncation gone. Health smoke: documented launch
   (`PYTHONPATH=src .venv/bin/python -m retnovation.web`) boots, `GET /api/health → {"ok":true}`, `GET / → 200`
-  serving the converse-mode surface. Per-task OPUS reviews: T1 APPROVED, T4 APPROVED-WITH-MINORS (one fence
-  applied, one fail-closed note deferred), closure review in flight at write time.
+  serving the converse-mode surface. **Reviews:** per-task OPUS — T1 APPROVED, T4 APPROVED-WITH-MINORS
+  (fence applied, one fail-closed note deferred), closure(T5+T6) APPROVED. **OPUS whole-branch
+  purpose-review = MERGE-WITH-FOLLOWUPS:** #4/#7 fully + structurally resolved, #2/#6 honestly mitigated,
+  #1/#3 resolved in doctrine (prompt-governed — the dogfood confirms compliance), and it caught one real
+  **spec/impl divergence** the per-task reviews missed — `concierge_close.md` (spec §5) was never rewritten,
+  leaving obs #5 able to mirror a fantasy back as "your position". **Fixed (`ab9714d`):** honest
+  non-validating close + read-on-ask, prompt-only, frame-blind, egress-backstopped; @live shows the off-track
+  close now names the un-engaged decision ("nothing here yet to mirror back as your position"). Known:
+  two @live moat behavioral tests (`*_never_names`, `echo_gate_catches`) are pre-existing ~50% flaky on their
+  borderline egress fixtures (defense-in-depth backstop; the structural frame-blindness is the real moat) —
+  a follow-up, not a regression.
 - **Honest residuals (not cured):** obs #6 — an off-track reply already graded before the re-anchor isn't
   retroactively un-graded (trajectory grading absorbs the recovery; the ≥2/≥2 gate means a single corrupted
   reply can't light a region). Terrain node-COUNT / cross-session accretion leaks coarse rubric-coverage
   shape — accepted for the MVP (capping node count is a future option). A `screen_moves` runaway above 4096
-  still fail-closes to a 500 (correct posture; optional degrade-to-push deferred). **NEXT:** founder felt
-  dogfood (re-run the gene-editing analogy); OPUS whole-branch review → finishing-a-development-branch.
+  still fail-closes to a 500 (correct posture; optional degrade-to-push deferred); the post-convergence
+  converse reuses the withhold gear, which could stonewall a "so what was the point?" — watch in dogfood.
+  **NEXT:** finishing-a-development-branch (merge decision is the founder's) → founder felt dogfood (re-run
+  the gene-editing analogy on `irreversible_anchor` — does it demonstrate understanding, re-ground, and let
+  the user own closure) → push (founder's call).
 
 ## 2026-06-29 — feat(concierge): the engaged agent fronts the (byte-untouched) engine
 - **Dogfood failure that started it:** the founder ran a real session and the agent gave answers "completely
