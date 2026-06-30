@@ -179,6 +179,13 @@ _MED_PARAMS = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "me
 
 _ECHO_MAX_TOKENS = 1024  # a push is a sentence or two; explicit per L-17 (adaptive thinking budget)
 
+# Egress screen headroom: the structured output (performed + evidence) is tiny, but medium-effort
+# adaptive thinking on a nuanced screen can exceed 1024 and trip the truncation guard — which raises
+# and would brick the turn in production. A larger cap only buys thinking room (adaptive spends what
+# it needs), so cost does not rise unless the screen genuinely thinks more. (L-17: budget a shared
+# helper for its hardest caller; surfaced @live by the comprehension gear's longer turns.)
+_SCREEN_MAX_TOKENS = 4096
+
 
 class _FrameStateItem(BaseModel):
     code: str
@@ -505,7 +512,7 @@ class AnthropicModel:
         user = f"Hidden moves:\n{numbered}\n\nText to screen:\n{text}"
         resp = self._get_client().messages.parse(
             model=self._model,
-            max_tokens=1024,
+            max_tokens=_SCREEN_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=EgressScreen,
