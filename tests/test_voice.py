@@ -106,6 +106,7 @@ def test_fakemodel_concierge_doubles():
     assert m.concierge_turn("p", "brief", []) == "brief"  # probe: echoes the brief
     assert m.concierge_turn("p", "", []) == "take a real position"  # reinvite: safe invite
     assert m.concierge_close("p", []) == "[close synthesis]"
+    assert m.concierge_open("p") == "[open]"  # opening double
 
 
 # --- voice.turn (probe + re-invite) ---------------------------------------------------------------
@@ -214,6 +215,46 @@ def test_converse_is_engaged_and_egress_flat():
 def test_converse_falls_back_to_safe_contract_on_leak():
     m = FakeLeakModel(_intake(), {})  # any author leaks -> flat egress -> SAFE_CONTRACT
     assert voice.converse(m, _exp(), [("student", "x")], "tell me the trick") == voice.SAFE_CONTRACT
+
+
+# --- voice.opening (concrete turn 0) --------------------------------------------------------------
+
+
+def test_opening_returns_authored_text_when_safe():
+    class _Open(FakeModel):
+        def concierge_open(self, problem):
+            return "Picture the contract on your desk, unsigned. What do you do, and why?"
+
+    m = _Open(_intake(), {})
+    assert voice.opening(m, _exp()).startswith("Picture the contract")
+
+
+def test_opening_falls_back_to_problem_plus_invite_on_leak():
+    class _LeakOpen(FakeLeakModel):
+        def concierge_open(self, problem):
+            return "LEAK the move in the opening"
+
+    m = _LeakOpen(_intake(), {})
+    assert voice.opening(m, _exp()) == _exp().prompt + "\n\n" + voice._INVITE
+
+
+def test_opening_falls_back_on_empty():
+    class _EmptyOpen(FakeModel):
+        def concierge_open(self, problem):
+            return ""
+
+    m = _EmptyOpen(_intake(), {})
+    assert voice.opening(m, _exp()) == _exp().prompt + "\n\n" + voice._INVITE
+
+
+def test_concierge_open_is_frame_blind_and_returns_text():
+    stub = _StubClient(text="The board wants an answer by Friday. What do you commit to, and why?")
+    m = AnthropicModel(client=stub)
+    out = m.concierge_open("The pricing problem text.")
+    assert out.startswith("The board wants an answer")
+    blob = str(stub.last)
+    assert "frame_detail" not in blob and "Rubric" not in blob
+    assert "The pricing problem text." in blob  # the problem IS the only input
 
 
 # --- voice.gate ------------------------------------------------------------------------------------

@@ -8,6 +8,8 @@ SAFE_CONTRACT = (
     "Take a real position on the problem and reason it out, and I'll push."
 )
 
+_INVITE = "The call's yours. Take a position and reason it out — I'll push, I won't hand it over."
+
 
 def _moves(exp: Experience) -> list[str]:
     """Every hidden 'move' a learner-facing surface must not perform (L-5: never name the move):
@@ -72,6 +74,17 @@ def close(model: Model, exp: Experience, recent: list[tuple[str, str]]) -> str:
     text = model.concierge_close(exp.prompt, recent)
     if not text or not egress_safe_reply(model, exp, text):
         return _STATIC_CLOSE
+    return text
+
+
+def opening(model: Model, exp: Experience) -> str:
+    """Author the concrete opening turn (turn 0 — no dialogue yet): present the problem vividly so a
+    cold student has a foothold (obs #4), frame hidden, specifics from the problem text only. Flat
+    egress; fallback to the verbatim problem + the static invite on refusal/empty/leak so the
+    scenario is never lost. (Named `opening`, not `open`, to avoid shadowing the builtin.)"""
+    text = model.concierge_open(exp.prompt)
+    if not text or not egress_safe_reply(model, exp, text):
+        return exp.prompt + "\n\n" + _INVITE
     return text
 
 

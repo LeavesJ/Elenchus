@@ -16,9 +16,6 @@ from . import voice
 # who keeps typing non-substantive input (or a mis-classifying model) pins the session open forever.
 _DOOR_MAX_NONSUBSTANTIVE = 3
 
-# The Concierge's opening invite (static — turn 0 has no dialogue to ground on).
-_INVITE = "The call's yours. Take a position and reason it out — I'll push, I won't hand it over."
-
 
 class _Channel:
     def __init__(self):
@@ -73,7 +70,7 @@ class SessionRegistry:
                     # The Concierge authors every visible turn. Opening = scenario verbatim + the
                     # static invite (turn 0 has no dialogue to ground on); the gate only decides
                     # when a real position has arrived so the engine can start grading.
-                    ch.from_worker.put(("say", {"text": exp.prompt + "\n\n" + _INVITE}))
+                    ch.from_worker.put(("say", {"text": voice.opening(model, exp)}))
                     recent: list[tuple[str, str]] = []
                     nonsubstantive = 0
                     while True:

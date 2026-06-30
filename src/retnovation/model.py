@@ -72,6 +72,7 @@ class Model(Protocol):
     ) -> "EntryClassification": ...
     def concierge_turn(self, problem: str, push: str, recent: list[tuple[str, str]]) -> str: ...
     def concierge_close(self, problem: str, recent: list[tuple[str, str]]) -> str: ...
+    def concierge_open(self, problem: str) -> str: ...
     def screen_moves(self, moves: list[str], text: str) -> "EgressScreen": ...
 
 
@@ -132,6 +133,9 @@ class FakeModel:
 
     def concierge_close(self, problem, recent):
         return "[close synthesis]"
+
+    def concierge_open(self, problem):
+        return "[open]"
 
     def check_injection_expressed(self, injection: str, framed_output: str) -> InjectionExpressed:
         # Safe by default; voice tests that need a leak use FakeLeakModel (Task 2).
@@ -381,6 +385,22 @@ class AnthropicModel:
             max_tokens=_ECHO_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user}],
+            **_PARAMS,
+        )
+        if getattr(resp, "stop_reason", None) == "refusal":
+            return ""
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        return ""
+
+    def concierge_open(self, problem: str) -> str:
+        system = load_prompt("concierge_open")  # frame-blind: the problem text only
+        resp = self._get_client().messages.create(
+            model=self._model,
+            max_tokens=_ECHO_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": f"Problem:\n{problem}"}],
             **_PARAMS,
         )
         if getattr(resp, "stop_reason", None) == "refusal":
