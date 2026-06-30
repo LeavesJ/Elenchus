@@ -1,5 +1,37 @@
 # Retnovation — DEVLOG
 
+## 2026-06-29 — feat(concierge): the engaged agent fronts the (byte-untouched) engine
+- **Dogfood failure that started it:** the founder ran a real session and the agent gave answers "completely
+  irrelevant to user input — zero engagement," and the picker showed raw `veldra:` refs. Root cause (confirmed by
+  recon, not guessed): `generate_push(exp, kind, code)` is **dialogue-blind** — it never receives the user's reply,
+  so every push pursued the rubric's next angle regardless of what the user said (even when they objected "your
+  question is irrelevant"). The prior Doorman+Echo only ran on the **entrance**; every in-conversation turn was a
+  rubric push re-voiced. So the body was as rigid as day one. Separately, the menu rendered `s.ledger_ref`
+  (`veldra:license_fork_risk`, …) — an immersion break AND a confidentiality leak (those slugs are gitignored).
+- **Decision (brainstormed with the founder → spec → plan):** Approach A, "agent fronts the engine." The diagnostic
+  engine stays **byte-untouched** (objective selection + canonical push + grading + conclusion-agnostic). A
+  **Concierge** authors every *visible* turn — opening, re-invite, probe, close — from the problem + full dialogue +
+  the engine's L-13-safe push, acknowledging the user's actual words and adapting to objections, **never naming the
+  move**. The batched egress (L-20) backstops every visible turn; the raw reply still returns to the engine
+  (bridge transparency). Standard chat UI; clean picker titles; conversational close; terrain deferred.
+- **Built subagent-driven (controller-implements + independent review subagents, the drop-resistant strategy this
+  repo converged on), 5 commits, engine byte-untouched throughout:** (C1) `concierge_turn`/`concierge_close` model
+  methods + prompts [OPUS ✅]; (C2) `Rubric.display_title` + `voice.display_titles` — clean picker, `veldra:` ref
+  never crosses the wire [sonnet ✅]; (C3) the cutover — `voice.gate/turn/close` replace door/echo (egress kept;
+  added-revelation in probe mode, flat in re-invite/close), `session_runner` Concierge loop + unified `say`/`done`
+  protocol + server-side `last_menu_refs`, `app` `/say` endpoint, `ledger_ref` off the wire [OPUS ✅ — transparency,
+  frame-blindness, egress, confidentiality all reproduced]; (C4) chat-thread UI [sonnet ✅]; (C5) `@live` engagement
+  + moat tests [✅].
+- **Verified:** offline 280 passed / 12 skipped, ruff + format clean. `@live` 7/7 (91s): classify_entry golden-set
+  zero-false-positive; the egress no-op + leak-catch hold; and the **engagement regression is fixed against the real
+  model** — the probe references the user's actual words and presses (Socratic), authors a distinct adapted turn
+  when the user objects, leaks no move, and never invents a name ("Sam"). Whole-branch OPUS review (merge gate):
+  **Ready-to-merge YES** — all four invariants independently reproduced (engine `orchestration.py` diff empty;
+  transparency; frame-blindness; moat/egress + confidentiality), zero Critical/Important, all Minors deferrable.
+- **OPEN:** terrain visualization (deferred — future; the diagnostic still records underneath); Phase-2 tool-calling
+  trajectory-driving Concierge (Approach B) if the engine-ordered trajectory proves too rigid in dogfood. NEXT:
+  founder browser dogfood (`PYTHONPATH=src .venv/bin/python -m retnovation.web`).
+
 ## 2026-06-29 — perf(engaged-agent): batch the egress screen (N per-move calls → 1) — the real latency lever (L-20)
 - The founder's dogfood: "after clicking submit the time the agent takes to think and execute is a while." My first
   diagnosis (each turn = ~8 high-effort Opus calls @ 20–30s; lower `effort` on the simple ones) was WRONG, and
