@@ -8,6 +8,7 @@
  */
 window.Terrain3D = (function () {
   "use strict";
+  var activeTeardown = null; // one live scene at a time: a re-render stops the prior loop + listeners
   function rgba(r, g, b, a) { return "rgba(" + r + "," + g + "," + b + "," + a + ")"; }
   function rnd(a, b) { return a + Math.random() * (b - a); }
 
@@ -27,6 +28,7 @@ window.Terrain3D = (function () {
     var THREE = window.THREE;
     var data = normalize(payload);
     if (!THREE) { return; } // index.html keeps a text note as the no-WebGL fallback
+    if (activeTeardown) { activeTeardown(); activeTeardown = null; } // stop any prior scene first
 
     var W = container.clientWidth || 680, H = container.clientHeight || 460;
     var cv = document.createElement("canvas");
@@ -245,8 +247,9 @@ window.Terrain3D = (function () {
 
     // controls (no auto-rotate — founder note)
     var keys = {};
-    window.addEventListener("keydown", function (e) { keys[e.key.toLowerCase()] = true; });
-    window.addEventListener("keyup", function (e) { keys[e.key.toLowerCase()] = false; });
+    function kd(e) { keys[e.key.toLowerCase()] = true; }
+    function ku(e) { keys[e.key.toLowerCase()] = false; }
+    window.addEventListener("keydown", kd); window.addEventListener("keyup", ku);
     function dn(e) { dragging = true; introActive = false; container.style.cursor = "grabbing"; var t = e.touches ? e.touches[0] : e; lx = t.clientX; ly = t.clientY; }
     function mv(e) { if (!dragging) return; var t = e.touches ? e.touches[0] : e; az -= (t.clientX - lx) * 0.006; pol -= (t.clientY - ly) * 0.006; pol = Math.max(0.14, Math.min(1.42, pol)); lx = t.clientX; ly = t.clientY; if (e.touches) e.preventDefault(); }
     function up() { dragging = false; container.style.cursor = "grab"; }
@@ -254,6 +257,8 @@ window.Terrain3D = (function () {
     cv.addEventListener("touchstart", dn, { passive: false }); cv.addEventListener("touchmove", mv, { passive: false }); cv.addEventListener("touchend", up);
     cv.addEventListener("wheel", function (e) { rad *= (1 + (e.deltaY > 0 ? 1 : -1) * 0.08); rad = Math.max(14, Math.min(110, rad)); e.preventDefault(); }, { passive: false });
     container.style.cursor = "grab";
+    var stopped = false;
+    activeTeardown = function () { stopped = true; window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku); window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up); };
 
     var composer = null;
     if (window.ResizeObserver) new ResizeObserver(function () { var w = container.clientWidth, h = container.clientHeight; if (!w || !h) return; renderer.setSize(w, h); if (composer) composer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }).observe(container);
@@ -268,6 +273,7 @@ window.Terrain3D = (function () {
 
     var t0 = Date.now();
     (function loop() {
+      if (stopped) return; // a newer render (or teardown) took over
       requestAnimationFrame(loop);
       var t = (Date.now() - t0) / 1000;
       var mvx = 0, mvz = 0;

@@ -117,9 +117,10 @@ the same discipline that governs the DOM view governs it:
 **Change:** compute a per-region `accretion` scalar in `project_terrain` (for regions that clear the guard),
 carry it on `Region`, and bucket it in `learner_view` as `elevation`. Seeds get `elevation=None`.
 
-- **`accretion` definition (contract; exact thresholds calibrated in the plan):** a monotone function of the
-  region's **counts** — `len(frame_codes)` and `len(problems)` (breadth) — i.e. "how much durable evidence you
-  have accreted here." It is **independent of frame identity** by construction.
+- **`accretion` definition (contract; thresholds calibrated in the plan):** the region's **breadth count** —
+  `len(problems)` — a monotone, count-only measure of "how much ground you've accreted here." (`len(frame_codes)`
+  is correlated and available; the implementation deliberately uses `len(problems)` **only** — the more
+  conservative choice, fewer inputs to decode.) It is **independent of frame identity** by construction.
 - **Bucketing:** a coarse `_elevation_bucket(accretion) -> None|1|2|3` mirroring `_vitality_bucket`.
 - **Non-invertibility re-proof (required, ships with the change):**
   1. **Rename-invariance:** extend `test_learner_view_is_non_invertible_under_frame_rename` to assert the
