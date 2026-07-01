@@ -130,13 +130,17 @@ def converse(
     recent: list[tuple[str, str]],
     user_text: str,
     posture: str | None = None,
+    stop_reason: str = "converged",
 ) -> str:
-    """Post-convergence, engine-free continuation. The diagnostic is DONE — WIND DOWN, never re-invite
-    a position (the old re-invite path re-demanded a committed answer, DEVLOG 2026-07-01). Author via
-    concierge_converse (frame-blind wind-down doctrine, wider window). Flat egress; fallback SAFE_CONTRACT
-    on refusal/empty/leak."""
+    """Post-stop, engine-free continuation. The diagnostic is DONE — WIND DOWN, never re-invite
+    a position (the old re-invite path re-demanded a committed answer, DEVLOG 2026-07-01). Honest by
+    stop_reason: on a non-converged stop the author is told the student did NOT land the call, so it
+    can't manufacture a commitment that never happened. Author via concierge_converse (frame-blind
+    wind-down doctrine, wider window). Flat egress; fallback SAFE_CONTRACT on refusal/empty/leak."""
     v = resolve_presentation(posture, exp)["voice"]
-    text = model.concierge_converse(exp.prompt, recent + [("student", user_text)], voice=v)
+    text = model.concierge_converse(
+        exp.prompt, recent + [("student", user_text)], stop_reason=stop_reason, voice=v
+    )
     if not text or not egress_safe_reply(model, exp, text):
         return SAFE_CONTRACT
     return text

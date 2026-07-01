@@ -78,7 +78,12 @@ class Model(Protocol):
     ) -> str: ...
     def concierge_open(self, problem: str, *, voice: str = "") -> str: ...
     def concierge_converse(
-        self, problem: str, recent: list[tuple[str, str]], *, voice: str = ""
+        self,
+        problem: str,
+        recent: list[tuple[str, str]],
+        *,
+        stop_reason: str = "converged",
+        voice: str = "",
     ) -> str: ...
     def concierge_land(
         self, problem: str, recent: list[tuple[str, str]], stop_reason: str, *, voice: str = ""
@@ -147,7 +152,7 @@ class FakeModel:
     def concierge_open(self, problem, *, voice=""):
         return "[open]"
 
-    def concierge_converse(self, problem, recent, *, voice=""):
+    def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
         return "[converse winddown]"
 
     def concierge_land(self, problem, recent, stop_reason, *, voice=""):
@@ -436,12 +441,22 @@ class AnthropicModel:
         return ""
 
     def concierge_converse(
-        self, problem: str, recent: list[tuple[str, str]], *, voice: str = ""
+        self,
+        problem: str,
+        recent: list[tuple[str, str]],
+        *,
+        stop_reason: str = "converged",
+        voice: str = "",
     ) -> str:
-        # Post-convergence wind-down: no engine push, no re-invite. Wider window (limit=20) so the
-        # committed position can't age out of view and get re-demanded. Frame-blind.
+        # Post-stop wind-down: no engine push, no re-invite. Wider window (limit=20) so a committed
+        # position can't age out of view and get re-demanded. Honest by stop_reason (a process signal,
+        # never a grade — L-4): on a non-converged stop the author must NOT assume the student
+        # committed (dogfood 2026-07-01). Frame-blind.
         system = (voice + "\n\n" if voice else "") + load_prompt("concierge_converse")
-        user = f"Problem:\n{problem}\n\n{_render_turns(recent, limit=20)}Respond to the student's latest."
+        user = (
+            f"Problem:\n{problem}\n\nStop reason: {stop_reason}\n\n"
+            f"{_render_turns(recent, limit=20)}Respond to the student's latest."
+        )
         resp = self._get_client().messages.create(
             model=self._model,
             max_tokens=_ECHO_MAX_TOKENS,

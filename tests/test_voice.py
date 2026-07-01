@@ -55,7 +55,7 @@ class FakeLeakModel(FakeModel):
     def concierge_turn(self, problem, push, recent, *, voice=""):
         return "LEAK: lead with what you refuse to do"
 
-    def concierge_converse(self, problem, recent, *, voice=""):
+    def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
         return "LEAK: lead with what you refuse to do"
 
     def screen_moves(self, moves, text):
@@ -248,7 +248,7 @@ def test_converse_winds_down_via_concierge_converse_not_reinvite():
             super().__init__(intake, {})
             self.called = None
 
-        def concierge_converse(self, problem, recent, *, voice=""):
+        def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
             self.called = "converse"
             return "we're done here — that's a good place to be"
 
@@ -260,6 +260,26 @@ def test_converse_winds_down_via_concierge_converse_not_reinvite():
     out = voice.converse(m, _exp(), [("student", "I'd hold.")], "makes sense")
     assert m.called == "converse"  # wound down; did not re-invite
     assert out == "we're done here — that's a good place to be"
+
+
+def test_converse_threads_stop_reason_to_the_author():
+    # Honesty-by-stop-reason (dogfood 2026-07-01): on a NON-converged stop the wind-down author must
+    # not be told the user "already committed". voice.converse threads the record's stop reason through.
+    class _Rec(FakeModel):
+        def __init__(self, intake):
+            super().__init__(intake, {})
+            self.told = None
+
+        def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
+            self.told = stop_reason
+            return "[converse winddown]"
+
+    m = _Rec(_intake())
+    voice.converse(m, _exp(), [("student", "x")], "so how did that go?", None, "budget")
+    assert m.told == "budget"
+    m2 = _Rec(_intake())
+    voice.converse(m2, _exp(), [("student", "x")], "ok")  # default stays the safe converged premise
+    assert m2.told == "converged"
 
 
 def test_converse_returns_winddown_when_egress_safe():
@@ -442,6 +462,16 @@ def test_concierge_land_is_frame_blind_and_carries_stop_reason():
 def test_concierge_land_refusal_returns_empty():
     m = AnthropicModel(client=_RefusingClient())
     assert m.concierge_land("P", [("student", "x")], "converged") == ""
+
+
+def test_concierge_converse_is_frame_blind_and_carries_stop_reason():
+    stub = _StubClient(text="We're done here — and that's a good place to be.")
+    m = AnthropicModel(client=stub)
+    out = m.concierge_converse("Problem P.", [("student", "ok")], stop_reason="plateau")
+    assert out.startswith("We're done")
+    blob = str(stub.last)
+    assert "frame_detail" not in blob and "Rubric" not in blob  # frame-blind
+    assert "plateau" in blob  # the stop reason IS available to the wind-down author
 
 
 def test_display_titles_have_no_veldra_and_cover_open_ended():

@@ -210,6 +210,57 @@ def test_done_payload_carries_a_landing(tmp_path, make_fake):
     assert "embed_credentials_as_a_list" not in r["landing"]
 
 
+class _PlateauModel(FakeModel):
+    """Never closes the target -> the diagnostic CANNOT converge (plateau/budget stop). Records what
+    stop_reason the converse author is told, to prove the record's reason is threaded (not a default)."""
+
+    told = None
+
+    def classify_response(self, exp, kind, code, push, response, *, stress=False):
+        return ResponseClassification(
+            outcome="unchanged", mechanism_supplied=False, hard_wrong=False
+        )
+
+    def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
+        type(self).told = stop_reason
+        return "[converse winddown]"
+
+
+def test_converse_is_told_the_records_stop_reason(tmp_path):
+    """Honesty-by-stop-reason end-to-end (dogfood 2026-07-01): after a NON-converged stop, the
+    engine-free converse path must tell the author the ACTUAL stop reason from ch.record — a
+    wind-down that assumes 'already committed' lies to a user who never committed."""
+    _PlateauModel.told = None
+    intake = IntakeClassification(
+        frame_states={
+            "embed_credentials_as_a_list": FrameState.present_reasoned,
+            "choose_the_failure_default_deliberately": FrameState.absent,
+        },
+        trap_states={
+            "deferred_the_one_time_choice": TrapState.not_tripped,
+            "assumed_the_happy_path": TrapState.not_tripped,
+        },
+    )
+    app = create_app(
+        db_path=str(tmp_path / "sr.db"), model_factory=lambda: _PlateauModel(intake, {})
+    )
+    client = TestClient(app)
+    _, r = _choose_anchor(client)
+    r = client.post("/api/session/s/say", json={"text": "an opening without the move"}).json()
+    while r["kind"] == "say":
+        r = client.post("/api/session/s/say", json={"text": "still no mechanism"}).json()
+    assert r["kind"] == "done"
+    stop = (
+        r["landing"].removeprefix("[land:").removesuffix("]")
+    )  # FakeModel.concierge_land echoes it
+    assert stop != "converged"  # the scripted flow cannot converge — this test must discriminate
+    cv = client.post(
+        "/api/session/s/converse", json={"text": "so where does that leave me?"}
+    ).json()
+    assert cv["kind"] == "say"
+    assert _PlateauModel.told == stop  # the author was told the RECORD's stop reason, not a default
+
+
 def test_terrain_host_cannot_flex_collapse():
     """Dogfood 2026-07-01: #thread is a fixed-height column flex container; the terrain host has
     overflow:hidden, which zeroes its automatic flex minimum size — so without flex:none the host

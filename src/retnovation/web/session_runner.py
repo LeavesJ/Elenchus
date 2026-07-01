@@ -194,7 +194,14 @@ class SessionRegistry:
         rec = self._ch[session_id].record
         if rec is None:
             return ("error", {"message": "session has not converged"})
-        reply = voice.converse(rec["model"], rec["exp"], rec["recent"], value, rec["posture"])
+        reply = voice.converse(
+            rec["model"],
+            rec["exp"],
+            rec["recent"],
+            value,
+            rec["posture"],
+            rec.get("stop_reason", "converged"),
+        )
         rec["recent"].append(("student", value))
         rec["recent"].append(("Vera", reply))
         return ("say", {"text": reply})
