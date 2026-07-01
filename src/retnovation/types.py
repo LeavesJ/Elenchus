@@ -491,6 +491,9 @@ class Region(BaseModel):
     frame_codes: list[str]  # author-side membership — STRIPPED from the learner-facing view (L-13)
     problems: list[str]
     vitality: float | None  # None when render == seed (sub-threshold; nothing to decode)
+    accretion: (
+        float | None
+    )  # breadth-count axis (§4 two-axis; height); None for seeds. Rename-invariant.
     render: RegionRender
 
 
@@ -506,6 +509,19 @@ def _vitality_bucket(v: float | None) -> int | None:
     return 3
 
 
+def _elevation_bucket(a: float | None) -> int | None:
+    """Coarse 3-level accretion (height) bucket, gated by the same §4b guard as vitality (None for seeds).
+    Derived from region breadth COUNT only, so it is rename-invariant; a bounded depth-location residual
+    (Cartographer §4d family) — reveals 'how much ground', never 'which move'."""
+    if a is None:
+        return None
+    if a <= 2:
+        return 1
+    if a <= 4:
+        return 2
+    return 3
+
+
 class TerrainView(BaseModel):
     regions: list[Region]
 
@@ -517,6 +533,7 @@ class TerrainView(BaseModel):
                 "region_id": r.region_id,
                 "render": r.render.value,
                 "vitality": _vitality_bucket(r.vitality),
+                "elevation": _elevation_bucket(r.accretion),
             }
             for r in self.regions
         ]

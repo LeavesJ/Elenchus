@@ -107,10 +107,16 @@ def test_learner_view_is_non_invertible_under_frame_rename():
     assert v1 == v2  # rename invariant -> non-invertible wire
 
     row = v1[0]
-    assert set(row) == {"region_id", "render", "vitality"}  # exactly the L-13-safe keys
+    assert set(row) == {
+        "region_id",
+        "render",
+        "vitality",
+        "elevation",
+    }  # exactly the L-13-safe keys
     assert row["region_id"] == "r0"  # positional ordinal, not the old 5-digit frame hash
     assert "frame_codes" not in row
     assert row["vitality"] in (None, 1, 2, 3)  # coarse bucket, not the raw mean
+    assert row["elevation"] in (None, 1, 2, 3)  # second axis, same coarse bucketing
 
 
 def test_learner_view_orders_by_public_vitality_not_frame_order():
@@ -127,3 +133,66 @@ def test_learner_view_orders_by_public_vitality_not_frame_order():
     rows = project_terrain(state, NOW).learner_view()
     assert [r["region_id"] for r in rows] == ["r0", "r1"]
     assert rows[0]["vitality"] == 3 and rows[1]["vitality"] == 1  # brighter first
+
+
+def test_learner_view_includes_bucketed_elevation():
+    # A rendered region: embed(strong,[P1,P2]) + choose_failure(forming,[P1]) -> problems {P1,P2}
+    # -> accretion 2 -> elevation bucket 1.
+    state = LearnerState(
+        frames={
+            "embed": _fs(Strength.strong, ["P1", "P2"]),
+            "choose_failure": _fs(Strength.forming, ["P1"]),
+        }
+    )
+    row = project_terrain(state, NOW).learner_view()[0]
+    assert set(row) == {"region_id", "render", "vitality", "elevation"}
+    assert row["elevation"] == 1
+    assert row["vitality"] in (1, 2, 3)
+
+
+def test_seed_has_no_elevation():
+    # 1 frame -> seed -> elevation None (nothing accreted to decode)
+    state = LearnerState(frames={"embed": _fs(Strength.strong, ["P1", "P2"])})
+    row = project_terrain(state, NOW).learner_view()[0]
+    assert row["render"] == "seed"
+    assert row["elevation"] is None
+    assert row["vitality"] is None
+
+
+def test_elevation_is_independent_of_vitality_two_axis():
+    # TALL-DIM region: 4 weak frames chained across 5 problems -> vitality bucket 1, elevation bucket 3.
+    # SHORT-BRIGHT region: 2 strong frames across 2 problems -> vitality bucket 3, elevation bucket 1.
+    state = LearnerState(
+        frames={
+            "t_a": _fs(Strength.weak, ["P1", "P2"]),
+            "t_b": _fs(Strength.weak, ["P2", "P3"]),
+            "t_c": _fs(Strength.weak, ["P3", "P4"]),
+            "t_d": _fs(Strength.weak, ["P4", "P5"]),
+            "s_a": _fs(Strength.strong, ["Q1", "Q2"]),
+            "s_b": _fs(Strength.strong, ["Q1"]),
+        }
+    )
+    rows = project_terrain(state, NOW).learner_view()
+    # regions_to_view orders by descending raw vitality: SHORT-BRIGHT (1.0) first, TALL-DIM (0.2) second.
+    short_bright, tall_dim = rows[0], rows[1]
+    assert (short_bright["vitality"], short_bright["elevation"]) == (3, 1)
+    assert (tall_dim["vitality"], tall_dim["elevation"]) == (1, 3)
+
+
+def test_elevation_is_rename_invariant():
+    # Extends the rename-invariance guarantee to the elevation channel.
+    state = LearnerState(
+        frames={
+            "embed": _fs(Strength.strong, ["P1", "P2"]),
+            "choose_failure": _fs(Strength.forming, ["P1"]),
+        }
+    )
+    renamed = LearnerState(
+        frames={
+            "zzz_other": _fs(Strength.strong, ["P1", "P2"]),
+            "aaa_renamed": _fs(Strength.forming, ["P1"]),
+        }
+    )
+    assert (
+        project_terrain(state, NOW).learner_view() == project_terrain(renamed, NOW).learner_view()
+    )

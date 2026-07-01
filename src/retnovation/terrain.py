@@ -56,12 +56,15 @@ def project_terrain(
         vitality = (
             sum(_VITALITY[state.frames[c].strength] for c in comp) / len(comp) if clears else None
         )
+        # accretion (height axis, §4): breadth COUNT only — rename-invariant, gated by the same guard.
+        accretion = float(len(problems)) if clears else None
         regions.append(
             Region(
                 region_id="",  # assigned positionally in regions_to_view (L-13: never frame-derived)
                 frame_codes=comp,
                 problems=sorted(problems),
                 vitality=vitality,
+                accretion=accretion,
                 render=RegionRender.rendered if clears else RegionRender.seed,
             )
         )

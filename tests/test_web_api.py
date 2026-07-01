@@ -165,5 +165,10 @@ def test_converse_and_close_endpoints(tmp_path, make_fake):
     assert cl["kind"] == "close" and isinstance(cl["close"], str)
     assert isinstance(cl["terrain"], list)
     for row in cl["terrain"]:
-        assert set(row) == {"region_id", "render", "vitality"}  # L-13-safe wire shape
+        assert set(row) == {
+            "region_id",
+            "render",
+            "vitality",
+            "elevation",
+        }  # L-13-safe two-axis wire shape
         assert "embed_credentials_as_a_list" not in str(row)
