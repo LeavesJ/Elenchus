@@ -268,9 +268,12 @@ def test_terrain_host_cannot_flex_collapse():
     in EVERY real session (sparse harnesses never catch it). Pin the anti-collapse property."""
     client = TestClient(create_app(db_path=":memory:", model_factory=None))
     html = client.get("/").text
-    host_block = html[html.index("terrain3d'") : html.index("terrain3d'") + 500]
-    assert "flex:none" in host_block
-    assert "height:460px" in host_block
+    # anchor on the cssText ASSIGNMENT (not the surrounding block): the explanatory comment above it
+    # also says "flex:none", so a wider slice would stay green even if the property were removed.
+    css_start = html.index("host.style.cssText='")
+    css_block = html[css_start : html.index("thread.appendChild(host)", css_start)]
+    assert "flex:none" in css_block
+    assert "height:460px" in css_block
     # grammatical fallback copy for a single region ("1 area has taken shape.")
     assert "' has':' have'" in html
 
