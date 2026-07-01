@@ -44,6 +44,12 @@ _STATIC_CLOSE = (
     "That's the read. You took a position and reasoned the trade-offs — that's the work."
 )
 
+# Honest-generic fallback: safe across every stop reason — no verdict (L-4), no move (L-13), and no
+# manufactured "you arrived" for a user who never engaged. Used on refusal/empty/leak.
+_STATIC_LAND = (
+    "That's where we'll leave it. What you did with the problem is yours to sit with now."
+)
+
 
 def gate(model: Model, exp: Experience, opening: str, recent: list[tuple[str, str]]) -> EntryClass:
     """Entrance gate only: has the student taken a real position yet? (The engine needs a
@@ -84,6 +90,25 @@ def close(
     text = model.concierge_close(exp.prompt, recent, voice=v)
     if not text or not egress_safe_reply(model, exp, text):
         return _STATIC_CLOSE
+    return text
+
+
+def land(
+    model: Model,
+    exp: Experience,
+    recent: list[tuple[str, str]],
+    stop_reason: str,
+    posture: str | None = None,
+) -> str:
+    """Author the felt landing at convergence/stop — a short, present-tense arrival, honest by
+    stop_reason. It rewards movement/rigor, NEVER correctness (L-4 — the egress screen cannot enforce
+    that; only concierge_land's doctrine can). Egress-backstopped HERE, in the worker, before the text
+    reaches the done payload (mirrors voice.close); fallback to the honest-generic static on
+    refusal/empty/leak."""
+    v = resolve_presentation(posture, exp)["voice"]
+    text = model.concierge_land(exp.prompt, recent, stop_reason, voice=v)
+    if not text or not egress_safe_reply(model, exp, text):
+        return _STATIC_LAND
     return text
 
 

@@ -80,6 +80,9 @@ class Model(Protocol):
     def concierge_converse(
         self, problem: str, recent: list[tuple[str, str]], *, voice: str = ""
     ) -> str: ...
+    def concierge_land(
+        self, problem: str, recent: list[tuple[str, str]], stop_reason: str, *, voice: str = ""
+    ) -> str: ...
     def screen_moves(self, moves: list[str], text: str) -> "EgressScreen": ...
 
 
@@ -146,6 +149,9 @@ class FakeModel:
 
     def concierge_converse(self, problem, recent, *, voice=""):
         return "[converse winddown]"
+
+    def concierge_land(self, problem, recent, stop_reason, *, voice=""):
+        return f"[land:{stop_reason}]"
 
     def check_injection_expressed(self, injection: str, framed_output: str) -> InjectionExpressed:
         # Safe by default; voice tests that need a leak use FakeLeakModel (Task 2).
@@ -436,6 +442,33 @@ class AnthropicModel:
         # committed position can't age out of view and get re-demanded. Frame-blind.
         system = (voice + "\n\n" if voice else "") + load_prompt("concierge_converse")
         user = f"Problem:\n{problem}\n\n{_render_turns(recent, limit=20)}Respond to the student's latest."
+        resp = self._get_client().messages.create(
+            model=self._model,
+            max_tokens=_ECHO_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            **_PARAMS,
+        )
+        if getattr(resp, "stop_reason", None) == "refusal":
+            return ""
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        return ""
+
+    def concierge_land(
+        self, problem: str, recent: list[tuple[str, str]], stop_reason: str, *, voice: str = ""
+    ) -> str:
+        # The felt landing at convergence/stop. `stop_reason` is the assessment's StopReason value —
+        # the author lands honestly by it. Frame-blind; correctness is deliberately NOT supplied (L-4:
+        # the landing rewards the reckoning, never the answer). Wider window (limit=20) so it references
+        # the real arc, not a 6-turn tail. NOTE: `resp.stop_reason` below is the API's finish reason,
+        # distinct from the `stop_reason` argument (the diagnostic outcome).
+        system = (voice + "\n\n" if voice else "") + load_prompt("concierge_land")
+        user = (
+            f"Problem:\n{problem}\n\nStop reason: {stop_reason}\n\n"
+            f"{_render_turns(recent, limit=20)}Write the landing."
+        )
         resp = self._get_client().messages.create(
             model=self._model,
             max_tokens=_ECHO_MAX_TOKENS,

@@ -111,6 +111,7 @@ def test_fakemodel_concierge_doubles():
     assert m.concierge_close("p", []) == "[close synthesis]"
     assert m.concierge_open("p") == "[open]"  # opening double
     assert m.concierge_converse("p", []) == "[converse winddown]"  # wind-down double
+    assert m.concierge_land("p", [], "converged") == "[land:converged]"  # landing double
 
 
 # --- voice.turn (probe + re-invite) ---------------------------------------------------------------
@@ -203,6 +204,37 @@ def test_close_falls_back_on_leak():
 
     m = _LeakClose(_intake(), {})
     assert voice.close(m, _exp(), [("student", "x")]) == voice._STATIC_CLOSE
+
+
+# --- voice.land (felt arrival, honest by stop_reason, egress-backstopped) -------------------------
+
+
+def test_land_returns_authored_text_when_safe():
+    m = FakeModel(_intake(), {})  # concierge_land -> "[land:converged]"; screen [] safe
+    assert voice.land(m, _exp(), [("student", "I'd hold.")], "converged") == "[land:converged]"
+
+
+def test_land_threads_the_stop_reason_through():
+    m = FakeModel(_intake(), {})  # the fake echoes the stop reason it was handed
+    assert voice.land(m, _exp(), [("student", "x")], "budget") == "[land:budget]"
+
+
+def test_land_falls_back_to_static_on_leak():
+    class _LeakLand(FakeLeakModel):
+        def concierge_land(self, problem, recent, stop_reason, *, voice=""):
+            return "LEAK the move"
+
+    m = _LeakLand(_intake(), {})
+    assert voice.land(m, _exp(), [("student", "x")], "converged") == voice._STATIC_LAND
+
+
+def test_land_falls_back_to_static_on_empty():
+    class _EmptyLand(FakeModel):
+        def concierge_land(self, problem, recent, stop_reason, *, voice=""):
+            return ""
+
+    m = _EmptyLand(_intake(), {})
+    assert voice.land(m, _exp(), [("student", "x")], "converged") == voice._STATIC_LAND
 
 
 # --- voice.converse (post-convergence, engine-free) -----------------------------------------------
@@ -393,6 +425,23 @@ def test_concierge_close_is_frame_blind_and_returns_text():
 def test_concierge_turn_refusal_returns_empty():
     m = AnthropicModel(client=_RefusingClient())
     assert m.concierge_turn("P", "brief", [("student", "x")]) == ""
+
+
+def test_concierge_land_is_frame_blind_and_carries_stop_reason():
+    stub = _StubClient(
+        text="You reckoned with what it costs; there's no clean answer, and now you know why."
+    )
+    m = AnthropicModel(client=stub)
+    out = m.concierge_land("Problem P.", [("student", "I'd hold and eat the churn.")], "converged")
+    assert out.startswith("You reckoned with")
+    blob = str(stub.last)
+    assert "frame_detail" not in blob and "Rubric" not in blob  # frame-blind
+    assert "converged" in blob  # the stop reason IS available to the author
+
+
+def test_concierge_land_refusal_returns_empty():
+    m = AnthropicModel(client=_RefusingClient())
+    assert m.concierge_land("P", [("student", "x")], "converged") == ""
 
 
 def test_display_titles_have_no_veldra_and_cover_open_ended():
