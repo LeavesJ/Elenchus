@@ -77,6 +77,9 @@ class Model(Protocol):
         self, problem: str, recent: list[tuple[str, str]], *, voice: str = ""
     ) -> str: ...
     def concierge_open(self, problem: str, *, voice: str = "") -> str: ...
+    def concierge_converse(
+        self, problem: str, recent: list[tuple[str, str]], *, voice: str = ""
+    ) -> str: ...
     def screen_moves(self, moves: list[str], text: str) -> "EgressScreen": ...
 
 
@@ -140,6 +143,9 @@ class FakeModel:
 
     def concierge_open(self, problem, *, voice=""):
         return "[open]"
+
+    def concierge_converse(self, problem, recent, *, voice=""):
+        return "[converse winddown]"
 
     def check_injection_expressed(self, injection: str, framed_output: str) -> InjectionExpressed:
         # Safe by default; voice tests that need a leak use FakeLeakModel (Task 2).
@@ -414,6 +420,27 @@ class AnthropicModel:
             max_tokens=_ECHO_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": f"Problem:\n{problem}"}],
+            **_PARAMS,
+        )
+        if getattr(resp, "stop_reason", None) == "refusal":
+            return ""
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        return ""
+
+    def concierge_converse(
+        self, problem: str, recent: list[tuple[str, str]], *, voice: str = ""
+    ) -> str:
+        # Post-convergence wind-down: no engine push, no re-invite. Wider window (limit=20) so the
+        # committed position can't age out of view and get re-demanded. Frame-blind.
+        system = (voice + "\n\n" if voice else "") + load_prompt("concierge_converse")
+        user = f"Problem:\n{problem}\n\n{_render_turns(recent, limit=20)}Respond to the student's latest."
+        resp = self._get_client().messages.create(
+            model=self._model,
+            max_tokens=_ECHO_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": user}],
             **_PARAMS,
         )
         if getattr(resp, "stop_reason", None) == "refusal":

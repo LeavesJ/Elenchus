@@ -106,10 +106,15 @@ def converse(
     user_text: str,
     posture: str | None = None,
 ) -> str:
-    """Post-convergence, engine-free continuation: acknowledge the user's latest and keep them
-    reasoning — no engine push (the diagnostic is done), frame-blind. Reuses the re-invite turn
-    (flat egress, fallback SAFE_CONTRACT); the comprehension gear in the craft governs here too."""
-    return turn(model, exp, "", recent + [("student", user_text)], posture=posture)
+    """Post-convergence, engine-free continuation. The diagnostic is DONE — WIND DOWN, never re-invite
+    a position (the old re-invite path re-demanded a committed answer, DEVLOG 2026-07-01). Author via
+    concierge_converse (frame-blind wind-down doctrine, wider window). Flat egress; fallback SAFE_CONTRACT
+    on refusal/empty/leak."""
+    v = resolve_presentation(posture, exp)["voice"]
+    text = model.concierge_converse(exp.prompt, recent + [("student", user_text)], voice=v)
+    if not text or not egress_safe_reply(model, exp, text):
+        return SAFE_CONTRACT
+    return text
 
 
 def resolve_presentation(posture: str | None, exp: Experience | None) -> dict:

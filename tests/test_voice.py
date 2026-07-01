@@ -55,6 +55,9 @@ class FakeLeakModel(FakeModel):
     def concierge_turn(self, problem, push, recent, *, voice=""):
         return "LEAK: lead with what you refuse to do"
 
+    def concierge_converse(self, problem, recent, *, voice=""):
+        return "LEAK: lead with what you refuse to do"
+
     def screen_moves(self, moves, text):
         hit = list(range(1, len(moves) + 1)) if "LEAK" in text else []
         return EgressScreen(performed=hit, evidence="x")
@@ -107,6 +110,7 @@ def test_fakemodel_concierge_doubles():
     assert m.concierge_turn("p", "", []) == "take a real position"  # reinvite: safe invite
     assert m.concierge_close("p", []) == "[close synthesis]"
     assert m.concierge_open("p") == "[open]"  # opening double
+    assert m.concierge_converse("p", []) == "[converse winddown]"  # wind-down double
 
 
 # --- voice.turn (probe + re-invite) ---------------------------------------------------------------
@@ -204,16 +208,36 @@ def test_close_falls_back_on_leak():
 # --- voice.converse (post-convergence, engine-free) -----------------------------------------------
 
 
-def test_converse_is_engaged_and_egress_flat():
-    m = FakeModel(
-        _intake(), {}
-    )  # concierge_turn("", ...) -> "take a real position"; screen [] safe
+def test_converse_winds_down_via_concierge_converse_not_reinvite():
+    # THE REGRESSION: converse must route to concierge_converse (wind-down), NEVER concierge_turn(push="")
+    # (the RE-INVITE path that re-demanded a committed answer — DEVLOG 2026-07-01).
+    class _Probe(FakeModel):
+        def __init__(self, intake):
+            super().__init__(intake, {})
+            self.called = None
+
+        def concierge_converse(self, problem, recent, *, voice=""):
+            self.called = "converse"
+            return "we're done here — that's a good place to be"
+
+        def concierge_turn(self, problem, push, recent, *, voice=""):
+            self.called = "turn"
+            return "take a real position"  # the OLD re-invite path — must NOT be reached
+
+    m = _Probe(_intake())
+    out = voice.converse(m, _exp(), [("student", "I'd hold.")], "makes sense")
+    assert m.called == "converse"  # wound down; did not re-invite
+    assert out == "we're done here — that's a good place to be"
+
+
+def test_converse_returns_winddown_when_egress_safe():
+    m = FakeModel(_intake(), {})  # concierge_converse -> "[converse winddown]"; screen [] safe
     out = voice.converse(m, _exp(), [("student", "I'd hold.")], "but what about the long run?")
-    assert out == "take a real position"
+    assert out == "[converse winddown]"
 
 
 def test_converse_falls_back_to_safe_contract_on_leak():
-    m = FakeLeakModel(_intake(), {})  # any author leaks -> flat egress -> SAFE_CONTRACT
+    m = FakeLeakModel(_intake(), {})  # concierge_converse leaks -> flat egress -> SAFE_CONTRACT
     assert voice.converse(m, _exp(), [("student", "x")], "tell me the trick") == voice.SAFE_CONTRACT
 
 
