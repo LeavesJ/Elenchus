@@ -1,5 +1,38 @@
 # Retnovation — DEVLOG
 
+## 2026-07-01 — founder felt-dogfood follow-ups: the invisible valley (flex collapse), converse honesty, the findable exit
+- **The dogfood.** The founder drove a full real session (pricing, SV2 infra) through the merged stack. The
+  Earned Landing mechanics fired as designed — the non-converged landing honestly named the un-made call, the
+  wind-down engaged the post-landing commitment, the close mirrored his position in his own terms with no
+  verdict and no move — but three defects surfaced, all fixed same-day (suite **322 passed / 20 skipped**):
+- **D — the Kindled Valley was INVISIBLE at the close (root cause proven in a real browser).** `#thread` is a
+  fixed-height column flex container; the terrain host has `overflow:hidden`, which per the flex spec zeroes
+  its automatic minimum size — so it alone absorbed ALL the flex-shrink and **collapsed to 0px the moment the
+  dialogue overflowed the thread, i.e. in every real session**. Sparse preview harnesses (few bubbles, no
+  overflow) could never catch it — the terrain build's browser verification passed while every real close
+  failed. Proven with the real shell + the real live-db payload: 460px → 0px with 30 filler bubbles; fix
+  (`flex:none` on the host) → 460px holds, valley renders lit. Regression pinned
+  (`test_terrain_host_cannot_flex_collapse`) + the "1 area **has** taken shape" copy fix. (`ea5533b`)
+- **C — converse is now honest by stop_reason** (the deferred Minor, validated by this exact dogfood: the stop
+  was non-converged and the user had NOT committed when the wind-down began). `concierge_converse` gains a
+  keyword-only `stop_reason` (default `"converged"` — every existing caller safe); the doctrine branches:
+  converged → never re-demand the committed position; anything else → **the student did NOT land the call — do
+  not tell them they committed or manufacture an arrival**; if they now take a position, engage it briefly
+  without restarting the interrogation. Threaded `ch.record["stop_reason"]` → `voice.converse` →
+  `model.concierge_converse` ("Stop reason:" in the user block, mirroring `concierge_land`; a process signal,
+  L-4-safe). End-to-end discriminating test: a never-closing `_PlateauModel` proves the author is told the
+  RECORD's stop reason, not a default. (`55a2aba`)
+- **A — the exit is now findable.** The End button was a one-shot element anchored in the thread at the
+  engine's `done` — as the post-landing conversation continued it drifted into scrollback (the founder had to
+  hunt for it: "end session? give me the optino"). It now lives in the **sticky composer row** next to Send
+  (visually distinct, revealed at the landing, persists through every converse turn); the thread-anchored
+  `endButton()` is gone. Browser-verified: 8 post-landing turns, the exit stays in the viewport. (`7432c48`)
+- **Held throughout:** engine byte-untouched; L-13 egress on every visible turn; L-4 (stop_reason is a process
+  signal, never a grade). **Deferred to its own session (founder's call): the big thread — within-session woven
+  stance modulation** (press → acknowledge movement → crux). The dogfood confirmed it as THE remaining felt gap:
+  every acknowledgment beat in the session lived in the new Earned-Landing surfaces; the engine-path probe turns
+  have none.
+
 ## 2026-07-01 — @live run GREEN (Earned Landing confirmed live) + one pre-existing stale live test fixed (L-22)
 - **The founder ran the gated `-m live` suite (post-merge, post-push): 19 passed / 1 failed.** All 3 new Earned
   Landing tests **PASSED against real Opus** — the landing arrives with no evaluative verdict (L-4) and no named
