@@ -124,21 +124,39 @@ class SessionRegistry:
                     decide=decide,
                     decide_core=lambda c: [],
                 )
+                landing = ""
                 if captured:
+                    # Author the felt landing STRICTLY downstream of the frozen assessment — the
+                    # session is terminal, so this never re-enters a graded call. voice.land applies
+                    # the egress screen HERE before the text reaches the payload (mirrors voice.close).
+                    # It rewards arrival/rigor, never correctness (L-4). captured is always set when
+                    # done fires (present() sets it before run_session returns).
+                    landing = voice.land(
+                        model,
+                        captured["exp"],
+                        captured["recent"],
+                        assessment.stop_reason.value,
+                        posture,
+                    )
                     # Persist the record BEFORE queuing done (and before store.close in finally) so
                     # it is live the instant the client can request converse/close. Holds the rubric
                     # (in exp) server-side for the egress screen; never serialized to the client. The
                     # close is no longer authored here — it moves to the user-owned /close path.
+                    # stop_reason keeps the wind-down (converse) convergence-aware.
                     ch.record = {
                         "model": model,
                         "posture": posture,
                         "exp": captured["exp"],
                         "recent": captured["recent"],
+                        "stop_reason": assessment.stop_reason.value,
                         "terrain": project_terrain(state, now).learner_view(),
                     }
                 # The engine converged — but the SESSION does not end here. 'done' is an internal
-                # signal; the user owns closure (converse/close serve the rest from the record).
-                ch.from_worker.put(("done", {"state": state, "assessment": assessment}))
+                # signal; the user owns closure (converse/close serve the rest from the record). The
+                # landing rides the done payload as a felt arrival; the End affordance follows it.
+                ch.from_worker.put(
+                    ("done", {"state": state, "assessment": assessment, "landing": landing})
+                )
             except Exception as e:  # surface, never hang the client
                 ch.from_worker.put(("error", {"message": repr(e)}))
             finally:

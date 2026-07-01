@@ -48,6 +48,9 @@ def test_full_session_and_l13_surface(tmp_path, make_fake):
 
     assert r["kind"] == "done" and r.get("terminal") is True
     assert "close" not in r  # the engine's 'done' no longer closes — the user owns the exit
+    # the felt landing rides the done payload (before the user chooses to end)
+    assert isinstance(r.get("landing"), str) and r["landing"]  # authored, non-empty
+    seen.append(r["landing"])  # L-13: the landing must not leak a frame_code either (checked below)
     # the user ends the session -> honest close + the (now SURFACED) frozen terrain
     cl = client.post("/api/session/s/close").json()
     assert cl["kind"] == "close" and isinstance(cl["close"], str)
@@ -190,3 +193,18 @@ def test_index_references_3d_terrain_renderer():
     assert "/static/vendor/three.min.js" in html
     assert "/static/terrain3d.js" in html
     assert "Terrain3D.render" in html
+
+
+def test_done_payload_carries_a_landing(tmp_path, make_fake):
+    app = create_app(db_path=str(tmp_path / "land.db"), model_factory=make_fake)
+    client = TestClient(app)
+    _, r = _choose_anchor(client)
+    r = client.post(
+        "/api/session/s/say", json={"text": "reasoning that already holds the move"}
+    ).json()
+    while r["kind"] == "say":
+        r = client.post("/api/session/s/say", json={"text": "mechanism"}).json()
+    assert r["kind"] == "done" and r.get("terminal") is True
+    # FakeModel.concierge_land echoes the stop reason: "[land:<reason>]" — non-empty, no frame leak.
+    assert isinstance(r["landing"], str) and r["landing"].startswith("[land:")
+    assert "embed_credentials_as_a_list" not in r["landing"]
