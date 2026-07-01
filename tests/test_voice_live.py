@@ -308,3 +308,94 @@ def test_ceo_and_cto_registers_diverge_and_neither_leaks_the_move():
     assert ceo_idiom or cto_idiom, f"no role idiom surfaced:\nCEO {t_ceo!r}\nCTO {t_cto!r}"
     for t in (t_ceo, t_cto):
         assert not any(w in t for w in ("reversible", "rollback", "optionality"))
+
+
+# --- Earned Landing: the felt arrival + the converse wind-down (live behavior) --------------------
+
+# A converged dialogue on the irreversible_anchor problem: the student commits and reasons the cost.
+_CONVERGED = [
+    ("Vera", "The board wants the number by Friday. What do you commit to, and why?"),
+    (
+        "student",
+        "I'd hold the premium price and eat some churn — dropping later is cheaper than "
+        "clawing the number back up once it's anchored.",
+    ),
+    ("Vera", "And if the churn is the customers you most needed to keep?"),
+    (
+        "student",
+        "Then that's the bet I'm making: the thing protecting my margin is the same move I "
+        "can't quietly walk back, so I'd rather be wrong on volume than on price integrity.",
+    ),
+]
+
+# A NON-engaged dialogue: the student stayed in an analogy and never took the concrete call.
+_UNENGAGED = [
+    ("Vera", "The board wants the number by Friday. What do you commit to, and why?"),
+    ("student", "It's like poker, you have to read the table."),
+    ("Vera", "What number do you actually set?"),
+    ("student", "Depends on the vibe. Pricing is really an art form when you think about it."),
+]
+
+_VERDICT_TOKENS = (
+    "correct",
+    "incorrect",
+    "well done",
+    "good job",
+    "nailed",
+    "you got it right",
+    "you were right",
+    "wrong answer",
+    "i'd score",
+    "grade you",
+    "you passed",
+    "you failed",
+)
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_land_arrives_without_verdict_or_named_move(tmp_path):
+    from retnovation.web import voice
+
+    exp = _first_open_exp(str(tmp_path / "land.db"))
+    m = AnthropicModel()
+    text = voice.land(m, exp, _CONVERGED, "converged", "founder_ceo")
+    assert text and text != voice._STATIC_LAND  # a real authored landing, not the fallback
+    low = text.lower()
+    # L-4 (the assertion the egress screen CANNOT make): no evaluative verdict on the conclusion
+    assert not any(tok in low for tok in _VERDICT_TOKENS), (
+        f"landing graded the conclusion: {text!r}"
+    )
+    # no re-demand of a position (the diagnostic is done)
+    assert "take a position" not in low and "what number" not in low
+    # L-13: names no move beyond what the student argued (egress backstop, run directly)
+    assert voice._performed(m, exp, text) == set(), f"landing performed a hidden move: {text!r}"
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_land_is_honest_when_the_student_never_engaged(tmp_path):
+    from retnovation.web import voice
+
+    exp = _first_open_exp(str(tmp_path / "land_budget.db"))
+    m = AnthropicModel()
+    text = voice.land(m, exp, _UNENGAGED, "budget", "founder_ceo")
+    assert text  # authored or the honest static — never empty
+    low = text.lower()
+    # anti-flattery: do NOT manufacture an arrival for a user who never took the concrete call
+    assert not any(tok in low for tok in _VERDICT_TOKENS)
+    assert "you've reckoned" not in low and "you arrived" not in low, (
+        f"manufactured an arrival narrative for an un-engaged session: {text!r}"
+    )
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_converse_winds_down_does_not_re_demand_a_position(tmp_path):
+    from retnovation.web import voice
+
+    exp = _first_open_exp(str(tmp_path / "conv.db"))
+    m = AnthropicModel()
+    reply = voice.converse(m, exp, _CONVERGED, "yeah, I think that's where I land.", "founder_ceo")
+    assert reply and reply != voice.SAFE_CONTRACT  # a real wind-down, not the re-invite fallback
+    low = reply.lower()
+    # the regression: it must NOT re-demand the already-committed position
+    assert "take a position" not in low and "what number" not in low and "haven't named" not in low
+    assert voice._performed(m, exp, reply) == set(), f"converse leaked a move: {reply!r}"
