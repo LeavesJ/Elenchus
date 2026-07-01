@@ -116,10 +116,13 @@ function renderTerrain(regions){
   regions = regions || [];
   const rendered = regions.filter(x=>x.render==='rendered').length;
   const host=document.createElement('div'); host.className='terrain3d';
-  host.style.cssText='align-self:stretch;width:100%;height:460px;border-radius:16px;overflow:hidden;'
-    +'margin:10px 0 2px;background:#04060c;position:relative';
+  // flex:none is LOAD-BEARING: #thread is a fixed-height column flex; overflow:hidden zeroes this
+  // box's automatic min size, so without it the host absorbs ALL flex-shrink and collapses to 0px
+  // the moment the dialogue overflows the thread — i.e. in every real session (dogfood 2026-07-01).
+  host.style.cssText='align-self:stretch;flex:none;width:100%;height:460px;border-radius:16px;'
+    +'overflow:hidden;margin:10px 0 2px;background:#04060c;position:relative';
   thread.appendChild(host);
-  muted(rendered ? (rendered+' area'+(rendered===1?'':'s')+' have taken shape.')
+  muted(rendered ? (rendered+' area'+(rendered===1?'':'s')+(rendered===1?' has':' have')+' taken shape.')
                  : 'A seed was planted — your world begins.');
   try { if(window.Terrain3D) Terrain3D.render(host, regions); } catch(_) { /* text note stands as fallback */ }
   thread.scrollTop=thread.scrollHeight;

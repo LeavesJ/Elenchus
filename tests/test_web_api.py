@@ -210,6 +210,20 @@ def test_done_payload_carries_a_landing(tmp_path, make_fake):
     assert "embed_credentials_as_a_list" not in r["landing"]
 
 
+def test_terrain_host_cannot_flex_collapse():
+    """Dogfood 2026-07-01: #thread is a fixed-height column flex container; the terrain host has
+    overflow:hidden, which zeroes its automatic flex minimum size — so without flex:none the host
+    absorbs ALL the shrink and collapses to 0px the moment the dialogue overflows the thread, i.e.
+    in EVERY real session (sparse harnesses never catch it). Pin the anti-collapse property."""
+    client = TestClient(create_app(db_path=":memory:", model_factory=None))
+    html = client.get("/").text
+    host_block = html[html.index("terrain3d'") : html.index("terrain3d'") + 500]
+    assert "flex:none" in host_block
+    assert "height:460px" in host_block
+    # grammatical fallback copy for a single region ("1 area has taken shape.")
+    assert "' has':' have'" in html
+
+
 def test_index_renders_landing_before_end_affordance():
     client = TestClient(create_app(db_path=":memory:", model_factory=None))
     html = client.get("/").text
