@@ -1,5 +1,56 @@
 # Retnovation — DEVLOG
 
+## 2026-06-30 — feat(terrain): The Kindled Valley — 3D reward terrain (two-axis wire + WebGL renderer + reveal beat)
+- **The thread that started it.** Two gaps the dogfood surfaced: (1) a pure Socratic withhold has no
+  positive-progress channel — the session feels like an endless "something's missing" treadmill even when the
+  user reasons well (no reward / no hope-to-end); (2) as a B2C product, the surface *is* half the engine, and
+  the old terrain (flat DOM circles glowing by vitality bucket) undersold the whole thing. The reward is the
+  **terrain at the close**: a beautiful world you *ignite* — knowing it grows when you converge is the "hope to
+  end." (The within-turn half — woven stance modulation — stays a separate, later voice thread.)
+- **Decision (brainstormed live with the founder; concept browser-verified before any code).** "**The Kindled
+  Valley**" — a dark twilight valley you ignite: villages you grow, terraces that rise, a warm beacon, a fogged
+  frontier. Chosen over metropolis (off-theme, tycoon) and a passive garden (no verb); the verb *ignite* +
+  Ret·novation's "spark that endures" made it. Real-time **WebGL (Three.js)**, not the flat mockups — the
+  concept was verified in a real browser (garden terraces, pine forest, matte→subtle fog, UnrealBloom, lowkey).
+  Full arc: brainstorm → spec (`…/specs/2026-06-30-kindled-valley-terrain-reward-design.md`) → plan
+  (`…/plans/2026-06-30-kindled-valley-terrain.md`) → controller-implements build with per-task + whole-branch review.
+- **Built, TDD, green per commit (T1–T6):** (T1) **second terrain axis** — `elevation`/accretion alongside
+  `vitality` on the L-13 wire (`Region.accretion=len(problems)`, `_elevation_bucket`, `learner_view` gains
+  `elevation`), gated by the *same* `region_clears_guard` (None for seeds), rename-invariant (count-derived);
+  re-proof tests: rename-invariance incl. elevation, key-set lock, seed⇒None, **two-axis independence**
+  (tall-dim vs short-bright), coarse bucketing. L-10: the web-api terrain-shape assertion updated in the same
+  commit. (T2) **vendored** Three.js r128 + the UnrealBloom postprocessing addons under `static/vendor/` — no
+  CDN in the product. (T3) **`terrain3d.js`** renderer: each rendered region → a village (elevation → rising
+  terraces, vitality → beacon/window brightness), each seed → a dark ember; **village positions are a function
+  of the public ordinal ONLY** (L-13). Founder art notes applied + browser-verified rich AND user-zero states:
+  real additive fog at cut intensity (not shiny/matte), lowkey exposure/bloom, no auto-rotate. (T4) **cutover** —
+  the close renders the 3D valley (DOM-circle terrain removed; a text note stays as the no-WebGL fallback).
+  (T5) **reveal beat** — fly-in + villages *kindle up* as the world reveals (renderer-only; the precise
+  prev-terrain "which region grew" diff deferred, spec §16, so `session_runner`/engine stay untouched).
+- **Invariants held:** engine (`orchestration.py`, `assessment/judgment_loop.py`) **byte-untouched** (empty
+  diff vs main); `app.py`/`session_runner.py` (the close route/protocol) untouched — terrain still served only
+  at `/close`, frozen in `ch.record` (two-phase L-13 timing intact); no `frame_code`/`veldra:` ref reaches the
+  client (web-api no-leak assertions extended to the new key).
+- **Honest residuals (accepted, recorded):** `elevation` is a *new* learner-facing channel — a coarse,
+  count-derived, guard-gated **depth-location** signal ("how much ground," never "which move"), the same
+  bounded §4d family as the accepted rebound/node-count residuals; shrinks as the corpus fills. House-count per
+  village is a coarse elevation cue, not exact breadth. The precise ignite-diff and terrace-*rise* animation are
+  deferred to a refinement.
+- **Connection layer — DESIGNED, not built (seams reserved):** the hierarchy is house=session · village=region
+  · **road=transfer** · valley=your judgment, with **Vera as a gliding lamplighter wisp** embodying transfer +
+  the ignite ritual (verified in a throwaway 2-village + road + wisp prototype). V1 ships the single valley; the
+  spec reserves the seams (a `transfer`-edge wire field; the renderer already builds N villages; a persona
+  world-presence facet) so it's an additive future increment, not a rewrite. First-person is an optional
+  "walk your valley" treat, later. The guardrail: the world + figure + roads are **read-only rituals, never a
+  work-selector** — you still pick problems in the dialogue; fog recedes by *mastery, not navigation*.
+- **Verified:** offline **306 passed / 17 skipped**, ruff clean. Health smoke (documented launch
+  `PYTHONPATH=src .venv/bin/python -m retnovation.web`): `GET /api/health → {"ok":true}`, `GET / → 200` serving
+  the 3D shell, `/static/vendor/three.min.js` + `/static/terrain3d.js` → 200. **Reviews:** T1 adversarial moat
+  review **MERGE-READY** (elevation rename-invariant/guard-gated/coarse/bounded; engine empty-diff; it noted the
+  two-axis test proves elevation isn't a covert re-encoding of vitality); whole-branch review run at T6. NEXT:
+  founder felt dogfood of the real close (does the valley land, does the reveal feel like a reward?), then
+  finishing-a-development-branch (merge is the founder's call). Push remains the founder's explicit call.
+
 ## 2026-06-30 — feat(presentation): persona/subject/role across voice AND visual (the rigidity fix + a content-resolved identity seam)
 - **The dogfood that started it.** A founder browser session showed Vera's voice was a **rigid, stubborn AI
   template** — every turn the same five-beat machine (em-dash hinge, repeated "pick one and tell me X"). A
