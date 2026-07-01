@@ -180,3 +180,13 @@ def test_vendor_three_is_served():
     r = client.get("/static/vendor/three.min.js")
     assert r.status_code == 200 and b"THREE" in r.content
     assert client.get("/static/vendor/UnrealBloomPass.js").status_code == 200
+
+
+def test_index_references_3d_terrain_renderer():
+    # The close renders the Kindled Valley 3D terrain: the shell loads the vendored engine + the
+    # renderer and calls it (no CDN; DOM-circle terrain removed).
+    client = TestClient(create_app(db_path=":memory:", model_factory=None))
+    html = client.get("/").text
+    assert "/static/vendor/three.min.js" in html
+    assert "/static/terrain3d.js" in html
+    assert "Terrain3D.render" in html
