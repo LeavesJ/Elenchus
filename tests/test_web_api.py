@@ -208,3 +208,12 @@ def test_done_payload_carries_a_landing(tmp_path, make_fake):
     # FakeModel.concierge_land echoes the stop reason: "[land:<reason>]" — non-empty, no frame leak.
     assert isinstance(r["landing"], str) and r["landing"].startswith("[land:")
     assert "embed_credentials_as_a_list" not in r["landing"]
+
+
+def test_index_renders_landing_before_end_affordance():
+    client = TestClient(create_app(db_path=":memory:", model_factory=None))
+    html = client.get("/").text
+    # the done branch renders the landing as a Vera bubble...
+    assert "bubble('vera', r.landing)" in html
+    # ...before the End affordance is wired for that turn
+    assert html.index("bubble('vera', r.landing)") < html.index("endButton()")

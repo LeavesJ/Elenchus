@@ -99,7 +99,7 @@ async function choose(i, menuEl){
 }
 function advance(r){
   if(r.kind==='say'){ applyTheme(r.theme); bubble('vera', r.text); showComposer(true); return; }
-  if(r.kind==='done'){ mode='converse'; showComposer(true); endButton(); return; }
+  if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); endButton(); return; }
   if(r.kind==='close'){ renderClose(r); return; }
   if(r.kind==='nudge'){ muted(r.message); showComposer(true); return; }
   muted('error: '+(r.message||'')); showComposer(true);
