@@ -172,3 +172,11 @@ def test_converse_and_close_endpoints(tmp_path, make_fake):
             "elevation",
         }  # L-13-safe two-axis wire shape
         assert "embed_credentials_as_a_list" not in str(row)
+
+
+def test_vendor_three_is_served():
+    # Three.js + bloom addons are vendored + served locally (no CDN dependency in the product).
+    client = TestClient(create_app(db_path=":memory:", model_factory=None))
+    r = client.get("/static/vendor/three.min.js")
+    assert r.status_code == 200 and b"THREE" in r.content
+    assert client.get("/static/vendor/UnrealBloomPass.js").status_code == 200
