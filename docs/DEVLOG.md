@@ -1,5 +1,62 @@
 # Retnovation — DEVLOG
 
+## 2026-07-01 — feat(voice): Earned Landing — the post-convergence wind-down + felt arrival
+- **The dogfood that started it.** On the terrain branch the founder converged on a pricing decision (committed
+  "12 for 12"; Vera said "planted") — then Vera **kept interrogating in circles**, several turns later
+  re-demanding *"you still haven't named the number"* (already named), and the **End button appeared abruptly**.
+  Recon pinned two **voice-layer** defects (engine byte-untouched, verified — `_select_target`/`generate_push`/
+  `classify_response` are never called after `done`): (1) `voice.converse()` reused the **re-invite** path
+  `turn(push="")`, whose brief literally says *"the student has not taken a position — invite one"*, so post-
+  convergence the code told Vera the user hadn't committed; compounded by the 6-turn render window (the committed
+  answer aged out) and `voice_craft`'s press gear with no wind-down. (2) `index.html` showed the End button on the
+  raw `done` with no closing beat. Founder chose the **"Earned Landing"** scope (the ending; within-session woven
+  modulation stays deferred). Full arc: spec (`…/specs/2026-07-01-earned-landing-design.md`, 3-lens adversarial
+  review folded, founder-approved) → plan (`…/plans/2026-07-01-earned-landing.md`) → controller-implements build,
+  per-task + whole-branch review.
+- **Built, TDD, green per commit (T1–T6):** (T1) **`_render_turns(limit=6)` param** — default preserves every
+  existing caller byte-for-byte; post-convergence callers pass `limit=20` so the committed answer can't age out.
+  (T2) **converse winds down** — new `content/prompts/concierge_converse.md` + `model.concierge_converse`;
+  `voice.converse` rewritten to author via it (frame-blind wind-down doctrine, wider window) instead of the
+  re-invite `turn(push="")` — **kills the circling** (regression test: the re-invite path is now unreachable).
+  (T3) **the felt landing** — new `content/prompts/concierge_land.md` + `model.concierge_land` +
+  `voice.land`/`_STATIC_LAND`: a short present-tense arrival, honest by `stop_reason`, egress-backstopped (mirrors
+  `voice.close`), fallback to an honest-generic static. (T4) **wired into `done`** — the worker authors the
+  landing **strictly downstream of the frozen assessment** (never re-enters a graded call) and carries it on the
+  `done` payload; `stop_reason` persisted to `ch.record`; `app._emit` passes `landing`. (T5) **UI** — the landing
+  renders as a Vera bubble **before** the End affordance (escaped via `esc()`). (T6) **@live** — 3 key-gated tests:
+  the landing arrives with **no evaluative verdict** (L-4), **no named move** (L-13), no re-demand; a non-converged
+  stop lands **honestly** (anti-flattery); converse doesn't re-demand.
+- **The load-bearing moat point (L-4).** The egress screen (`screen_moves`) backstops L-13 (naming a hidden
+  *move*) but is **BLIND to L-4** (a verdict on the conclusion names no move — "you got it right" passes every
+  screen). So the landing's no-grade guarantee rests on two backstops, both confirmed by a 3-lens OPUS review:
+  **(a) structural** — correctness is *never* supplied to the author (`concierge_land` gets only problem + dialogue
+  + `stop_reason`, which is a process signal, not a grade; `recent` carries no correctness), so an author *cannot*
+  grade what it was never told; **(b) prose** — `concierge_land.md` explicitly forbids grading/scoring/validating,
+  with a worked GOOD (crux in the user's own terms) vs BAD (naming the move) contrast; a review Minor sharpened it
+  further ("reward by DESCRIBING the movement, never by RATING it"). The `@live` no-verdict test is the behavioral
+  teeth the egress screen can't provide.
+- **Invariants held:** engine (`orchestration.py`, `assessment/judgment_loop.py`, the three graded methods)
+  **byte-untouched** — empty diff vs `main` across the whole `assessment/` tree. **Bridge transparency intact** —
+  the additive `landing` key on the `done` payload doesn't perturb `assessment`
+  (`test_runner_assessment_equals_direct_run_session` byte-equality still green). L-13: every landing + converse
+  turn is egress-backstopped; the landing on the wire carries no `frame_code`/`veldra:`. Two-phase timing
+  unchanged: the landing is *dialogue* (at convergence); terrain still only at `/close`.
+- **Honest residuals / deferred (founder-adjudication bundle at merge).** Two converse honesty-by-stop-reason
+  items, both adjacent to the explicitly-deferred within-session modulation: (1) `voice.converse`'s leak/empty/
+  refusal fallback is `SAFE_CONTRACT`, which *re-invites* a position — a mild reappearance of the circling on the
+  rare fallback path (plan §3b mandated it; a wind-down-flavored static would close it). (2) `rec["stop_reason"]`
+  is **stored but unconsumed** — `converse` doesn't read it, and `concierge_converse.md` hard-assumes "already
+  committed," which is false on a non-converged stop (budget/plateau); the spec stored it "so converse stays
+  convergence-aware" but its own doctrine doesn't use it. Both are honest-generic-safe today; wiring converse's
+  honesty-by-stop-reason is the natural next increment. Plus two @live soft spots (narrow anti-flattery sentinels;
+  a bare `"correct"` token) — watch if a gated @live run false-fails.
+- **Verified:** offline **318 passed / 20 skipped** (3 new @live tests SKIP without a key), ruff clean, engine
+  empty-diff, bridge byte-equal. Per-task reviews: T1/T5 sonnet ✅, T2/T4/T6 OPUS ✅, **T3 3-lens OPUS Workflow ✅**
+  (L-4 no-grade guarantee confirmed by all three lenses). The **@live suite is founder-gated** (spends Opus) — run
+  it at the felt dogfood with the key. NEXT: whole-branch OPUS review → present the deferred bundle + the
+  merge/push decision to the founder (finishing-a-development-branch; this branch is stacked on
+  `feat/kindled-valley-terrain`).
+
 ## 2026-06-30 — feat(terrain): The Kindled Valley — 3D reward terrain (two-axis wire + WebGL renderer + reveal beat)
 - **The thread that started it.** Two gaps the dogfood surfaced: (1) a pure Socratic withhold has no
   positive-progress channel — the session feels like an endless "something's missing" treadmill even when the
