@@ -5,19 +5,36 @@ import pytest
 from retnovation.aim import aim, derive_core
 from retnovation.experience import select_experience
 from retnovation.model import AnthropicModel, IntakeClassification
-from retnovation.types import FrameState, LearnerState, Regime, TrapState
+from retnovation.types import FrameState, Regime, TrapState
 
 _HAS_KEY = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"))
 
 
 @pytest.mark.live
 @pytest.mark.skipif(not _HAS_KEY, reason="no Anthropic credential in env")
-def test_live_intake_on_fixed_experience():
-    """Smoke: a real Opus 4.8 call classifies every rubric code on the fixed experience."""
-    core = derive_core(aim())
-    exp = select_experience(core, LearnerState(), ledger=[], spec=None)
+def test_live_intake_on_selected_experience(tmp_path):
+    """Smoke: a real Opus 4.8 call classifies every rubric code on a REAL selected experience.
+    Setup mirrors test_voice_live._first_open_exp — the production selection path (store → propose →
+    select), NOT a hand-built shortcut: the old spec=None 'fixed experience' call rotted silently
+    when select_experience gained `corpus`, because this key-gated test never runs offline (L-22)."""
+    from datetime import datetime, timezone
+
+    from retnovation.cli import build_store
+    from retnovation.content_loader import load_library, load_progression
+    from retnovation.scheduler import propose_open_ended
+
+    store = build_store(str(tmp_path / "live_intake.db"))
+    try:
+        core = derive_core(aim())
+        now = datetime.now(timezone.utc)
+        state, ledger, corpus = store.load_state(now), store.load_ledger(), store.load_corpus()
+        exps = [e for e in load_library() if e.regime is Regime.open_ended]
+        spec, _ = propose_open_ended(state, exps, load_progression(), now).problem_menu()[0]
+        exp = select_experience(core, state, ledger, corpus, spec)
+    finally:
+        store.close()
     result = AnthropicModel().classify_intake(
-        exp, "I would honor the customer's reading because the relationship matters most."
+        exp, "I would hold the original commitment because reversing it later costs more."
     )
     assert isinstance(result, IntakeClassification)
     assert set(result.frame_states) == {f.frame_code for f in exp.rubric.frames}

@@ -1,5 +1,22 @@
 # Retnovation — DEVLOG
 
+## 2026-07-01 — @live run GREEN (Earned Landing confirmed live) + one pre-existing stale live test fixed (L-22)
+- **The founder ran the gated `-m live` suite (post-merge, post-push): 19 passed / 1 failed.** All 3 new Earned
+  Landing tests **PASSED against real Opus** — the landing arrives with no evaluative verdict (L-4) and no named
+  move (L-13), a non-converged stop lands honestly, and converse winds down without re-demanding the committed
+  position. The whole pre-existing moat/gear/golden-set live suite also green.
+- **The one failure was pre-existing bitrot, unrelated to Earned Landing:** `test_live_model.py::
+  test_live_intake_on_fixed_experience` TypeError'd at SETUP (no model call reached) — it still called
+  `select_experience(core, state, ledger, spec=None)` from before the gated-generator/immersive-scenes era;
+  when the required `corpus` param landed (3915964/6d0f836), every offline caller was updated (L-10) but this
+  key-gated test never runs offline, so it rotted invisibly through six merged builds (**new lesson L-22**).
+- **Fix:** modernized the smoke to the production selection path (mirrors `test_voice_live._first_open_exp`:
+  `build_store` → load state/ledger/corpus → `propose_open_ended` → `select_experience`), renamed to
+  `test_live_intake_on_selected_experience`; same shape assertions (every rubric code classified, enum types).
+  Verified cheapest-first (L-17/L-22): setup-only offline repro (`SETUP OK: continuity_lock_in`), ruff clean,
+  offline suite unchanged **318/20**, then a **single-call live run of just that test: 1 passed (11.9s)** —
+  the live suite is now fully green.
+
 ## 2026-07-01 — feat(voice): Earned Landing — the post-convergence wind-down + felt arrival
 - **The dogfood that started it.** On the terrain branch the founder converged on a pricing decision (committed
   "12 for 12"; Vera said "planted") — then Vera **kept interrogating in circles**, several turns later

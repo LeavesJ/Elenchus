@@ -196,3 +196,16 @@ Read this checklist before every code change. Update it after every correction o
   controller's later edits), OR instruct them to review the COMMIT via `git show <sha>` and run only that commit's
   own tests — never `pytest` the live tree — and to treat any full-suite failure as possibly later in-progress work,
   not the commit under review. "Passes in isolation, fails in the full run" during an active build is the tell.
+- **L-22 A key-gated (@live) test rots SILENTLY when a signature changes — it never runs offline, so the drift
+  is invisible until the next paid live run.** `test_live_intake_on_fixed_experience` called
+  `select_experience(core, state, ledger, spec=None)`; when Step 3/immersive-scenes added the required `corpus`
+  param (3915964/6d0f836) every OFFLINE caller was updated (L-10) but this @live test was not — it is
+  `skipif(no key)`, so six merged builds and every `pytest -q` stayed green while the test was un-runnable. It
+  surfaced a week later as a TypeError in the founder's first full `-m live` run, costing a 5-minute paid run to
+  discover a bug that was free to catch. Prevention: (a) L-10's "update every caller in the same commit" includes
+  callers the offline suite never EXECUTES — when changing a signature, grep tests/ for the symbol including
+  live/skipped files, and treat a hit in an @live file as a real caller; (b) build live-test setups on the
+  production path shared with offline-covered helpers (mirror `_first_open_exp`), never on retired shortcuts —
+  everything before the model call should be executable offline, so a setup-only repro
+  (`python -c` the setup lines) can verify it for free; (c) after fixing a live-only break, verify with a
+  single-call live run of just that test (L-17), not the whole batch.
