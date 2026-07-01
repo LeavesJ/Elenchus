@@ -378,3 +378,31 @@ def test_display_titles_have_no_veldra_and_cover_open_ended():
         assert ref.startswith("veldra:")  # keyed by the internal ref (server-side only)
         assert "veldra" not in title.lower()  # the VALUE never leaks the source
         assert title and title[0].isupper()
+
+
+# --- _render_turns windowing --------------------------------------------------------------------
+
+
+def test_render_turns_default_window_is_six():
+    from retnovation.model import _render_turns
+
+    turns = [("student", f"t{i}") for i in range(10)]
+    out = _render_turns(turns)
+    assert "t9" in out and "t4" in out  # last 6: t4..t9
+    assert "t3" not in out  # older than the 6-turn tail is dropped
+
+
+def test_render_turns_wider_window_keeps_more():
+    from retnovation.model import _render_turns
+
+    turns = [("student", f"t{i}") for i in range(25)]
+    out = _render_turns(turns, limit=20)
+    assert "t24" in out and "t5" in out  # last 20: t5..t24
+    assert "t4" not in out
+
+
+def test_render_turns_empty_is_blank():
+    from retnovation.model import _render_turns
+
+    assert _render_turns([]) == ""
+    assert _render_turns([], limit=20) == ""

@@ -228,10 +228,10 @@ def _render_rubric(rubric) -> str:
     return "\n".join(lines)
 
 
-def _render_turns(recent: list[tuple[str, str]]) -> str:
+def _render_turns(recent: list[tuple[str, str]], limit: int = 6) -> str:
     if not recent:
         return ""
-    lines = [f"{role}: {text}" for role, text in recent[-6:]]
+    lines = [f"{role}: {text}" for role, text in recent[-limit:]]
     return "Recent exchange:\n" + "\n".join(lines) + "\n\n"
 
 
