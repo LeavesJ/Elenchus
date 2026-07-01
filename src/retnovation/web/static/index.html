@@ -29,9 +29,8 @@
   .node{width:18px;height:18px;border-radius:50%;background:#0f3a3f;box-shadow:0 0 6px #155e63}
   .node.v2{background:#1d6f6f;box-shadow:0 0 12px #2bd4c4}
   .node.v3{background:#2bd4c4;box-shadow:0 0 18px #5eead4}
-  .end{align-self:center;margin-top:8px;background:#0f1a2b;border:1px solid #2b4a6b;color:#cfe;
-    border-radius:10px;padding:8px 16px;font:inherit;cursor:pointer}
-  .end:disabled{opacity:.5;cursor:default}
+  #composer #end{background:#0f1a2b;border:1px solid #2b4a6b;color:#cfe}
+  #composer #end[hidden]{display:none}
   #wrap{--accent:#5a6a85}
   .accent-amber{--accent:#ba7517} .accent-teal{--accent:#1d9e75} .accent-slate{--accent:#5a6a85}
   .you{background:var(--accent)!important}
@@ -54,6 +53,7 @@
   <form id="composer" hidden>
     <textarea id="input" placeholder="Take a position. Reason it out." rows="1"></textarea>
     <button type="submit" id="send">Send</button>
+    <button type="button" id="end" hidden>End session</button>
   </form>
 </div>
 <script>
@@ -61,6 +61,7 @@ const thread = document.getElementById('thread');
 const composer = document.getElementById('composer');
 const input = document.getElementById('input');
 const send = document.getElementById('send');
+const endBtn = document.getElementById('end');
 let mode='engine';  // 'engine' -> /say (gate + probes); 'converse' -> /converse (post-convergence)
 const post = (url, body) => fetch(url, {method:'POST', headers:{'content-type':'application/json'},
   body: body?JSON.stringify(body):null}).then(r=>r.json());
@@ -73,6 +74,13 @@ function thinking(){ const d=document.createElement('div'); d.className='thinkin
   d.innerHTML='Vera is thinking<span>.</span><span>.</span><span>.</span>'; thread.appendChild(d);
   thread.scrollTop=thread.scrollHeight; return d; }
 function showComposer(on){ composer.hidden=!on; if(on){ input.disabled=false; send.disabled=false; input.focus(); } }
+// The End control lives in the STICKY composer row (not the scrolling thread): the exit stays
+// findable however long the post-landing conversation runs (dogfood 2026-07-01: the old one-shot
+// thread-anchored button drifted six turns into scrollback and the user had to hunt for it).
+function showEnd(on){ endBtn.hidden=!on; }
+endBtn.addEventListener('click', async ()=>{ endBtn.disabled=true; const t=thinking();
+  try{ const r=await post('/api/session/single/close'); t.remove(); renderClose(r); }
+  catch(_){ t.remove(); endBtn.disabled=false; muted('connection lost — try again.'); } });
 function applyTheme(t){ if(!t) return;
   const w=document.getElementById('wrap'); w.className='';
   if(t.accent) w.classList.add('accent-'+t.accent);
@@ -99,17 +107,10 @@ async function choose(i, menuEl){
 }
 function advance(r){
   if(r.kind==='say'){ applyTheme(r.theme); bubble('vera', r.text); showComposer(true); return; }
-  if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); endButton(); return; }
+  if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); return; }
   if(r.kind==='close'){ renderClose(r); return; }
   if(r.kind==='nudge'){ muted(r.message); showComposer(true); return; }
   muted('error: '+(r.message||'')); showComposer(true);
-}
-function endButton(){
-  const b=document.createElement('button'); b.className='end'; b.type='button'; b.textContent='End session';
-  b.onclick=async()=>{ b.disabled=true; const t=thinking();
-    try{ const r=await post('/api/session/single/close'); t.remove(); renderClose(r); }
-    catch(_){ t.remove(); b.disabled=false; muted('connection lost — try again.'); } };
-  thread.appendChild(b); thread.scrollTop=thread.scrollHeight;
 }
 function renderClose(r){ if(r.close) bubble('vera', r.close); renderTerrain(r.terrain||[]); showComposer(false); }
 function renderTerrain(regions){

@@ -280,5 +280,9 @@ def test_index_renders_landing_before_end_affordance():
     html = client.get("/").text
     # the done branch renders the landing as a Vera bubble...
     assert "bubble('vera', r.landing)" in html
-    # ...before the End affordance is wired for that turn
-    assert html.index("bubble('vera', r.landing)") < html.index("endButton()")
+    # ...then reveals the PERSISTENT End control — it lives in the sticky composer row, so it can
+    # never be lost in scrollback while the user keeps conversing (dogfood 2026-07-01: the one-shot
+    # thread-anchored button drifted six turns up and the user had to hunt for it).
+    assert html.index("bubble('vera', r.landing)") < html.index("showEnd(true)")
+    assert 'id="end"' in html  # the End control is part of the composer, not the scrolling thread
+    assert "endButton" not in html  # the one-shot thread-anchored button is gone
