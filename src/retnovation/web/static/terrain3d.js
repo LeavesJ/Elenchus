@@ -62,15 +62,7 @@ window.Terrain3D = (function () {
     for (var ri = 0; ri < data.regions.length; ri++) { var p = pos(ri); maxR = Math.max(maxR, Math.sqrt(p.x * p.x + p.z * p.z)); }
     var target = new THREE.Vector3(0, wh(0, 0) + 4, 0);
     var az = 0.9, pol = 1.14, rad = Math.min(78, 26 + maxR * 1.1), dragging = false, lx = 0, ly = 0;
-    function place() {
-      camera.position.set(
-        target.x + rad * Math.sin(pol) * Math.cos(az),
-        target.y + rad * Math.cos(pol),
-        target.z + rad * Math.sin(pol) * Math.sin(az)
-      );
-      camera.lookAt(target);
-    }
-
+    var introActive = true, INTRO = 2.0; // reveal beat: fly-in + villages kindle up as the camera arrives
     scene.add(new THREE.HemisphereLight(0x18314c, 0x04060c, 0.28));
     scene.add(new THREE.AmbientLight(0x091320, 0.16));
     var moon = new THREE.DirectionalLight(0x8fb0d8, 0.32); moon.position.set(-46, 54, -30); scene.add(moon);
@@ -132,10 +124,10 @@ window.Terrain3D = (function () {
     var dR = new THREE.MeshStandardMaterial({ color: 0x0b0f17, roughness: 0.9 });
     var chimMat = new THREE.MeshStandardMaterial({ color: 0x241a12, roughness: 0.95 });
     var orbGeo = new THREE.SphereGeometry(0.2, 8, 8), postGeo = new THREE.CylinderGeometry(0.08, 0.1, 1.5, 5);
-    var beacons = [], lightSites = [];
+    var beacons = [], lightSites = [], litMats = [];
 
-    function litWinMat(bright) { return new THREE.MeshStandardMaterial({ color: 0x1a1208, emissive: 0xffc470, emissiveIntensity: 1.0 + 1.8 * bright }); }
-    function orbMat(bright) { return new THREE.MeshStandardMaterial({ color: 0x1a1206, emissive: 0xffc06a, emissiveIntensity: 1.0 + 1.6 * bright }); }
+    function litWinMat(bright) { var m = new THREE.MeshStandardMaterial({ color: 0x1a1208, emissive: 0xffc470, emissiveIntensity: 1.0 + 1.8 * bright }); litMats.push({ m: m, base: m.emissiveIntensity }); return m; }
+    function orbMat(bright) { var m = new THREE.MeshStandardMaterial({ color: 0x1a1206, emissive: 0xffc06a, emissiveIntensity: 1.0 + 1.6 * bright }); litMats.push({ m: m, base: m.emissiveIntensity }); return m; }
 
     function gTier(cx, cz, vb, rT, rB, h, localCy, rot, bright) {
       var g = new THREE.Group();
@@ -255,7 +247,7 @@ window.Terrain3D = (function () {
     var keys = {};
     window.addEventListener("keydown", function (e) { keys[e.key.toLowerCase()] = true; });
     window.addEventListener("keyup", function (e) { keys[e.key.toLowerCase()] = false; });
-    function dn(e) { dragging = true; container.style.cursor = "grabbing"; var t = e.touches ? e.touches[0] : e; lx = t.clientX; ly = t.clientY; }
+    function dn(e) { dragging = true; introActive = false; container.style.cursor = "grabbing"; var t = e.touches ? e.touches[0] : e; lx = t.clientX; ly = t.clientY; }
     function mv(e) { if (!dragging) return; var t = e.touches ? e.touches[0] : e; az -= (t.clientX - lx) * 0.006; pol -= (t.clientY - ly) * 0.006; pol = Math.max(0.14, Math.min(1.42, pol)); lx = t.clientX; ly = t.clientY; if (e.touches) e.preventDefault(); }
     function up() { dragging = false; container.style.cursor = "grab"; }
     cv.addEventListener("pointerdown", dn); window.addEventListener("pointermove", mv); window.addEventListener("pointerup", up);
@@ -282,17 +274,25 @@ window.Terrain3D = (function () {
       if (keys["w"] || keys["arrowup"]) mvz += 1; if (keys["s"] || keys["arrowdown"]) mvz -= 1;
       if (keys["a"] || keys["arrowleft"]) mvx -= 1; if (keys["d"] || keys["arrowright"]) mvx += 1;
       if (mvx || mvz) { var fx = Math.cos(az), fz = Math.sin(az); target.x += (-fx * mvz + fz * mvx) * 0.8; target.z += (-fz * mvz - fx * mvx) * 0.8; var lim = 54, d = Math.sqrt(target.x * target.x + target.z * target.z); if (d > lim) { target.x *= lim / d; target.z *= lim / d; } target.y = wh(target.x, target.z) + 4; }
+      var ige = 1;
+      if (introActive) { var ig = Math.min(1, t / INTRO); ige = 1 - Math.pow(1 - ig, 3); if (ig >= 1) introActive = false; }
+      var kindle = 0.12 + 0.88 * ige; // villages "catch fire" as the reveal settles in
       for (var bi = 0; bi < beacons.length; bi++) {
         var bc = beacons[bi], fl = 0.7 + 0.3 * Math.sin(t * 6.5 + bc.ph) + 0.12 * Math.sin(t * 15 + bc.ph);
-        bc.bl.intensity = (0.7 + 1.1 * bc.base) * (0.8 + 0.25 * fl);
-        bc.flame.material.emissiveIntensity = (0.7 + 0.9 * bc.base) * (0.75 + 0.4 * fl);
+        bc.bl.intensity = (0.7 + 1.1 * bc.base) * (0.8 + 0.25 * fl) * kindle;
+        bc.flame.material.emissiveIntensity = (0.7 + 0.9 * bc.base) * (0.75 + 0.4 * fl) * kindle;
         bc.flame.scale.setScalar(0.9 + 0.14 * fl);
-        bc.gc.material.opacity = (0.3 + 0.3 * bc.base) * (0.8 + 0.3 * fl);
+        bc.gc.material.opacity = (0.3 + 0.3 * bc.base) * (0.8 + 0.3 * fl) * kindle;
       }
+      for (var li = 0; li < litMats.length; li++) litMats[li].m.emissiveIntensity = litMats[li].base * kindle;
       for (var i = 0; i < flies.length; i++) { var ff = flies[i]; ff.s.position.y = ff.y0 + (Math.sin(t * ff.sp + ff.ph) * 0.5 + 0.5) * ff.amp; ff.s.position.x = ff.bx + Math.sin(t * 0.4 + ff.ph) * 1.5; ff.s.position.z = ff.bz + Math.cos(t * 0.35 + ff.ph) * 1.5; ff.s.material.opacity = 0.3 + 0.4 * Math.abs(Math.sin(t * 1.3 + ff.ph)); }
       for (var m = 0; m < mist.length; m++) mist[m].s.position.x = mist[m].bx + Math.sin(t * 0.06 + mist[m].ph) * 9;
       for (var g2 = 0; g2 < fogWall.length; g2++) fogWall[g2].s.material.opacity = fogWall[g2].b * (0.85 + 0.15 * Math.sin(t * 0.5 + fogWall[g2].ph));
-      place(); draw();
+      // fly-in reveal: start wide + high, ease to the resting pose (rr==rad, pp==pol once ige==1)
+      var rr = rad * (1 + 0.7 * (1 - ige)), pp = pol * (0.8 + 0.2 * ige);
+      camera.position.set(target.x + rr * Math.sin(pp) * Math.cos(az), target.y + rr * Math.cos(pp), target.z + rr * Math.sin(pp) * Math.sin(az));
+      camera.lookAt(target);
+      draw();
     })();
   }
 
