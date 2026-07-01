@@ -50,25 +50,43 @@ stance there would leak into mid-session probing.
 
 ### 3a. The landing at `done` (felt arrival)
 
-When the worker sees the engine finish (`session_runner` worker, after `run_session` returns and `ch.record` is
-frozen — **web-layer, post-assessment, transparent**), author a **landing turn** and carry it in the `done`
-payload; the UI shows it as Vera's turn, then the End affordance.
+When the worker sees the engine finish (`session_runner` worker, **after** `run_session` returns and the
+assessment is frozen), author a **landing turn** and carry it in the `done` payload; the UI shows it as Vera's
+turn, then the End affordance. **Authoring is strictly downstream of the frozen assessment and never re-enters
+any graded call** (the session is terminal — `ch.terminal=True` — so there is no path back into the engine).
 
-- **New `voice.land(model, exp, recent, stop_reason, posture) -> str`** → **`model.concierge_land(problem,
-  recent, stop_reason, *, voice)`** with a new **`content/prompts/concierge_land.md`**. Egress-backstopped
-  (flat), fallback a static landing (§3d).
-- **Landing doctrine (`concierge_land.md`), honest by stop-reason:**
-  - **converged:** acknowledge the *movement* they made (frames closed, the trade-off reckoned) — **never
-    whether they're right (L-4)**; name the **crux** (the hard part of the decision) **in their own terms,
-    never the move (L-13)**; and let it rest — e.g. *"you've reckoned with the real trade-off and its cost;
-    there's no clean answer, and now you know why."* Do **not** ask for a position; do **not** re-open settled
-    ground; do **not** grade the conclusion or hand a resolution (L-5).
-  - **plateau / budget / regression / bounded_error_violation:** land **honestly** — name where the reasoning
-    actually got to and what's still open, without pretending they arrived ("this is as far as this session
-    goes; the piece you kept circling is X"). No forced verdict (L-16 spirit: don't claim an arrival the work
-    didn't make).
-- The landing sees the **full converged dialogue** (§3c), so it references the *actual* arrival, not a 6-turn
-  tail.
+- **`stop_reason` availability (review-corrected):** the landing is authored **in the worker, where the live
+  `assessment` (hence `assessment.stop_reason`) is in scope** — `ch.record` does *not* carry the assessment.
+  For symmetry + the wind-down (§3b), **also persist `"stop_reason": assessment.stop_reason` into `ch.record`**
+  so the converse continuation stays convergence-aware. (Corrects §6's earlier draft.)
+- **`voice.land(model, exp, recent, stop_reason, posture) -> str`** → **`model.concierge_land(problem, recent,
+  stop_reason, *, voice)`** with a new **`content/prompts/concierge_land.md`**. **The egress screen is
+  load-bearing here:** `voice.land()` applies `egress_safe_reply(model, exp, text)` in the worker and returns
+  `_STATIC_LAND` on leak/empty/refusal — **exactly as `voice.close()` does** (voice.py:85-86). Raw model text
+  MUST NOT reach the `done` payload unscreened.
+- **The landing is the *felt, in-the-moment arrival* — short, present-tense** ("you've landed it"), a distinct
+  beat/register from the retrospective `/close` synthesis (§3d).
+- **Landing doctrine (`concierge_land.md`), honest by stop-reason — with the hard prohibitions the egress
+  screen CANNOT enforce:**
+  - **The egress screen backstops L-13 (performing a move) but is BLIND to L-4 (grading the conclusion)** — an
+    author can say "you got the call right" while naming no frame, and `screen_moves` passes it. So
+    `concierge_land.md` MUST carry (like `concierge_close.md`'s explicit prohibitions): **(i) a hard "do NOT
+    grade, score, validate, or pass any verdict on the conclusion — reward the reckoning, never the answer"
+    line (L-4);** and **(ii) a worked contrast — name the crux *in the user's own concrete terms* (GOOD: "the
+    hard part is the thing protecting you is the thing you can't take back") vs. *naming the move/frame* (BAD:
+    restating the principle they were meant to find) (L-13).** The crux is the closest-to-the-line turn in the
+    product; the prompt gets an operational test, not just the abstract rule.
+  - **converged:** acknowledge the *movement* (frames closed, the trade-off reckoned) — never whether they're
+    right; name the crux **in their own terms**; let it rest — e.g. *"you've reckoned with the real trade-off
+    and its cost; there's no clean answer, and now you know why."*
+  - **plateau / budget / regression / bounded_error_violation:** land **honestly**, with the same
+    **anti-flattery discipline as `concierge_close.md`**: if they never took a real position on the concrete
+    choice (stayed in an analogy, flailed to `budget`), **say that plainly — do NOT manufacture an "arrival
+    narrative" or imply they were "circling a real thing"** when they weren't. No forced verdict (L-16 spirit).
+- The landing sees a **bounded wider window** (§3c), so it references the *actual* arc, not a 6-turn tail.
+- **Strictly the `done` path:** if the worker throws (`error`, not `done`), no landing fires — correct, no gap.
+  `captured` (hence a coherent `recent`) is always populated when `done` fires (`present()` sets it before
+  `run_session` returns), so the landing never authors over an empty dialogue.
 
 ### 3b. Converse winds down (kills the circling)
 
@@ -85,10 +103,11 @@ payload; the UI shows it as Vera's turn, then the End affordance.
 
 ### 3c. Keep the committed answer in view
 
-`model._render_turns` gains a `limit: int | None = 6` param (default preserves every existing caller
-byte-for-byte). The **post-convergence** callers (`concierge_land`, `concierge_converse`) pass a wider window
-(the full frozen `recent`, or a generous tail e.g. 20) so the committed position + the arc stay visible and Vera
-cannot forget what was decided. Probe turns (`concierge_turn`) keep the 6-turn default unchanged.
+`model._render_turns` gains a `limit: int = 6` param (default preserves every existing caller byte-for-byte —
+verified: `concierge_turn`/`concierge_close`/`classify_entry` all call it with no second arg). The
+**post-convergence** callers (`concierge_land`, `concierge_converse`) pass a **bounded wider window
+(`limit=20`)** so the committed position + the arc stay visible and Vera cannot forget what was decided, while
+capping growth if a user converses for many turns. Probe turns (`concierge_turn`) keep the 6-turn default.
 
 ### 3d. The End button follows the landing (UI)
 
@@ -99,15 +118,25 @@ the **terrain reveal** (the world payoff). Two distinct beats: the **dialogue la
 **world reveals** when the user chooses to end. (Static fallbacks: `_STATIC_LAND` for the landing;
 existing `_STATIC_CLOSE` for the close.)
 
+To avoid a **dull echo** when End is clicked right after the landing (0 converse turns), the two beats keep
+**distinct registers**: the **landing** is the in-the-moment felt arrival (short, present-tense, "you've landed
+it"); the **close** is the retrospective synthesis tied to the terrain reveal (the world payoff).
+`concierge_close.md` gains a one-line steer toward that retrospective/world register so it never merely
+re-voices the landing.
+
 ## 4. Moat / invariants (load-bearing)
 
 - **Engine byte-untouched:** `orchestration.py`, `assessment/judgment_loop.py`, the three graded model methods —
-  empty diff vs `main`. The landing is authored in the worker **after** `run_session`/assessment (transparent);
-  `test_runner_assessment_equals_direct_run_session` stays green.
+  empty diff vs `main`. The landing is authored **strictly downstream of the frozen assessment and never
+  re-enters any graded call**; the `done` payload gains an **additive** `landing` key, so
+  `test_runner_assessment_equals_direct_run_session` (which reads `assessment` by key) is unaffected.
 - **L-4 (never grade the conclusion):** the landing rewards *movement/arrival/rigor*, never "you got it right."
+  **The egress screen does NOT catch L-4** (it screens performed moves, not verdicts) — so the *only* backstop
+  is `concierge_land.md`'s explicit prohibition (§3a) and the @live "no evaluative verdict" assertion (§5).
 - **L-13 (never name the move):** the crux is named in the user's own terms / world idiom, never the frame.
-  Every landing + converse turn is **egress-backstopped** (`egress_safe_reply` / `screen_moves`) exactly as
-  today; on leak/empty/refusal → the static fallback.
+  Every landing + converse turn is **egress-backstopped** (`egress_safe_reply` / `screen_moves`) — for the
+  landing this runs inside `voice.land()` in the worker *before* the text reaches the `done` payload; on
+  leak/empty/refusal → the static fallback.
 - **L-5 (disband rules):** no handing the answer, no naming the frame, no softening, no removing effort. The
   landing is honest ("no clean answer"), not validating.
 - **Two-phase timing unchanged:** terrain still only at `/close`. The landing is *dialogue*, at convergence.
@@ -117,13 +146,15 @@ existing `_STATIC_CLOSE` for the close.)
 - **Structural (FakeModel / offline):**
   - `voice.converse` no longer calls the re-invite path: assert it routes to `concierge_converse` (not
     `concierge_turn(push="")`) — e.g. a FakeModel records which brief/method was used.
-  - `_render_turns(recent, limit=None)` returns the full dialogue; `_render_turns(recent)` unchanged (6).
+  - `_render_turns(recent, limit=20)` returns up to 20 turns; `_render_turns(recent)` unchanged (6).
   - The `done` payload carries a `landing` string; `app._emit`/`index.html` shape includes it.
   - Existing no-leak/L-13 web assertions extended to the landing + converse turns (no `frame_code`/`veldra:`).
 - **@live (key-gated):** after convergence, (a) the landing acknowledges arrival + names a crux **without**
-  re-demanding a position and **without** naming the move; (b) a follow-up converse turn does **not** re-open
-  settled ground / re-demand a position; (c) a non-converged stop (plateau/budget) lands **honestly** (no false
-  "you arrived"). The existing engagement / no-name / no-leak moat suite stays green.
+  re-demanding a position, **without** naming the move (L-13), and **without any evaluative verdict on the
+  conclusion** — no "right/correct/well done/score" (L-4, the assertion the egress screen cannot make); (b) a
+  follow-up converse turn does **not** re-open settled ground / re-demand a position; (c) a non-converged stop
+  (plateau/budget), and a user who never engaged the concrete choice, lands **honestly** — no false "you
+  arrived" and no manufactured "arrival narrative". The existing engagement / no-name / no-leak moat suite stays green.
 - **Regression:** the exact dogfood shape — user commits a number, keeps talking — no longer loops back to
   "name the number."
 - **Health smoke:** documented launch boots; `/api/health`, `/`, close flow intact.
@@ -136,9 +167,11 @@ existing `_STATIC_CLOSE` for the close.)
 - **Within-session modulation still deferred.** This lands the ending; the mid-session "press → acknowledge
   movement → crux" arc (the fuller handoff design) is a follow-up. If the ending-only landing doesn't make the
   session *feel* like it has "hope to end" throughout, that thread is next.
-- **Stop-reason honesty depends on the record carrying `stop_reason`.** `ch.record` already freezes the
-  assessment; the landing reads `assessment.stop_reason`. If a stop reason is missing/unknown, the landing
-  degrades to the honest-generic fallback, never the false-arrival text.
+- **Stop-reason source (review-corrected).** The landing reads `assessment.stop_reason` from the **live
+  `assessment` in the worker** — `ch.record` does NOT carry the assessment (only model/posture/exp/recent/
+  terrain). §3a **adds `stop_reason` to `ch.record`** so the wind-down (`converse`) can also stay
+  convergence-aware. If a stop reason is ever missing/unknown, the landing degrades to the honest-generic
+  fallback, never the false-arrival text.
 
 ## 7. Files touched (all voice/web-layer; engine untouched)
 
