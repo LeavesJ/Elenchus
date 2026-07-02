@@ -399,3 +399,90 @@ def test_converse_winds_down_does_not_re_demand_a_position(tmp_path):
     # the regression: it must NOT re-demand the already-committed position
     assert "take a position" not in low and "what number" not in low and "haven't named" not in low
     assert voice._performed(m, exp, reply) == set(), f"converse leaked a move: {reply!r}"
+
+
+# --- Woven stance modulation (live behavior) -------------------------------------------------------
+
+_ACK_OPENERS = ("you've", "you have", "you just", "you stopped", "you started")
+
+_MOVEMENT_REPLY = (
+    "Fine — I'll say the part I was avoiding: locking this in costs me the next two quarters of "
+    "flexibility, and I'd still do it. 12 for 12, and I own the downside if churn spikes."
+)
+_RESTATEMENT_REPLY = (
+    "Like I said, verifiable audits and data are what's essential. That's my answer."
+)
+
+
+def _probe_turn(m, exp, reply, arc):
+    f = exp.rubric.frames[0]
+    push = m.generate_push(exp, "frame", f.frame_code, stress=False)
+    turn = m.concierge_turn(
+        exp.prompt,
+        push,
+        [("Vera", "And the cost?"), ("student", reply)],
+        arc=arc,
+        voice=_voice(exp),
+    )
+    return turn, push
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_movement_draws_an_earned_ack_without_verdict(tmp_path):
+    exp = _first_open_exp(str(tmp_path / "ack.db"))
+    m = AnthropicModel()
+    turn, _ = _probe_turn(m, exp, _MOVEMENT_REPLY, (2, 8))
+    low = turn.lower().lstrip()
+    assert low.startswith(_ACK_OPENERS), f"no ack-shaped opener on real movement: {turn!r}"
+    assert not any(t in low for t in _VERDICT_TOKENS), f"ack rated the conclusion: {turn!r}"
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_restatement_draws_no_ack_opener(tmp_path):
+    exp = _first_open_exp(str(tmp_path / "noack.db"))
+    m = AnthropicModel()
+    turn, _ = _probe_turn(m, exp, _RESTATEMENT_REPLY, (2, 8))
+    assert not turn.lower().lstrip().startswith(_ACK_OPENERS), (
+        f"rhythmic flattery: ack opener on a pure restatement: {turn!r}"
+    )
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_ack_on_settled_ground_survives_the_probe_gate(tmp_path):
+    """MF-1 teeth: a GOOD ack naming movement on a PREVIOUSLY-settled thread must pass the real
+    push-diff gate (else voice.turn silently discards the feature's output)."""
+    from retnovation.web import voice
+
+    exp = _first_open_exp(str(tmp_path / "gate.db"))
+    m = AnthropicModel()
+    t = exp.rubric.traps[0]
+    push = m.generate_push(exp, "trap", t.trap_code, stress=False)  # press a DIFFERENT angle
+    ack_turn = (
+        "You've stopped hedging and owned what the lock-in costs you — so on this new front: "
+        + push
+    )
+    added = bool(voice._performed(m, exp, ack_turn) - voice._performed(m, exp, push))
+    assert added is False, (
+        "the probe gate eats a move-free ack — escalate to segment screening (spec §4)"
+    )
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_late_arc_is_shorter_and_single_question(tmp_path):
+    exp = _first_open_exp(str(tmp_path / "late.db"))
+    m = AnthropicModel()
+    early, _ = _probe_turn(m, exp, _RESTATEMENT_REPLY, (1, 8))
+    late, _ = _probe_turn(m, exp, _RESTATEMENT_REPLY, (5, 8))
+    assert len(late) <= 0.85 * len(early), f"late arc not shorter: {len(late)} vs {len(early)}"
+    assert late.count("?") <= 1, f"late turn stacks questions: {late!r}"
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_craft_one_question_no_dismissive_tics(tmp_path):
+    exp = _first_open_exp(str(tmp_path / "craft.db"))
+    m = AnthropicModel()
+    turn, _ = _probe_turn(m, exp, _MOVEMENT_REPLY, (2, 8))
+    assert turn.count("?") <= 1, f"stacked questions: {turn!r}"
+    assert not any(turn.lstrip().startswith(t) for t in ("Fine.", "Sure.")), (
+        f"dismissive tic: {turn!r}"
+    )
