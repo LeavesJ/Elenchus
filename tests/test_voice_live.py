@@ -117,19 +117,24 @@ def test_echo_gate_does_not_flag_a_faithful_revoice(tmp_path):
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
 def test_echo_gate_catches_a_named_move(tmp_path):
     """The moat direction (false negatives = leaks slip): the batched medium-effort screen must
-    FLAG a re-voice that states the frame's principle outright as added revelation vs the push. A
-    degenerate screen that always returns [] would pass the no-op test and the offline suite but
-    fail here — this is the L-13 backstop's teeth, at the lowered effort."""
+    FLAG a text that states the frame's principle outright. A degenerate screen that always returns
+    [] would pass the no-op test and the offline suite but fail here — the L-13 backstop's teeth.
+    ABSOLUTE assertion (2026-07-01): the old diff-vs-a-FRESH-push form was flaky by construction —
+    the judge occasionally (correctly) flags an aggressively-worded generated push as performing the
+    move, emptying the diff even though the leak WAS flagged. Measured on fixed texts: leak 6/6,
+    push 0/6 at BOTH efforts — the screen is solid; the push draw was the variance. The set-diff
+    mechanic itself is pinned by the no-op test + the offline _PerMoveModel tests."""
     from retnovation.web import voice
 
     exp = _first_open_exp(str(tmp_path / "live2.db"))
     m = AnthropicModel()
     f = exp.rubric.frames[0]
-    push = m.generate_push(exp, "frame", f.frame_code, stress=False)
-    # a leaking re-voice: hands the move by stating the frame's principle outright
+    # a leaking text: hands the move by stating the frame's principle outright
     leak = f"The move here is to {f.frame_detail.rstrip('.').lower()} — just do that."
-    added = bool(voice._performed(m, exp, leak) - voice._performed(m, exp, push))
-    assert added is True, "egress missed an explicitly named move — the L-13 backstop has a hole"
+    flagged = voice._performed(m, exp, leak)
+    assert 1 in flagged, (  # move 1 = the first frame (voice._moves lists frames then traps)
+        f"egress missed an explicitly named move — the L-13 backstop has a hole: {sorted(flagged)}"
+    )
 
 
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
