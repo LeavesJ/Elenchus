@@ -52,7 +52,7 @@ class FakeLeakModel(FakeModel):
     """concierge_turn emits a 'LEAK' string; screen_moves flags any 'LEAK' text as PERFORMING every
     screened move. Drives the egress fallback in both probe and re-invite modes."""
 
-    def concierge_turn(self, problem, push, recent, *, voice=""):
+    def concierge_turn(self, problem, push, recent, *, arc=None, voice=""):
         return "LEAK: lead with what you refuse to do"
 
     def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
@@ -72,7 +72,7 @@ class _PerMoveModel(FakeModel):
         super().__init__(intake, {})
         self._flags = flags
 
-    def concierge_turn(self, problem, push, recent, *, voice=""):
+    def concierge_turn(self, problem, push, recent, *, arc=None, voice=""):
         return "CANDIDATE"
 
     def screen_moves(self, moves, text):
@@ -143,7 +143,7 @@ def test_turn_reinvite_uses_flat_gate_and_safe_contract_on_leak():
 
 def test_turn_empty_concierge_output_falls_back():
     class _Empty(FakeModel):
-        def concierge_turn(self, problem, push, recent, *, voice=""):
+        def concierge_turn(self, problem, push, recent, *, arc=None, voice=""):
             return ""
 
     m = _Empty(_intake(), {})
@@ -252,7 +252,7 @@ def test_converse_winds_down_via_concierge_converse_not_reinvite():
             self.called = "converse"
             return "we're done here — that's a good place to be"
 
-        def concierge_turn(self, problem, push, recent, *, voice=""):
+        def concierge_turn(self, problem, push, recent, *, arc=None, voice=""):
             self.called = "turn"
             return "take a real position"  # the OLD re-invite path — must NOT be reached
 
@@ -481,6 +481,43 @@ def test_display_titles_have_no_veldra_and_cover_open_ended():
         assert ref.startswith("veldra:")  # keyed by the internal ref (server-side only)
         assert "veldra" not in title.lower()  # the VALUE never leaks the source
         assert title and title[0].isupper()
+
+
+# --- arc threading (woven stance modulation) ------------------------------------------------------
+
+
+def test_turn_threads_arc_to_the_author():
+    class _Rec(FakeModel):
+        def __init__(self, intake):
+            super().__init__(intake, {})
+            self.arc = "unset"
+
+        def concierge_turn(self, problem, push, recent, *, arc=None, voice=""):
+            self.arc = arc
+            return push or "take a real position"
+
+    m = _Rec(_intake())
+    voice.turn(m, _exp(), "the push", [("student", "x")], None, (3, 8))
+    assert m.arc == (3, 8)
+    m2 = _Rec(_intake())
+    voice.turn(m2, _exp(), "the push", [("student", "x")])  # default: no arc
+    assert m2.arc is None
+
+
+def test_concierge_turn_brief_carries_arc_line_only_on_probe():
+    stub = _StubClient(text="A sharp probe?")
+    m = AnthropicModel(client=stub)
+    m.concierge_turn("P", "the angle", [("student", "x")], arc=(3, 8))
+    blob = str(stub.last)
+    assert "Arc: this is push 3" in blob and "8 pushes" in blob
+    stub2 = _StubClient(text="A sharp probe?")
+    m2 = AnthropicModel(client=stub2)
+    m2.concierge_turn("P", "the angle", [("student", "x")])  # no arc -> no line
+    assert "Arc:" not in str(stub2.last)
+    stub3 = _StubClient(text="An invite.")
+    m3 = AnthropicModel(client=stub3)
+    m3.concierge_turn("P", "", [("student", "x")], arc=(3, 8))  # re-invite NEVER carries an arc
+    assert "Arc:" not in str(stub3.last)
 
 
 # --- _render_turns windowing --------------------------------------------------------------------

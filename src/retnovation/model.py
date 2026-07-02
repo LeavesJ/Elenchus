@@ -71,7 +71,13 @@ class Model(Protocol):
         self, prompt: str, opening: str, recent: list[tuple[str, str]]
     ) -> "EntryClassification": ...
     def concierge_turn(
-        self, problem: str, push: str, recent: list[tuple[str, str]], *, voice: str = ""
+        self,
+        problem: str,
+        push: str,
+        recent: list[tuple[str, str]],
+        *,
+        arc: tuple[int, int] | None = None,
+        voice: str = "",
     ) -> str: ...
     def concierge_close(
         self, problem: str, recent: list[tuple[str, str]], *, voice: str = ""
@@ -143,7 +149,7 @@ class FakeModel:
         # Offline double: every opening is a real attempt (keeps the engine path unchanged).
         return EntryClassification(entry_class=EntryClass.substantive, reply="")
 
-    def concierge_turn(self, problem, push, recent, *, voice=""):
+    def concierge_turn(self, problem, push, recent, *, arc=None, voice=""):
         return push or "take a real position"  # probe: echo the brief; reinvite: a safe invite
 
     def concierge_close(self, problem, recent, *, voice=""):
@@ -381,15 +387,29 @@ class AnthropicModel:
         return _require(resp)
 
     def concierge_turn(
-        self, problem: str, push: str, recent: list[tuple[str, str]], *, voice: str = ""
+        self,
+        problem: str,
+        push: str,
+        recent: list[tuple[str, str]],
+        *,
+        arc: tuple[int, int] | None = None,
+        voice: str = "",
     ) -> str:
         # Frame-blind: problem + dialogue + the SAFE push only. `voice` = composed persona+role+craft.
+        # arc=(n, cap) is the frame-blind position hint — two integers, PROBE briefs only (the
+        # re-invite is pre-engine and never carries it); the doctrine in concierge.md holds the bands.
         system = (voice + "\n\n" if voice else "") + load_prompt("concierge")
         brief = (
             f"Next angle to pursue (turn it into a question; never state it):\n{push}"
             if push
             else "The student has not taken a real position yet — acknowledge what they said and invite one."
         )
+        if push and arc:
+            n, cap = arc
+            brief += (
+                f"\nArc: this is push {n}; the diagnostic never runs past {cap} pushes "
+                "and usually resolves well before that."
+            )
         user = f"Problem:\n{problem}\n\n{_render_turns(recent)}{brief}"
         resp = self._get_client().messages.create(
             model=self._model,

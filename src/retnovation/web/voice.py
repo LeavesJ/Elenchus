@@ -63,13 +63,15 @@ def turn(
     push: str,
     recent: list[tuple[str, str]],
     posture: str | None = None,
+    arc: tuple[int, int] | None = None,
 ) -> str:
     """Author one engaged visible turn. push != "" -> PROBE: pursue the engine's angle, grounded in
     the student's words; egress = added-revelation vs the push baseline, fallback the verbatim push.
     push == "" -> RE-INVITE: acknowledge + invite a real position; egress = flat (perform no move),
-    fallback SAFE_CONTRACT. A refused/empty author also takes the fallback."""
+    fallback SAFE_CONTRACT. A refused/empty author also takes the fallback. arc=(n, cap) is the
+    frame-blind position hint (probe turns only — the stance doctrine in concierge.md eases on it)."""
     v = resolve_presentation(posture, exp)["voice"]
-    text = model.concierge_turn(exp.prompt, push, recent, voice=v)
+    text = model.concierge_turn(exp.prompt, push, recent, arc=arc, voice=v)
     if not text:
         return push or SAFE_CONTRACT
     if push:
