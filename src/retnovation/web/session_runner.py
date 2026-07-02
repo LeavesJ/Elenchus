@@ -3,7 +3,7 @@ from __future__ import annotations
 import queue
 import threading
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from ..aim import aim, derive_core
 from ..assessment.judgment_loop import (
@@ -35,6 +35,33 @@ _STATIC_SITTING_CLOSE = (
 # Durable sittings: the static seam line on a continued segment (signage, not warmth — muted
 # register, not a Vera bubble; the sitting-aware AUTHORED seam is founder-gated, spec §1).
 _SEAM_TEXT = "Same sitting — next door."
+
+# Branch-accurate honesty copy for a lost in-flight segment (spec §2c states 4/6): the engine is
+# not checkpointable (byte-untouched), so a restart loses the segment's grading — never the words.
+_HONESTY_RESTART_LANDED = (
+    "The server restarted mid-problem; that door closed unfinished. Your conversation is saved — "
+    "continue to a next door, or end to see what you've built."
+)
+_HONESTY_RESTART_FIRST = (
+    "The server restarted mid-problem. Your words are saved above — pick a door to keep going."
+)
+_HONESTY_DOOR_FAILED = "That door failed — it reopens fresh."
+
+# The static reopen variant when a later segment re-enters the interrupted door: mechanical
+# honesty (the user can SEE their prior words above; pretending otherwise is the amnesia bug).
+_REOPEN_SEAM = "Starting this one over — restate your position, or build on what you wrote above."
+
+# The MF-5 static close over a restart-interrupted tail (never a mirrored close of the previous
+# problem beneath the interrupted problem's visible turns).
+_STATIC_RESTART_CLOSE = (
+    "That last door closed unfinished when the server restarted — here's the village you built."
+)
+
+# Stale-tab soft fail (a request against a channel this process never had).
+_STALE_NUDGE = "This room went stale — refresh to pick up where you left off."
+
+# A live sitting idle past this is abandoned: an evening, not an undying thread (spec §2c).
+_SITTING_MAX_IDLE = timedelta(hours=18)
 
 
 def _serialize_record(rec: dict) -> dict | None:
@@ -95,6 +122,11 @@ class SessionRegistry:
         self._seam_pending: dict[str, str] = {}  # consumed by the next opening say
         self._inflight_synced: dict[str, tuple | None] = {}
         self._stepping: set[str] = set()  # sids with a step blocked on from_worker (drain guard)
+        self._menu_nonce: dict[str, int] = {}  # stale-menu guard: choose echoes, mismatch re-serves
+        # A restart-lost segment's identity (server-side only): drives the reopen seam and the
+        # interrupted-adjacent converse union screen (spec §2c); cleared at the next landing.
+        self._lost_ref: dict[str, str] = {}
+        self._lost_exp_id: dict[str, str] = {}
 
     def start(self, session_id: str, now: datetime | None = None) -> tuple[str, dict]:
         now = now or datetime.now(timezone.utc)
@@ -266,8 +298,7 @@ class SessionRegistry:
         t.start()
         tag, data = ch.from_worker.get()
         if tag == "menu":
-            ch.last_menu = data["problems"]
-            ch.last_menu_refs = data.get("refs", [])
+            self._cache_menu(session_id, ch, data)
         self._persist_emit(session_id, ch, tag, data)
         if tag == "done":
             self._on_done(session_id, ch, data)
@@ -290,6 +321,141 @@ class SessionRegistry:
                 return None
             self._sitting_id[session_id] = sit
             return sit
+
+    def _cache_menu(self, session_id: str, ch: _Channel, data: dict) -> None:
+        """Cache the menu server-side and stamp it with a nonce the client must echo on choose —
+        a stale tab's click then re-serves the menu instead of opening a door nobody picked."""
+        ch.last_menu = data["problems"]
+        ch.last_menu_refs = data.get("refs", [])
+        nonce = self._menu_nonce.get(session_id, 0) + 1
+        self._menu_nonce[session_id] = nonce
+        data["nonce"] = nonce
+
+    def resume_or_start(self, session_id: str, now: datetime | None = None) -> tuple[str, dict]:
+        """The front door (spec §2c): a live sitting resumes — same room, whole conversation —
+        instead of the unconditional cold start that reproduced the founder's amnesia incident.
+        No live sitting (or one idle past the abandonment bound) cold-starts as today."""
+        now = now or datetime.now(timezone.utc)
+        row = None if self._store.inert else self._store.live_sitting()
+        if row is not None:
+            try:
+                idle = now - datetime.fromisoformat(row["updated_at"])
+            except ValueError:
+                idle = _SITTING_MAX_IDLE  # unreadable timestamp: treat as abandoned, keep rows
+            if idle >= _SITTING_MAX_IDLE:
+                self._store.close_sitting(row["id"])
+                self._end_sitting(session_id)  # idempotent; clears any same-process maps
+                row = None
+        if row is None:
+            return self.start(session_id, now=now)
+        return self._resume(session_id, row, now)
+
+    def _resume(self, session_id: str, row: dict, now: datetime) -> tuple[str, dict]:
+        sit = row["id"]
+        with self._lock:
+            self._sitting_id[session_id] = sit
+        st = self._store.read_state(sit)
+        turns = [
+            {"kind": t["kind"], "text": t["payload"].get("text", "")}
+            for t in self._store.turns(sit)
+        ]
+        ch = self._ch.get(session_id)
+        honesty = ""
+        menu_block = None
+
+        if ch is not None and not ch.terminal:
+            # States 1–3 (same process, live worker): queues intact — nothing restarts.
+            rec = self._last_record.get(session_id)
+            mode = "converse" if ch.record is not None else "engine"
+            if ch.inflight_exp is None and ch.record is None and ch.last_menu:
+                # State 3: parked at the picker — re-derive from the live channel (same nonce:
+                # it is the same menu; the reloaded tab must be able to answer it).
+                menu_block = {
+                    "problems": list(ch.last_menu),
+                    "nonce": self._menu_nonce.get(session_id, 0),
+                }
+                mode = "engine"
+        else:
+            # States 4–7: terminal channel (done/error) or a different process entirely.
+            rec = self._rebuild(session_id)
+            inflight = st["inflight"]
+            lost = inflight is not None
+            if lost:
+                self._lost_ref[session_id] = inflight.get("ledger_ref", "")
+                self._lost_exp_id[session_id] = inflight.get("experience_id", "")
+                died_here = ch is not None  # a terminal ERROR channel in this process
+                honesty = (
+                    _HONESTY_DOOR_FAILED
+                    if died_here
+                    else (_HONESTY_RESTART_LANDED if rec is not None else _HONESTY_RESTART_FIRST)
+                )
+            mode = "converse" if rec is not None else "engine"
+            if rec is None:
+                # Nothing landed: embed a fresh way forward (states 6-no-record / 7) — the
+                # composer must never dead-end (the D1/D2-class brick).
+                tag, data = self.start(session_id, now=now)
+                if tag == "error":
+                    return (tag, data)
+                if tag == "menu":
+                    menu_block = {"problems": data["problems"], "nonce": data.get("nonce", 0)}
+
+        rec = self._last_record.get(session_id)
+        end_visible = rec is not None
+        next_title = ""
+        pick = st["next_pick"]
+        if pick is not None:
+            ref, title = pick
+            if ref in self._store.converged_within(now):
+                pick = None  # a since-converged door: drop honestly (MF-3 path on continue)
+                self._store.write_state(sit, next_pick=None)
+        if pick is not None and rec is not None:
+            self._next_pick[session_id] = pick[0]
+            self._next_pick_title[session_id] = pick[1]
+            next_title = pick[1]
+        payload = {
+            "turns": turns,
+            "next_title": next_title,
+            "end_visible": end_visible,
+            "mode": mode,
+            "theme": st["theme"] or {},
+            "honesty": honesty,
+        }
+        if menu_block is not None:
+            payload["menu"] = menu_block
+        return ("resume", payload)
+
+    def _rebuild(self, session_id: str) -> dict | None:
+        """Lazily rebuild the landed record from the durable state (cross-restart): model from the
+        factory (stateless), exp from the L-1 content library by id — a miss degrades (exp=None:
+        statics only, never an unscreened author, never a 500). Idempotent under the lock; the
+        in-memory `continued` flag initializes ABSENT (a continuation cannot survive the process
+        that held its worker — persisting it would brick Continue, spec §2a)."""
+        with self._lock:
+            rec = self._last_record.get(session_id)
+            if rec is not None:
+                return rec
+            sit = self._sitting_id.get(session_id)
+            if sit is None:
+                return None
+            ser = self._store.read_state(sit)["record"]
+            if ser is None:
+                return None
+            try:
+                exp = next(
+                    (e for e in load_library() if e.experience_id == ser["experience_id"]), None
+                )
+            except Exception:
+                exp = None  # content library unreadable: degrade, don't die
+            rec = {
+                "model": self._model_factory(),
+                "posture": ser.get("posture"),
+                "exp": exp,
+                "recent": [tuple(t) for t in ser.get("recent", [])],
+                "stop_reason": ser.get("stop_reason", "converged"),
+                "terrain": ser.get("terrain", []),
+            }
+            self._last_record[session_id] = rec
+            return rec
 
     def _persist_emit(self, session_id: str, ch: _Channel, tag: str, data: dict) -> None:
         """Write-through at the PROJECTION layer (spec §2b): only what the client renders is
@@ -342,18 +508,28 @@ class SessionRegistry:
                 # The landed record + cleared inflight marker, one honest boundary (spec §2b).
                 self._store.write_state(sit, record=_serialize_record(ch.record), inflight=None)
                 self._inflight_synced[session_id] = None
-        done_refs = self._sitting_done.get(session_id, set())
+        # The guard window: this sitting's converged refs UNION anything converged within the
+        # rolling 24h across sittings/processes (spec §2e; the union keeps :memory: registries —
+        # whose durable log is inert — on today's behavior).
+        done_refs = self._sitting_done.get(session_id, set()) | self._store.converged_within(now)
         pick = next(((r, t) for r, t in ch.next_menu if r not in done_refs), None)
         self._next_pick[session_id] = pick[0] if pick else None
         self._next_pick_title[session_id] = pick[1] if pick else ""
         data["next_title"] = pick[1] if pick else ""
+        # A landing supersedes any restart-lost context: the tip of the sitting is this record.
+        self._lost_ref.pop(session_id, None)
+        self._lost_exp_id.pop(session_id, None)
         if sit is not None:
             self._store.write_state(sit, next_pick=pick if pick else None)
             if data.get("landing"):
                 self._store.append_turn(sit, "landing", {"text": data["landing"]}, now)
 
     def step(self, session_id: str, value) -> tuple[str, dict]:
-        ch = self._ch[session_id]
+        ch = self._ch.get(session_id)
+        if ch is None:
+            # A tab from a previous process: fail SOFT (a refresh resumes the sitting) — never a
+            # KeyError 500 (spec §2c stale-tab rule).
+            return ("nudge", {"message": _STALE_NUDGE})
         if ch.terminal:
             return ("error", {"message": "session already ended"})
         sit = self._sitting_id.get(session_id)
@@ -370,8 +546,7 @@ class SessionRegistry:
             with self._lock:
                 self._stepping.discard(session_id)
         if tag == "menu":
-            ch.last_menu = data["problems"]
-            ch.last_menu_refs = data.get("refs", [])
+            self._cache_menu(session_id, ch, data)
         self._persist_emit(session_id, ch, tag, data)
         if tag == "done":
             self._on_done(session_id, ch, data)
@@ -381,16 +556,32 @@ class SessionRegistry:
             ch.terminal = True
         return tag, data
 
-    def choose(self, session_id: str, idx: int) -> tuple[str, dict]:
+    def choose(self, session_id: str, idx: int, nonce: int | None = None) -> tuple[str, dict]:
         """A CLIENT-initiated menu choice: persist what the user did (marker + chosen title —
         titles only, never refs), then step. continue_session's internal auto-step bypasses this
-        deliberately — the user never saw that menu (spec §2b: no fabricated turns)."""
-        sit = self._sitting_id.get(session_id)
+        deliberately — the user never saw that menu (spec §2b: no fabricated turns). A stale nonce
+        re-serves the CURRENT menu instead of opening a door nobody picked."""
         ch = self._ch.get(session_id)
-        if sit is not None and ch is not None and 0 <= idx < len(ch.last_menu):
+        if ch is None:
+            return ("nudge", {"message": _STALE_NUDGE})
+        if nonce is not None and nonce != self._menu_nonce.get(session_id):
+            return (
+                "menu",
+                {
+                    "problems": list(ch.last_menu),
+                    "nonce": self._menu_nonce.get(session_id, 0),
+                },
+            )
+        sit = self._sitting_id.get(session_id)
+        if sit is not None and 0 <= idx < len(ch.last_menu):
             now = datetime.now(timezone.utc)
             self._store.append_turn(sit, "muted", {"text": "door chosen"}, now)
             self._store.append_turn(sit, "you", {"text": ch.last_menu[idx]}, now)
+        if 0 <= idx < len(ch.last_menu_refs) and ch.last_menu_refs[idx] == self._lost_ref.get(
+            session_id
+        ):
+            # Re-entering the restart-interrupted door: the seam says so honestly (spec §2c).
+            self._seam_pending[session_id] = _REOPEN_SEAM
         return self.step(session_id, idx)
 
     def _drain(self, session_id: str) -> None:
@@ -410,8 +601,7 @@ class SessionRegistry:
         except queue.Empty:
             return
         if tag == "menu":
-            ch.last_menu = data["problems"]
-            ch.last_menu_refs = data.get("refs", [])
+            self._cache_menu(session_id, ch, data)
         if tag == "done":
             self._on_done(session_id, ch, data)
         if tag == "error":
@@ -436,9 +626,19 @@ class SessionRegistry:
         if old_ch is not None and not old_ch.terminal:
             old_ch.to_worker.put(_ABANDON)  # reap the parked mid-segment worker
         pick = self._next_pick.get(session_id)
+        if pick is not None and pick in self._store.converged_within(datetime.now(timezone.utc)):
+            # The persisted pick was converged since it was offered (another sitting, this window):
+            # drop to the menu — MF-3's honest path, never a silent converged re-serve (spec §2e).
+            pick = None
+            self._next_pick[session_id] = None
+            self._next_pick_title[session_id] = ""
         # Durable sittings: the seam line rides the NEXT opening say (one-click or via the
         # inline picker); the one-click marker mirrors the button the user pressed (spec §2b).
-        self._seam_pending[session_id] = _SEAM_TEXT
+        self._seam_pending[session_id] = (
+            _REOPEN_SEAM
+            if pick is not None and pick == self._lost_ref.get(session_id)
+            else _SEAM_TEXT
+        )
         sit = self._sitting_id.get(session_id)
         if sit is not None and not menu and pick is not None:
             title = self._next_pick_title.get(session_id, "")
@@ -462,10 +662,16 @@ class SessionRegistry:
 
     def converse(self, session_id: str, value) -> tuple[str, dict]:
         """Post-convergence engaged turn — engine-free, served from the SITTING's last converged
-        record (survives chained segments); never touches the terminal-guarded worker queue."""
-        rec = self._last_record.get(session_id)
+        record (survives chained segments AND restarts via the lazy rebuild); never touches the
+        terminal-guarded worker queue."""
+        rec = self._last_record.get(session_id) or self._rebuild(session_id)
         if rec is None:
+            if self._ch.get(session_id) is None:
+                return ("nudge", {"message": _STALE_NUDGE})  # a previous process's tab
             return ("error", {"message": "session has not converged"})
+        if rec.get("exp") is None:
+            # Degraded rebuild (content drift): the safe static — never an unscreened author.
+            return ("say", {"text": voice.SAFE_CONTRACT})
         reply = voice.converse(
             rec["model"],
             rec["exp"],
@@ -474,6 +680,18 @@ class SessionRegistry:
             rec["posture"],
             rec.get("stop_reason", "converged"),
         )
+        lost_eid = self._lost_exp_id.get(session_id)
+        if lost_eid:
+            # Interrupted-adjacent converse (spec §2c): the honesty line invites talk about the
+            # LOST problem, whose moves the record's own egress screen is blind to — screen the
+            # union. The lost exp was NOT converged, so it may re-offer within the window; an
+            # unscreened reply could hand its move and prime the future intake.
+            try:
+                lost_exp = next((e for e in load_library() if e.experience_id == lost_eid), None)
+            except Exception:
+                lost_exp = None
+            if lost_exp is not None and not voice.egress_safe_reply(rec["model"], lost_exp, reply):
+                reply = voice.SAFE_CONTRACT
         rec["recent"].append(("student", value))
         rec["recent"].append(("Vera", reply))
         sit = self._sitting_id.get(session_id)
@@ -493,12 +711,22 @@ class SessionRegistry:
         mirrored close would reflect the PREVIOUS problem while the current turns vanish — and the
         parked worker is reaped (MF-4)."""
         self._drain(session_id)
-        rec = self._last_record.get(session_id)
+        rec = self._last_record.get(session_id) or self._rebuild(session_id)
         if rec is None:
+            if self._ch.get(session_id) is None:
+                return ("nudge", {"message": _STALE_NUDGE})  # a previous process's tab
             return ("error", {"message": "session has not converged"})
         ch = self._ch.get(session_id)
         if ch is not None and not ch.terminal and ch.record is None:
             ch.to_worker.put(_ABANDON)
+            result = ("close", {"close": _STATIC_SITTING_CLOSE, "terrain": rec["terrain"]})
+        elif self._lost_ref.get(session_id):
+            # MF-5 ACROSS RESTART (spec §2c): the interrupted tail is persisted state, not channel
+            # state — a mirrored close would reflect the previous problem beneath the interrupted
+            # problem's visible turns.
+            result = ("close", {"close": _STATIC_RESTART_CLOSE, "terrain": rec["terrain"]})
+        elif rec.get("exp") is None:
+            # Degraded rebuild: static close + the persisted village — never an unscreened author.
             result = ("close", {"close": _STATIC_SITTING_CLOSE, "terrain": rec["terrain"]})
         else:
             close_text = voice.close(rec["model"], rec["exp"], rec["recent"], rec["posture"])
@@ -518,3 +746,6 @@ class SessionRegistry:
         self._next_pick_title.pop(session_id, None)
         self._seam_pending.pop(session_id, None)
         self._inflight_synced.pop(session_id, None)
+        self._menu_nonce.pop(session_id, None)
+        self._lost_ref.pop(session_id, None)
+        self._lost_exp_id.pop(session_id, None)

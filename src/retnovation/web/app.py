@@ -26,6 +26,7 @@ _BLANK_NUDGE = {
 
 class _Choice(BaseModel):
     index: int | None = None
+    nonce: int | None = None  # stale-menu guard: mismatch re-serves the menu (durable sittings)
 
 
 class _Text(BaseModel):
@@ -44,7 +45,14 @@ def _default_model():
 
 def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
     if tag == "menu":
-        return {"kind": "menu", "problems": data["problems"], "theme": data.get("theme", {})}
+        out = {"kind": "menu", "problems": data["problems"], "theme": data.get("theme", {})}
+        if "nonce" in data:
+            out["nonce"] = data["nonce"]
+        return out
+    if tag == "resume":  # durable sittings: the whole room, verbatim (already-projected payload)
+        return {"kind": "resume", **data}
+    if tag == "nudge":  # soft fail (stale tab) — the shell shows the message and recovers
+        return {"kind": "nudge", "message": data.get("message", "")}
     if tag == "say":  # every Concierge-authored visible turn (opening, re-invite, probe)
         out = {"kind": "say", "text": data["text"]}
         if "theme" in data:  # the opening say carries the role atmosphere (two-phase)
@@ -82,12 +90,16 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
 
     @app.post("/api/session")
     def start():
-        return _emit(reg, *reg.start(_SID))
+        # Durable sittings: a live sitting RESUMES (same room, whole conversation) — the
+        # unconditional cold start was the founder's amnesia incident (spec §0).
+        return _emit(reg, *reg.resume_or_start(_SID))
 
     @app.post("/api/session/{sid}/choose")
     def choose(sid: str, body: _Choice):
         # choose() (not step) so the CLIENT-made choice persists to the sitting transcript.
-        return _emit(reg, *reg.choose(_SID, body.index if body.index is not None else 0))
+        return _emit(
+            reg, *reg.choose(_SID, body.index if body.index is not None else 0, nonce=body.nonce)
+        )
 
     @app.post("/api/session/{sid}/say")
     def say(sid: str, body: _Text):

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from retnovation.aim import aim, derive_core
 from retnovation.cli import build_store
@@ -589,3 +589,184 @@ def test_drain_consumes_an_orphan_done_but_never_steals_from_a_stepper(tmp_path,
     from retnovation.web.sitting_store import SittingStore
 
     assert _ANCHOR in SittingStore(db).converged_within(datetime.now(timezone.utc))
+
+
+# ---- Durable sittings: resume, rebuild, guards (spec §2c/§2e) --------------------------------
+
+
+def _converge_one(db, make_fake, sid="s1"):
+    """Fresh registry over db; drive one full segment to done. Returns (reg, done_data)."""
+    reg = SessionRegistry(db, model_factory=make_fake)
+    reg.start(sid, now=NOW)
+    reg.step(sid, reg.menu_index(sid, _ANCHOR))
+    tag, data = _drive(reg, sid, opening="my position")
+    assert tag == "done"
+    return reg, data
+
+
+def test_restart_resume_returns_transcript_and_working_record(tmp_path, make_fake):
+    """The crown: a NEW registry over the same db (== process restart) resumes the sitting —
+    verbatim turns, End/Continue state, converse over the REBUILT record — and a converse
+    exchange survives a SECOND restart (record_json write-through)."""
+    db = str(tmp_path / "resume.db")
+    _converge_one(db, make_fake)
+
+    reg2 = SessionRegistry(db, model_factory=make_fake)  # restart #1
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    assert data["mode"] == "converse" and data["end_visible"] is True
+    kinds = [t["kind"] for t in data["turns"]]
+    assert kinds[0] == "vera" and "landing" in kinds
+    assert any(t["text"] == "my position" for t in data["turns"])
+    assert data["next_title"] and "veldra:" not in str(data)
+    assert "frame" not in str(data.get("theme", {}))
+
+    tag_c, data_c = reg2.converse("s1", "so what did that cost me?")
+    assert tag_c == "say" and data_c["text"]
+
+    reg3 = SessionRegistry(db, model_factory=make_fake)  # restart #2
+    tag, data = reg3.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    texts = [t["text"] for t in data["turns"]]
+    assert "so what did that cost me?" in texts  # the converse pair survived the second restart
+    # and the rebuilt record REMEMBERS it (Vera must not contradict her own on-screen memory)
+    rec = reg3._rebuild("s1")
+    assert ["student", "so what did that cost me?"] in [list(t) for t in rec["recent"]]
+
+
+def test_restart_continue_works_and_flag_cleared(tmp_path, make_fake):
+    """A persisted continued-flag would brick Continue forever after a restart — the rebuild must
+    clear it (in-memory only), while double-continue within a process still refuses."""
+    db = str(tmp_path / "cflag.db")
+    reg, _ = _converge_one(db, make_fake)
+    tag, _ = reg.continue_session("s1")
+    assert tag == "say"  # continued flag now set on the record, segment 2 in flight
+
+    reg2 = SessionRegistry(db, model_factory=make_fake)  # restart mid-continued-segment
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    tag2, data2 = reg2.continue_session("s1")
+    assert tag2 in ("say", "menu")  # NOT "continuation already in flight"
+    if tag2 == "say":
+        # and within-process idempotency still holds
+        assert reg2.continue_session("s1")[0] == "error"
+
+
+def test_restart_mid_segment_honesty_and_static_close(tmp_path, make_fake):
+    """A lost in-flight segment resumes with the branch-accurate honesty line; close() over the
+    interrupted tail returns the STATIC variant, never a mirrored close of the previous problem
+    (MF-5 across restart)."""
+    db = str(tmp_path / "mid.db")
+    reg, _ = _converge_one(db, make_fake)
+    tag, _ = reg.continue_session("s1")
+    assert tag == "say"  # segment 2 open; now the "process dies" (drop the registry)
+
+    reg2 = SessionRegistry(db, model_factory=make_fake)
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    assert "restarted mid-problem" in data["honesty"]
+    assert data["mode"] == "converse"  # a landed record exists beneath the lost segment
+    tag_cl, data_cl = reg2.close("s1")
+    assert tag_cl == "close"
+    assert "closed unfinished" in data_cl["close"]  # static variant, not authored
+    assert isinstance(data_cl["terrain"], list)
+
+
+def test_restart_mid_first_segment_offers_fresh_menu(tmp_path, make_fake):
+    """Restart mid-FIRST segment: nothing landed — honesty line + an embedded fresh menu; the
+    composer never dead-ends."""
+    db = str(tmp_path / "midfirst.db")
+    reg = SessionRegistry(db, model_factory=make_fake)
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))  # opening served; segment in flight
+
+    reg2 = SessionRegistry(db, model_factory=make_fake)
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    assert "restarted mid-problem" in data["honesty"]
+    assert data["mode"] == "engine" and data["end_visible"] is False
+    assert data["menu"] and data["menu"]["problems"]  # a fresh way forward
+    assert "refs" not in data["menu"]  # L-13: the embedded menu is title-only
+
+
+def test_rolling_window_dedupe_across_processes(tmp_path, make_fake):
+    """Refs converged in a PRIOR process within 24h are excluded from the auto-pick even across a
+    UTC date boundary; a stale persisted next_pick into a since-converged ref drops to the menu."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "window.db")
+    reg, data = _converge_one(db, make_fake)
+    # process 1 converged _ANCHOR; simulate a prior sitting having converged the offered pick
+    offered_ref = reg._next_pick["s1"]
+    assert offered_ref is not None
+    store = SittingStore(db)
+    store.log_converged("someprior", offered_ref, datetime.now(timezone.utc))
+
+    reg2 = SessionRegistry(db, model_factory=make_fake)  # restart
+    tag, rdata = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    # the stale pick was re-validated against the window and dropped or replaced
+    assert rdata["next_title"] == "" or rdata["next_title"] != reg._next_pick_title.get("s1")
+    tag2, data2 = reg2.continue_session("s1")
+    assert tag2 == "menu"  # MF-3's honest path: the doors, never a silent converged re-serve
+
+
+def test_rebuild_failure_degrades_to_statics(tmp_path, make_fake):
+    """A record whose experience_id no longer resolves (L-1 content drift across a restart) must
+    never author unscreened or 500 — converse and close degrade to statics + persisted terrain."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "degraded.db")
+    _converge_one(db, make_fake)
+    store = SittingStore(db)
+    sit = store.live_sitting()
+    rec = store.read_state(sit["id"])["record"]
+    rec["experience_id"] = "retired_experience_that_no_longer_exists"
+    store.write_state(sit["id"], record=rec)
+
+    reg2 = SessionRegistry(db, model_factory=make_fake)
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    tag_c, data_c = reg2.converse("s1", "hello again")
+    assert tag_c == "say" and data_c["text"]  # the safe static, not an unscreened author
+    tag_cl, data_cl = reg2.close("s1")
+    assert tag_cl == "close" and isinstance(data_cl["terrain"], list)
+
+
+def test_stale_sitting_older_than_18h_cold_starts(tmp_path, make_fake):
+    """A sitting is an evening, not an undying thread: >18h idle -> closed (retained), cold menu."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "stale.db")
+    _converge_one(db, make_fake)
+
+    reg2 = SessionRegistry(db, model_factory=make_fake)
+    later = datetime.now(timezone.utc) + timedelta(hours=19)
+    tag, data = reg2.resume_or_start("s1", now=later)
+    assert tag == "menu"  # cold start
+    store = SittingStore(db)
+    assert store.live_sitting() is not None  # the NEW sitting
+    # exactly one closed + one live sitting exist; nothing deleted
+
+
+def test_stale_tab_requests_fail_soft(tmp_path, make_fake):
+    """/say against a missing channel (post-restart tab) nudges instead of KeyError-500ing."""
+    db = str(tmp_path / "staletab.db")
+    _converge_one(db, make_fake)
+    reg2 = SessionRegistry(db, model_factory=make_fake)
+    tag, data = reg2.step("s1", "hello?")  # no channel in this process
+    assert tag == "nudge" and "refresh" in data["message"]
+
+
+def test_stale_menu_nonce_reserves_the_menu(tmp_path, make_fake):
+    """A choose carrying a stale nonce re-serves the current menu instead of silently opening a
+    door the user never picked (selection semantics preserved)."""
+    db = str(tmp_path / "nonce.db")
+    reg = SessionRegistry(db, model_factory=make_fake)
+    tag, data = reg.start("s1", now=NOW)
+    assert tag == "menu" and data.get("nonce")
+    stale = data["nonce"] - 1
+    tag2, data2 = reg.choose("s1", 0, nonce=stale)
+    assert tag2 == "menu"  # re-served, no door opened
+    tag3, _ = reg.choose("s1", reg.menu_index("s1", _ANCHOR), nonce=data2["nonce"])
+    assert tag3 == "say"  # the correct nonce proceeds
