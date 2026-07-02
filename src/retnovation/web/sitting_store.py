@@ -41,9 +41,15 @@ class SittingStore:
         self._inert = db_path == ":memory:"
         if self._inert:
             return
-        with self._conn() as c:
-            c.execute("PRAGMA journal_mode=WAL")
-            c.executescript(_SCHEMA)
+        try:
+            with self._conn() as c:
+                c.execute("PRAGMA journal_mode=WAL")
+                c.executescript(_SCHEMA)
+        except sqlite3.OperationalError:
+            # An unopenable path must not crash the registry at construction — the WORKER surfaces
+            # the db error per-session (its build_store fails the same way and emits `error`).
+            # Durability is off; the session error is the loud signal.
+            self._inert = True
 
     @property
     def inert(self) -> bool:

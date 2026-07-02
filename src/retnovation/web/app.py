@@ -49,6 +49,8 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
         out = {"kind": "say", "text": data["text"]}
         if "theme" in data:  # the opening say carries the role atmosphere (two-phase)
             out["theme"] = data["theme"]
+        if "seam" in data:  # a continued segment's static seam line (durable sittings §2d)
+            out["seam"] = data["seam"]
         return out
     if tag == "done":  # the engine converged — the SESSION does not end; the user owns closure. The
         # felt landing rides the payload; the guarded next door (chained sittings) rides with it.
@@ -84,7 +86,8 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
 
     @app.post("/api/session/{sid}/choose")
     def choose(sid: str, body: _Choice):
-        return _emit(reg, *reg.step(_SID, body.index if body.index is not None else 0))
+        # choose() (not step) so the CLIENT-made choice persists to the sitting transcript.
+        return _emit(reg, *reg.choose(_SID, body.index if body.index is not None else 0))
 
     @app.post("/api/session/{sid}/say")
     def say(sid: str, body: _Text):

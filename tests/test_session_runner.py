@@ -413,3 +413,179 @@ def test_error_segment_does_not_strand_continuation(tmp_path, make_fake):
     # the continuation flow is NOT stranded: a fresh continue is accepted
     tag4, data4 = reg.continue_session("s1")
     assert tag4 in ("say", "menu"), f"stranded: {tag4} {data4}"
+
+
+# ---- Durable sittings: write-through (spec 2026-07-01-durable-sittings-design §2b) ----------
+
+
+def test_write_through_persists_projected_transcript_and_state(tmp_path, make_fake):
+    """The store mirrors the PROJECTED wire: vera/you/landing turns in order, NO menus, NO refs
+    (L-13); the landed record + next pick + converged row are persisted; inflight clears at done."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "wt.db")
+    reg = SessionRegistry(db, model_factory=make_fake)
+    tag, _ = reg.start("s1", now=NOW)
+    tag, _ = reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    assert tag == "say"
+    tag, data = _drive(reg, "s1", opening="my position")
+    assert tag == "done"
+
+    store = SittingStore(db)
+    sit = store.live_sitting()
+    assert sit is not None
+    turns = store.turns(sit["id"])
+    kinds = [t["kind"] for t in turns]
+    assert "menu" not in kinds and "error" not in kinds  # menus/errors never persist
+    assert kinds[0] == "vera"  # the opening
+    assert kinds[1] == "you" and turns[1]["payload"]["text"] == "my position"
+    assert kinds[-1] == "landing" and turns[-1]["payload"]["text"] == data["landing"]
+    import json as _json
+
+    blob = _json.dumps([t["payload"] for t in turns])
+    assert "veldra:" not in blob  # L-13 on the durable mirror
+
+    state = store.read_state(sit["id"])
+    assert state["record"]["stop_reason"] == "converged"
+    assert state["record"]["experience_id"]  # rebuildable identity, not the object
+    assert state["inflight"] is None  # cleared at done
+    assert state["next_pick"] is not None and state["next_pick"][0] != _ANCHOR
+    # the converged log stamps wall-clock time (the registry's own now), so read with wall-clock
+    assert _ANCHOR in store.converged_within(datetime.now(timezone.utc))
+
+
+def test_write_through_continue_seam_marker_and_converse_record(tmp_path, make_fake):
+    """Continue persists marker+seam+opening (never the swallowed internal menu) and the response
+    carries the seam; converse persists the pair AND rewrites record_json.recent."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "seam.db")
+    reg = SessionRegistry(db, model_factory=make_fake)
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    _drive(reg, "s1")
+
+    tag, data = reg.continue_session("s1")
+    assert tag == "say"
+    assert data.get("seam") == "Same sitting — next door."
+
+    store = SittingStore(db)
+    sit = store.live_sitting()
+    turns = store.turns(sit["id"])
+    kinds = [t["kind"] for t in turns]
+    i = kinds.index("seam")
+    assert turns[i - 1]["kind"] == "muted"  # Continue → {title} marker precedes the seam
+    assert turns[i - 1]["payload"]["text"].startswith("Continue → ")
+    assert turns[i + 1]["kind"] == "vera"  # the new segment's opening follows
+    assert "menu" not in kinds
+
+    # converse (over the landed record, mid-segment-2 is fine: registry-level record)
+    tag_c, data_c = reg.converse("s1", "but what about the long run?")
+    assert tag_c == "say"
+    turns = store.turns(sit["id"])
+    assert turns[-2]["kind"] == "you" and turns[-1]["kind"] == "vera"
+    rec = store.read_state(sit["id"])["record"]
+    assert ["student", "but what about the long run?"] in rec["recent"]  # same-transaction rewrite
+
+
+def test_write_through_plateau_banks_no_converged_row(tmp_path, make_fake):
+    """F1 on the durable log: a plateaued segment persists its record (honest stop_reason) but
+    NEVER a converged row — it may legitimately re-offer."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "plateau.db")
+    reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "unchanged"))
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    tag, _ = _drive(reg, "s1")
+    assert tag == "done"
+    store = SittingStore(db)
+    sit = store.live_sitting()
+    rec = store.read_state(sit["id"])["record"]
+    assert rec["stop_reason"] != "converged"
+    assert store.converged_within(NOW) == set()
+
+
+def test_error_emissions_never_reach_the_durable_transcript(tmp_path, make_fake):
+    """L-14: exception text can carry frame codes — a worker error emission must not persist."""
+    from retnovation.web.sitting_store import SittingStore
+
+    def factory():
+        m = make_fake()
+
+        def boom(exp, opening):
+            raise RuntimeError("Boom: choose_the_failure_default_deliberately leaked")
+
+        m.classify_intake = boom
+        return m
+
+    db = str(tmp_path / "err.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    tag, _ = reg.step("s1", "a real opening")
+    assert tag == "error"
+    store = SittingStore(db)
+    sit = store.live_sitting()
+    turns = store.turns(sit["id"])
+    import json as _json
+
+    blob = _json.dumps(turns)
+    assert "Boom" not in blob and "choose_the_failure" not in blob
+    assert [t["kind"] for t in turns] == ["vera", "you"]  # opening + the user's words only
+
+
+def test_close_marks_sitting_closed_and_clears_it(tmp_path, make_fake):
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "cl.db")
+    reg = SessionRegistry(db, model_factory=make_fake)
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    _drive(reg, "s1")
+    tag, data = reg.close("s1")
+    assert tag == "close"
+    store = SittingStore(db)
+    assert store.live_sitting() is None  # closed, retained
+    # the sitting is OVER: a stale converse/close now says so instead of re-serving
+    assert reg.converse("s1", "hello?")[0] == "error"
+
+
+def test_drain_consumes_an_orphan_done_but_never_steals_from_a_stepper(tmp_path, make_fake):
+    """Defensive drain: an undequeued done (handshake drift) is consumed by close/continue and
+    banked via _on_done; but the drain is skipped while a step is in flight for the sid."""
+    from retnovation.content_loader import load_library
+
+    db = str(tmp_path / "drain.db")
+    reg = SessionRegistry(db, model_factory=make_fake)
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    _drive(reg, "s1")
+    tag, _ = reg.continue_session("s1")
+    assert tag == "say"  # segment 2 open, worker parked at the gate
+
+    ch2 = reg._ch["s1"]
+    exp = next(e for e in load_library() if e.ledger_ref == _ANCHOR)
+    ch2.record = {
+        "model": make_fake(),
+        "posture": None,
+        "exp": exp,
+        "recent": [("student", "x")],
+        "stop_reason": "converged",
+        "terrain": [],
+    }
+    ch2.from_worker.put(("done", {"landing": ""}))  # fabricated proactive emission (drift)
+    # a step in flight blocks the drain (simulated via the bookkeeping set)
+    reg._stepping.add("s1")
+    assert not ch2.terminal
+    reg._drain("s1")
+    assert not ch2.terminal  # skipped: never steal from a blocked request
+    reg._stepping.discard("s1")
+
+    tag_cl, data_cl = reg.close("s1")  # close drains first -> _on_done banks segment 2
+    assert tag_cl == "close"
+    # close() then ENDS the sitting (clears the in-memory maps) — the durable evidence is the
+    # converged log the drain's _on_done wrote before the close branched.
+    from retnovation.web.sitting_store import SittingStore
+
+    assert _ANCHOR in SittingStore(db).converged_within(datetime.now(timezone.utc))

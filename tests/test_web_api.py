@@ -408,3 +408,29 @@ def test_chained_sitting_builds_two_houses(tmp_path):
         return sum(1 for row in t if row["render"] == "rendered")
 
     assert rendered(t2) > rendered(t1) or len(t2) > len(t1), (t1, t2)
+
+
+def test_choose_marker_and_seam_ride_the_endpoints(tmp_path, make_fake):
+    """Durable sittings §2b at the HTTP layer: choosing a door persists what the user did;
+    the continue response carries the seam text the shell renders."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "wt-api.db")
+    app = create_app(db_path=db, model_factory=make_fake)
+    client = TestClient(app)
+    _choose_anchor(client)
+    _drive_to_done(client)
+    r2 = client.post("/api/session/s/continue", json={}).json()
+    assert r2["kind"] == "say"
+    assert r2.get("seam") == "Same sitting — next door."
+
+    store = SittingStore(db)
+    sit = store.live_sitting()
+    turns = store.turns(sit["id"])
+    kinds = [t["kind"] for t in turns]
+    assert kinds[0] == "muted" and turns[0]["payload"]["text"] == "door chosen"
+    assert kinds[1] == "you" and turns[1]["payload"]["text"] == _ANCHOR_TITLE
+    assert "seam" in kinds
+    import json as _json
+
+    assert "veldra:" not in _json.dumps([t["payload"] for t in turns])
