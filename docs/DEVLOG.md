@@ -47,6 +47,23 @@
   re-entering the interrupted door gets the reopen seam; End mid-segment closes honestly and the
   village RENDERS (460px host, live canvas). Founder gates: re-dogfood (reload + restart are now
   safe to do mid-sitting — that's the point) + push.
+- **Batch review (3-lens multi-agent, every finding adversarially verified): 19 CONFIRMED, all
+  fixed @ 399ee7b, suite 372/25.** The four Important: (C1) close() reaped the worker but left the
+  channel non-terminal — a later /say blocked a threadpool thread FOREVER (single-tab reachable);
+  now the sitting's end reaps+terminals+drops the channel and stale requests nudge. (C2) the
+  18h-abandonment/replace path never poison-pilled the parked worker (MF-4 leak) — now `start()`
+  and `_end_sitting` reap, guarded against in-flight requests. (C3) MF-5 regressed on SAME-process
+  errored tails (converge → continue → segment errors → End authored a mirrored close of the
+  wrong problem) — close/converse now consult the PERSISTED inflight discriminator via
+  `_lost_context`, and the interrupted-close copy went cause-neutral. (C4) close racing continue
+  could hang /continue permanently (the drain/pill window) — the whole continue boot window now
+  counts as in-flight (counter, not set), close skips the reap while any request is blocked
+  (a leaked connection beats a hung request), and the shell disables End during in-flight
+  say/continue. Also folded: kind-aware End handler (nudge/error no longer render a false empty
+  village), pending-menu gate + nonce rotation (a replayed choose can't inject an int into the
+  graded loop or fabricate turns), fail-closed union screen, seam cleared on errored segments,
+  cross-process cold-start adoption on the unique-index race, monotonic nonce, build-stamp/theme
+  tooltip survival. Union screen + reopen seam now have direct test teeth.
 
 ## 2026-07-01 — feat(web): Chained Sittings — bounded engine sessions inside one continuous thread
 - **The founder's resolution of the short-vs-long tension:** "session" is the engine's concept
