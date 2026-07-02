@@ -209,6 +209,13 @@ Read this checklist before every code change. Update it after every correction o
   everything before the model call should be executable offline, so a setup-only repro
   (`python -c` the setup lines) can verify it for free; (c) after fixing a live-only break, verify with a
   single-call live run of just that test (L-17), not the whole batch.
+- **L-24 Read the ERROR CLASS of a live failure before debugging anything — `529 Overloaded` is Anthropic-side
+  capacity, not the product.** A full `-m live` run died 9/25 with identical `anthropic.OverloadedError: 529`
+  during a sustained overload window (the SDK's 2 default retries can't outlast minutes-long windows); the 16
+  outside the window passed, including tests that had "failed" suspiciously the run before. Prevention: (a) a
+  block of same-class 5xx/529 failures = infrastructure — wait it out, don't touch code; (b) resume with the
+  cache instead of re-burning the whole suite: `pytest -m live --lf -q` re-runs exactly the failed subset;
+  (c) only an ASSERTION failure (read the printed turn) is product signal on live runs.
 - **L-23 A `pytest | tail` pipe MASKS the exit status — an `&&` gate chain built on it will commit a RED
   state.** The woven-stance Minor-hardening commit ran `pytest -q ... | tail -2 && ... && git commit`; pytest
   failed but the chain's status came from `tail` (zsh, no pipefail), so the commit landed red and had to be
