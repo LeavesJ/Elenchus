@@ -513,11 +513,34 @@ def test_concierge_turn_brief_carries_arc_line_only_on_probe():
     stub2 = _StubClient(text="A sharp probe?")
     m2 = AnthropicModel(client=stub2)
     m2.concierge_turn("P", "the angle", [("student", "x")])  # no arc -> no line
-    assert "Arc:" not in str(stub2.last)
+    # (the doctrine text itself mentions "Arc:" in the system prompt — assert on the BRIEF line)
+    assert "Arc: this is push" not in str(stub2.last)
     stub3 = _StubClient(text="An invite.")
     m3 = AnthropicModel(client=stub3)
     m3.concierge_turn("P", "", [("student", "x")], arc=(3, 8))  # re-invite NEVER carries an arc
-    assert "Arc:" not in str(stub3.last)
+    assert "Arc: this is push" not in str(stub3.last)
+
+
+def test_arc_doctrine_lives_only_in_the_probe_prompt():
+    """MF-2: voice_craft rides into EVERY author — the press/arc stance must live in concierge.md
+    (probe-only). Sentinel: the section header. land/converse must never see it."""
+    from retnovation.content_loader import load_prompt
+
+    assert "The arc of the press" in load_prompt("concierge")
+    assert "The arc of the press" not in load_prompt("voice_craft")
+    v = voice.resolve_presentation(None, None)["voice"]
+    stub = _StubClient(text="landing text")
+    m = AnthropicModel(client=stub)
+    m.concierge_land("P", [("student", "x")], "converged", voice=v)
+    assert "The arc of the press" not in str(stub.last)
+    stub2 = _StubClient(text="wind-down")
+    m2 = AnthropicModel(client=stub2)
+    m2.concierge_converse("P", [("student", "x")], voice=v)
+    assert "The arc of the press" not in str(stub2.last)
+    stub3 = _StubClient(text="a probe?")
+    m3 = AnthropicModel(client=stub3)
+    m3.concierge_turn("P", "angle", [("student", "x")], voice=v)
+    assert "The arc of the press" in str(stub3.last)  # and the probe author DOES see it
 
 
 # --- _render_turns windowing --------------------------------------------------------------------
