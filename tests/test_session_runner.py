@@ -244,3 +244,35 @@ def test_converse_and_close_work_after_done_without_the_worker(tmp_path, make_fa
     for blob in (data_c["text"], data_cl["close"], str(data_cl["terrain"])):
         assert "embed_credentials_as_a_list" not in blob
         assert "choose_the_failure_default_deliberately" not in blob
+
+
+def test_probe_displays_carry_an_incrementing_arc(tmp_path, make_fake):
+    """Woven stance: every PROBE display call carries arc=(n, MAX_PUSHES), n starting at 1
+    (pre-incremented at the top of respond — never push 0). The door re-invite path carries none."""
+    from retnovation.assessment.judgment_loop import MAX_PUSHES
+
+    arcs = []
+
+    def factory():
+        m = make_fake()
+        orig = m.concierge_turn
+
+        def rec(problem, push, recent, *, arc=None, voice=""):
+            if push:
+                arcs.append(arc)
+            return orig(problem, push, recent, arc=arc, voice=voice)
+
+        m.concierge_turn = rec
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "arc.db"), model_factory=factory)
+    tag, _ = reg.start("s1", now=NOW)
+    assert tag == "menu"
+    tag, _ = reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    assert tag == "say"  # opening
+    tag, data = reg.step("s1", "reasoning that already holds the move")
+    while tag == "say":
+        tag, data = reg.step("s1", "mechanism")
+    assert tag == "done"
+    assert len(arcs) >= 1
+    assert arcs == [(i + 1, MAX_PUSHES) for i in range(len(arcs))]  # 1-based, pre-incremented

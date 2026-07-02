@@ -6,6 +6,9 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from ..aim import aim, derive_core
+from ..assessment.judgment_loop import (
+    MAX_PUSHES,
+)  # read-only: the arc hint's cap (engine untouched)
 from ..cli import build_store
 from ..orchestration import run_session
 from ..terrain import project_terrain
@@ -102,10 +105,15 @@ class SessionRegistry:
                         recent.append(("Vera", reinvite))
                     captured["exp"], captured["recent"] = exp, recent
 
+                    pushes = 0
+
                     def respond(push):
                         # Display the engaged, dialogue-grounded turn; the engine still grades the
-                        # CANONICAL push vs the RAW reply (bridge transparency preserved).
-                        shown = voice.turn(model, exp, push, recent, posture)
+                        # CANONICAL push vs the RAW reply (bridge transparency preserved). The arc
+                        # hint (pre-incremented: first probe = push 1) rides the DISPLAY path only.
+                        nonlocal pushes
+                        pushes += 1
+                        shown = voice.turn(model, exp, push, recent, posture, (pushes, MAX_PUSHES))
                         ch.from_worker.put(("say", {"text": shown}))
                         recent.append(("Vera", shown))
                         student = ch.to_worker.get()
