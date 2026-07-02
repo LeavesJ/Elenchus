@@ -79,7 +79,9 @@ function showComposer(on){ composer.hidden=!on; if(on){ input.disabled=false; se
 // thread-anchored button drifted six turns into scrollback and the user had to hunt for it).
 function showEnd(on){ endBtn.hidden=!on; }
 endBtn.addEventListener('click', async ()=>{ endBtn.disabled=true; const t=thinking();
-  try{ const r=await post('/api/session/single/close'); t.remove(); renderClose(r); }
+  try{ const r=await post('/api/session/single/close'); t.remove();
+    // kind-blindness rendered nudge/error payloads as a false empty village (review C13)
+    if(r.kind==='close'){ renderClose(r); } else { endBtn.disabled=false; advance(r); } }
   catch(_){ t.remove(); endBtn.disabled=false; muted('connection lost — try again.'); } });
 // Chained sittings: the in-thread Continue affordance. It FOLLOWS the conversation (re-rendered
 // after each converse reply so it is never stranded in scrollback); proceed lives in-thread, exit
@@ -106,23 +108,29 @@ function renderContinue(title){
   contBox.append(o); thread.appendChild(contBox); thread.scrollTop=thread.scrollHeight;
 }
 async function goContinue(btn,body){
-  btn.disabled=true; input.disabled=true; send.disabled=true; const t=thinking();
+  // End stays disabled while a continue is in flight: an End racing the new segment's boot
+  // would close over a half-started door (review C4)
+  btn.disabled=true; input.disabled=true; send.disabled=true; endBtn.disabled=true; const t=thinking();
   try{ const r=await post('/api/session/single/continue',body); t.remove();
-    if(contBox){ contBox.remove(); contBox=null; } nextTitle=''; mode='engine'; advance(r); }
+    if(contBox){ contBox.remove(); contBox=null; } nextTitle=''; mode='engine'; advance(r);
+    endBtn.disabled=false; }
   catch(_){ t.remove(); btn.disabled=false; input.disabled=false; send.disabled=false;
-    muted('connection lost — try again.'); }
+    endBtn.disabled=false; muted('connection lost — try again.'); }
 }
-function applyTheme(t){ if(!t) return;
+let buildStamp='';
+function applyTheme(t){ if(!t || (!t.accent && !t.persona_mark)) return;  // an empty theme (e.g. a
+  // menu re-serve) must not wipe the accent (review C19)
   const w=document.getElementById('wrap'); w.className='';
   if(t.accent) w.classList.add('accent-'+t.accent);
   const mk=document.getElementById('mark');
   if(t.persona_mark){ mk.textContent=t.persona_mark; mk.hidden=false;
-    if(t.atmosphere_label) mk.title=t.atmosphere_label; } }
+    // the build stamp survives theme changes (review C17): one glance still answers "which build"
+    mk.title=(t.atmosphere_label||'')+(buildStamp?(t.atmosphere_label?' · ':'')+buildStamp:''); } }
 
 async function start(){
   const r = await post('/api/session');
-  if(r.build){ const mk=document.getElementById('mark');
-    if(mk) mk.title=((mk.title?mk.title+' · ':'')+r.build);
+  if(r.build){ buildStamp=r.build;
+    const mk=document.getElementById('mark'); if(mk) mk.title=r.build;
     console.info('retnovation build', r.build); }  // one glance answers "which build?" (§2f)
   advance(r);
 }
@@ -195,10 +203,12 @@ composer.addEventListener('submit', async e=>{
   const text=input.value.trim(); if(!text) return;
   bubble('you', text); input.value=''; input.disabled=true; send.disabled=true;
   if(contBox){ contBox.remove(); contBox=null; }  // M2: no continue while a converse is in flight
+  const endWas=endBtn.disabled; endBtn.disabled=true;  // no End while a say is in flight (C4/C1)
   const t=thinking();
   const url = mode==='converse' ? '/api/session/single/converse' : '/api/session/single/say';
-  try { const r=await post(url,{text}); t.remove(); advance(r); }
-  catch(err){ t.remove(); muted('connection lost — is the server still running? try again.'); showComposer(true); }
+  try { const r=await post(url,{text}); t.remove(); advance(r); endBtn.disabled=endWas; }
+  catch(err){ t.remove(); endBtn.disabled=endWas;
+    muted('connection lost — is the server still running? try again.'); showComposer(true); }
 });
 input.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); composer.requestSubmit(); } });
 start();

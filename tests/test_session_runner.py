@@ -547,8 +547,10 @@ def test_close_marks_sitting_closed_and_clears_it(tmp_path, make_fake):
     assert tag == "close"
     store = SittingStore(db)
     assert store.live_sitting() is None  # closed, retained
-    # the sitting is OVER: a stale converse/close now says so instead of re-serving
-    assert reg.converse("s1", "hello?")[0] == "error"
+    # the sitting is OVER (channel popped, C1/C14): stale requests get the refresh nudge — never
+    # a hang on a reaped worker's queue, never a false "has not converged"
+    assert reg.converse("s1", "hello?")[0] == "nudge"
+    assert reg.step("s1", "hello again")[0] == "nudge"
 
 
 def test_drain_consumes_an_orphan_done_but_never_steals_from_a_stepper(tmp_path, make_fake):
@@ -575,12 +577,12 @@ def test_drain_consumes_an_orphan_done_but_never_steals_from_a_stepper(tmp_path,
         "terrain": [],
     }
     ch2.from_worker.put(("done", {"landing": ""}))  # fabricated proactive emission (drift)
-    # a step in flight blocks the drain (simulated via the bookkeeping set)
-    reg._stepping.add("s1")
+    # a step in flight blocks the drain (simulated via the bookkeeping counter)
+    reg._stepping["s1"] = 1
     assert not ch2.terminal
     reg._drain("s1")
     assert not ch2.terminal  # skipped: never steal from a blocked request
-    reg._stepping.discard("s1")
+    reg._stepping.pop("s1", None)
 
     tag_cl, data_cl = reg.close("s1")  # close drains first -> _on_done banks segment 2
     assert tag_cl == "close"
@@ -770,3 +772,170 @@ def test_stale_menu_nonce_reserves_the_menu(tmp_path, make_fake):
     assert tag2 == "menu"  # re-served, no door opened
     tag3, _ = reg.choose("s1", reg.menu_index("s1", _ANCHOR), nonce=data2["nonce"])
     assert tag3 == "say"  # the correct nonce proceeds
+
+
+# ---- Batch-review folds (2026-07-01 late): the confirmed findings, pinned ---------------------
+
+
+def test_stale_start_reaps_the_replaced_parked_worker(tmp_path, make_fake):
+    """C2/C8/C15: replacing a live non-terminal channel (18h-abandonment path) poison-pills the
+    parked worker so its store closes and the thread exits — never a silent leak."""
+    db = str(tmp_path / "reap18.db")
+    reg = SessionRegistry(db, model_factory=make_fake)
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))  # opening served; worker parked at the gate
+    old_ch = reg._ch["s1"]
+    assert old_ch.thread.is_alive()
+
+    later = datetime.now(timezone.utc) + timedelta(hours=19)
+    tag, _ = reg.resume_or_start("s1", now=later)  # stale -> close + cold start over the channel
+    assert tag == "menu"
+    old_ch.thread.join(timeout=5)
+    assert not old_ch.thread.is_alive()  # reaped: finally ran, store closed
+
+
+def test_same_process_errored_tail_gets_static_close_not_mirrored(tmp_path, make_fake):
+    """C3: converge -> continue -> the new segment ERRORS -> End (no reload). The close must be
+    the static interrupted variant read from the PERSISTED inflight discriminator — never an
+    authored close mirroring the previous problem beneath the errored problem's turns."""
+    calls = {"n": 0}
+
+    def factory():
+        calls["n"] += 1
+        m = make_fake()
+        if calls["n"] >= 2:  # segment 2's model: brick at intake
+
+            def boom(exp, opening):
+                raise RuntimeError("segment two dies")
+
+            m.classify_intake = boom
+        return m
+
+    db = str(tmp_path / "mf5same.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    _drive(reg, "s1")
+    tag, _ = reg.continue_session("s1")
+    assert tag == "say"  # segment 2 opening
+    tag, _ = reg.step("s1", "a real position")  # gate passes; intake bricks -> error
+    assert tag == "error"
+    tag_cl, data_cl = reg.close("s1")
+    assert tag_cl == "close"
+    assert "closed unfinished" in data_cl["close"]  # static, cause-neutral
+    assert "[close" not in data_cl["close"]  # never the authored mirror of the previous problem
+
+
+def test_errored_segment_clears_the_pending_seam(tmp_path, make_fake):
+    """C5: a seam pending on an errored segment must die with it — a stale (re)open line must not
+    render or persist on an unrelated later door."""
+    calls = {"n": 0}
+
+    def factory():
+        calls["n"] += 1
+        m = make_fake()
+        if calls["n"] == 2:
+
+            def boom(exp, opening):
+                raise RuntimeError("boot fails")
+
+            m.classify_intake = boom
+        return m
+
+    db = str(tmp_path / "seamclear.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    _drive(reg, "s1")
+    tag, _ = reg.continue_session("s1")  # seam set; segment 2 opens fine (error comes at intake)
+    assert tag == "say"
+    tag, _ = reg.step("s1", "a position")  # error emission
+    assert tag == "error"
+    assert "s1" not in reg._seam_pending  # cleared with the errored segment
+
+
+def test_choose_is_refused_when_no_menu_is_pending(tmp_path, make_fake):
+    """C10/C11: a replayed choose (same nonce, menu already consumed) is nudged — it must not
+    inject an int into the gate loop nor fabricate 'door chosen' turns."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "replay.db")
+    reg = SessionRegistry(db, model_factory=make_fake)
+    tag, data = reg.start("s1", now=NOW)
+    nonce = data["nonce"]
+    idx = reg.menu_index("s1", _ANCHOR)
+    tag, _ = reg.choose("s1", idx, nonce=nonce)
+    assert tag == "say"  # accepted; menu consumed
+    store = SittingStore(db)
+    sit = store.live_sitting()
+    turns_before = len(store.turns(sit["id"]))
+    tag2, data2 = reg.choose("s1", idx, nonce=nonce)  # the second tab's identical click
+    assert tag2 == "nudge"
+    assert len(store.turns(sit["id"])) == turns_before  # no fabricated turns
+
+
+def test_union_screen_fails_closed_and_catches_lost_exp_moves(tmp_path, make_fake):
+    """C9/C12: after a restart-lost segment, converse screens the UNION — a reply performing the
+    LOST problem's move serves the safe static; an unresolvable lost exp also fails closed."""
+    from retnovation.content_loader import load_library
+    from retnovation.model import EgressScreen
+    from retnovation.web import voice as voice_mod
+    from retnovation.web.sitting_store import SittingStore
+
+    anchor_exp = next(e for e in load_library() if e.ledger_ref == _ANCHOR)
+    # the screen receives RENDERED move details (frame/trap details, 1-based indices) — the exact
+    # move SET identifies the caller: A's own screen passes, the LOST exp's screen flags
+    a_details = set(voice_mod._moves(anchor_exp))
+
+    def leak_factory():
+        m = make_fake()
+
+        def screen(moves, text):
+            if set(moves) != a_details:
+                return EgressScreen(performed=[1], evidence="(fake: lost-exp leak)")
+            return EgressScreen(performed=[], evidence="(fake: clean)")
+
+        m.screen_moves = screen
+        return m
+
+    db = str(tmp_path / "union.db")
+    reg, _ = _converge_one(db, make_fake)
+    tag, _ = reg.continue_session("s1")
+    assert tag == "say"  # segment 2 (a NON-anchor door) in flight; now the process "dies"
+
+    reg2 = SessionRegistry(db, model_factory=leak_factory)
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume" and data["mode"] == "converse"
+    tag_c, data_c = reg2.converse("s1", "so about that other problem…")
+    assert tag_c == "say"
+    assert data_c["text"] == voice_mod.SAFE_CONTRACT  # union screen caught the lost-exp move
+
+    # and an UNRESOLVABLE lost exp fails closed too (never unscreened)
+    store = SittingStore(db)
+    sit = store.live_sitting()
+    store.write_state(
+        sit["id"], inflight={"experience_id": "retired_exp", "ledger_ref": "veldra:gone"}
+    )
+    reg3 = SessionRegistry(db, model_factory=make_fake)
+    tag, data = reg3.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    tag_c3, data_c3 = reg3.converse("s1", "hello again")
+    assert tag_c3 == "say" and data_c3["text"] == voice_mod.SAFE_CONTRACT
+
+
+def test_reopen_seam_on_reentering_the_interrupted_door(tmp_path, make_fake):
+    """C12: continuing back into the restart-interrupted door carries the reopen seam, not the
+    generic one — mechanical honesty about the visible prior words."""
+    db = str(tmp_path / "reopen.db")
+    reg, _ = _converge_one(db, make_fake)
+    tag, _ = reg.continue_session("s1")
+    assert tag == "say"  # segment 2 in flight (its ref == the persisted next_pick)
+
+    reg2 = SessionRegistry(db, model_factory=make_fake)
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    tag2, data2 = reg2.continue_session("s1")
+    assert tag2 == "say"
+    assert data2.get("seam") == (
+        "Starting this one over — restate your position, or build on what you wrote above."
+    )

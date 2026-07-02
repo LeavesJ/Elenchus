@@ -76,11 +76,20 @@ class SittingStore:
         sitting_id = now.strftime("%Y%m%dT%H%M%S%f") + "-" + secrets.token_hex(3)
         if self._inert:
             return sitting_id
-        with self._conn() as c:
-            c.execute(
-                "INSERT INTO web_sitting (id, status, updated_at) VALUES (?, 'live', ?)",
-                (sitting_id, now.isoformat()),
-            )
+        try:
+            with self._conn() as c:
+                c.execute(
+                    "INSERT INTO web_sitting (id, status, updated_at) VALUES (?, 'live', ?)",
+                    (sitting_id, now.isoformat()),
+                )
+        except sqlite3.IntegrityError:
+            # The partial unique live index fired: another PROCESS won the cold-start race (the
+            # registry lock only serializes within one process). The loser ADOPTS the winning
+            # live sitting instead of 500ing (spec §2c "the loser resumes"; batch-review C6).
+            row = self.live_sitting()
+            if row is not None:
+                return row["id"]
+            raise
         return sitting_id
 
     def close_sitting(self, sitting_id: str) -> None:
