@@ -1,5 +1,44 @@
 # Retnovation — DEVLOG
 
+## 2026-07-01 — feat(voice): Woven Stance Modulation — press → earned acknowledgment → late-arc narrowing
+- **The thread.** The felt dogfood confirmed the deferred half of the 2026-06-30 decision as THE remaining gap:
+  "more interrogative than interactive" — zero acknowledgment beats across five probe turns (all recognition
+  lived in the new Earned-Landing surfaces), no mid-session "hope to end", plus craft defects (2–3-question
+  stacks, the dismissive "Fine." tic, the same point pressed twice running). Founder-chosen design: the AUTHOR
+  judges movement from the dialogue it already sees + a free frame-blind worker arc-hint; implicit tone-easing
+  only (no position ever stated, no UI channel); craft fixes bundled. Full arc: brainstorm → spec
+  (`…/specs/2026-07-01-woven-stance-modulation-design.md`) → **3-lens OPUS adversarial review =
+  SOUND-WITH-FIXES, all 5 must-fixes folded** → plan (`…/plans/2026-07-01-woven-stance-modulation.md`) →
+  controller-implements build, TDD green per commit.
+- **The two review catches that mattered:** (MF-1) the probe egress gate (added-revelation vs the CURRENT push
+  only) would have **silently eaten** an acknowledgment naming movement on an earlier-closed thread — the
+  feature dies in exactly its intended case; resolution: the gate stays byte-unchanged and moat-first, acks are
+  **move-free by construction** (mirror THEIR words, never the principle), and a dedicated `@live` gate-compat
+  test is the teeth (escalation: segment screening). (MF-2) the doctrine's first draft lived in
+  `voice_craft.md`, which `resolve_presentation` appends to EVERY author — "press hard and cold" would have
+  ridden into the landing author; the doctrine lives in **`concierge.md`** (loaded only by the probe author),
+  pinned by a sentinel test (`The arc of the press` in the probe request, never in land/converse).
+- **Built (T1–T4):** (T1) `concierge_turn` gains keyword-only `arc: tuple[int, int] | None = None` (Protocol/
+  FakeModel/AnthropicModel + the **5 frozen test fakes** in the same commit, L-10); probe briefs append
+  `Arc: this is push {n}; the diagnostic never runs past {cap} pushes…` — never on the re-invite;
+  `voice.turn(..., arc=None)` pass-through. (T2) the bridge counts pushes (pre-incremented: first probe =
+  push 1) and passes `arc=(n, MAX_PUSHES)` — `MAX_PUSHES` imported **read-only** from the judgment loop; door
+  path untouched. (T3) the doctrine: early = full friction; **earned** acknowledgment = ONE perfect-tense
+  "You've …" opener naming the movement in their concrete words, reserved for real movement (restatement =
+  silence on the progress channel), DESCRIBE-never-RATE (L-4 contrast); late (push 3+) = shorter, no new
+  fronts, hold the ONE live tension, never resolve/point (L-5 contrast); craft = ≤1 question/turn, no
+  dismissive tics, never re-press your own previous press. (T4) five `@live` tests: earned ack without verdict,
+  anti-flattery (no ack-shaped opener on a restatement — the operational MF-4 predicate), **gate-compat**
+  (a move-free ack on settled ground survives the real push-diff gate), late-arc shorter + single question,
+  craft rules.
+- **Invariants held:** engine byte-untouched (a counter at the bridge + a constant import; empty diff on
+  `orchestration.py` + `assessment/`); bridge transparency green; L-4 structural (the probe author is still
+  never told correctness — only two arc integers were added); L-13 (the arc line lives in the REQUEST; every
+  visible turn keeps its existing egress gate); `voice_craft.md` byte-untouched.
+- **Verified:** offline **326 passed / 25 skipped** (5 new `@live` self-skip), ruff clean, green per commit.
+  **Founder-gated next:** the `@live` run (spends Opus), the felt dogfood (does the session now have an arc?),
+  push. Whole-batch adversarial review runs before merge-close.
+
 ## 2026-07-01 — founder felt-dogfood follow-ups: the invisible valley (flex collapse), converse honesty, the findable exit
 - **The dogfood.** The founder drove a full real session (pricing, SV2 infra) through the merged stack. The
   Earned Landing mechanics fired as designed — the non-converged landing honestly named the un-made call, the
