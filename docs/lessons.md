@@ -209,3 +209,10 @@ Read this checklist before every code change. Update it after every correction o
   everything before the model call should be executable offline, so a setup-only repro
   (`python -c` the setup lines) can verify it for free; (c) after fixing a live-only break, verify with a
   single-call live run of just that test (L-17), not the whole batch.
+- **L-23 A `pytest | tail` pipe MASKS the exit status — an `&&` gate chain built on it will commit a RED
+  state.** The woven-stance Minor-hardening commit ran `pytest -q ... | tail -2 && ... && git commit`; pytest
+  failed but the chain's status came from `tail` (zsh, no pipefail), so the commit landed red and had to be
+  amended after a fix-forward. Prevention: when a pipe feeds the gate, capture the real status — either
+  `pytest -q > /tmp/out 2>&1; echo "exit: $?"; tail -1 /tmp/out` and branch on the echoed status, or read the
+  tail output and ONLY commit after seeing the literal "N passed" with 0 failed — never let `&&` after a piped
+  pytest stand in for "tests passed."
