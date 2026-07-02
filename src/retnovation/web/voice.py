@@ -95,6 +95,17 @@ def close(
     return text
 
 
+_RETRY_STEER = (
+    "Your previous attempt restated the problem's mechanism too plainly. Land again without "
+    "describing any mechanism or move — point at what THEY said and what it cost them, never at "
+    "what it means."
+)
+
+
+def _student_text(recent: list[tuple[str, str]]) -> str:
+    return " ".join(t for role, t in recent if role == "student")
+
+
 def land(
     model: Model,
     exp: Experience,
@@ -103,15 +114,21 @@ def land(
     posture: str | None = None,
 ) -> str:
     """Author the felt landing at convergence/stop — a short, present-tense arrival, honest by
-    stop_reason. It rewards movement/rigor, NEVER correctness (L-4 — the egress screen cannot enforce
-    that; only concierge_land's doctrine can). Egress-backstopped HERE, in the worker, before the text
-    reaches the done payload (mirrors voice.close); fallback to the honest-generic static on
-    refusal/empty/leak."""
+    stop_reason. It rewards movement/rigor, NEVER correctness (L-4 — only concierge_land's doctrine
+    enforces that). L-13 gate (founder call, 2026-07-01 live evidence): the crux mirror inevitably
+    touches the move's territory, so a FLAT screen kills most good landings — instead the landing may
+    perform only moves the STUDENT's own dialogue already performed (added-revelation vs THEIR words,
+    the probe gate's logic — you cannot hand someone what they already hold). A flagged landing is
+    re-authored ONCE with a no-mechanism steer; then the honest static. Screened in the worker before
+    the done payload."""
     v = resolve_presentation(posture, exp)["voice"]
-    text = model.concierge_land(exp.prompt, recent, stop_reason, voice=v)
-    if not text or not egress_safe_reply(model, exp, text):
-        return _STATIC_LAND
-    return text
+    student = _student_text(recent)
+    baseline = _performed(model, exp, student) if student else set()
+    for steer in ("", _RETRY_STEER):
+        text = model.concierge_land(exp.prompt, recent, stop_reason, steer=steer, voice=v)
+        if text and not (_performed(model, exp, text) - baseline):
+            return text
+    return _STATIC_LAND
 
 
 def opening(model: Model, exp: Experience, posture: str | None = None) -> str:

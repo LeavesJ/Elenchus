@@ -221,7 +221,7 @@ def test_land_threads_the_stop_reason_through():
 
 def test_land_falls_back_to_static_on_leak():
     class _LeakLand(FakeLeakModel):
-        def concierge_land(self, problem, recent, stop_reason, *, voice=""):
+        def concierge_land(self, problem, recent, stop_reason, *, steer="", voice=""):
             return "LEAK the move"
 
     m = _LeakLand(_intake(), {})
@@ -230,11 +230,65 @@ def test_land_falls_back_to_static_on_leak():
 
 def test_land_falls_back_to_static_on_empty():
     class _EmptyLand(FakeModel):
-        def concierge_land(self, problem, recent, stop_reason, *, voice=""):
+        def concierge_land(self, problem, recent, stop_reason, *, steer="", voice=""):
             return ""
 
     m = _EmptyLand(_intake(), {})
     assert voice.land(m, _exp(), [("student", "x")], "converged") == voice._STATIC_LAND
+
+
+class _PerTextLandModel(FakeModel):
+    """Content-addressed screen + scripted landings: pins the student-baseline gate offline.
+    screen_moves flags by exact text; concierge_land pops scripted outputs (records steers)."""
+
+    def __init__(self, intake, flags, landings):
+        super().__init__(intake, {})
+        self._flags = flags
+        self._landings = list(landings)
+        self.steers = []
+
+    def concierge_land(self, problem, recent, stop_reason, *, steer="", voice=""):
+        self.steers.append(steer)
+        return self._landings.pop(0)
+
+    def screen_moves(self, moves, text):
+        return EgressScreen(performed=self._flags.get(text, []), evidence="x")
+
+
+def test_land_keeps_a_mirror_of_the_students_own_move():
+    # The landing performs move {1} — but the STUDENT's own dialogue already performed {1}:
+    # no ADDED revelation (you can't hand someone what they already hold) -> the landing SHIPS.
+    m = _PerTextLandModel(
+        _intake(),
+        {"MIRROR": [1], "I refuse to cross that line.": [1]},
+        ["MIRROR"],
+    )
+    out = voice.land(m, _exp(), [("student", "I refuse to cross that line.")], "converged")
+    assert out == "MIRROR"
+
+
+def test_land_retry_recovers_with_steer():
+    # Attempt 1 adds move {2} beyond the student's {1} -> flagged; the RETRY (with the no-mechanism
+    # steer) comes back clean -> the retry ships. Exactly one retry, steer only on the second call.
+    m = _PerTextLandModel(
+        _intake(),
+        {"TOO-PLAIN": [1, 2], "CLEAN": [], "I refuse to cross that line.": [1]},
+        ["TOO-PLAIN", "CLEAN"],
+    )
+    out = voice.land(m, _exp(), [("student", "I refuse to cross that line.")], "converged")
+    assert out == "CLEAN"
+    assert m.steers == ["", voice._RETRY_STEER]  # steer fires ONLY on the retry
+
+
+def test_land_static_after_retry_still_adds_a_move():
+    m = _PerTextLandModel(
+        _intake(),
+        {"BAD1": [2], "BAD2": [2]},
+        ["BAD1", "BAD2"],
+    )
+    out = voice.land(m, _exp(), [("student", "no moves here")], "converged")
+    assert out == voice._STATIC_LAND
+    assert m.steers == ["", voice._RETRY_STEER]  # exactly one retry, then the honest static
 
 
 # --- voice.converse (post-convergence, engine-free) -----------------------------------------------

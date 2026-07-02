@@ -137,6 +137,12 @@ re-voices the landing.
   Every landing + converse turn is **egress-backstopped** (`egress_safe_reply` / `screen_moves`) — for the
   landing this runs inside `voice.land()` in the worker *before* the text reaches the `done` payload; on
   leak/empty/refusal → the static fallback.
+  **AMENDED 2026-07-01 (founder call, live evidence):** the FLAT screen killed every good landing 3-for-3
+  (the crux mirror inevitably touches the move's territory; the judge is noisy on borderline mirrors — it
+  flagged a landing whose flagged sentence was a near-verbatim mirror of an unflagged student sentence). The
+  landing's gate is now **added-revelation vs the STUDENT's own dialogue** (it may perform only moves they
+  already performed — you cannot hand someone what they already hold), with **one retry** under a
+  no-mechanism steer before the static fallback. See `voice.land`/`_RETRY_STEER`.
 - **L-5 (disband rules):** no handing the answer, no naming the frame, no softening, no removing effort. The
   landing is honest ("no clean answer"), not validating.
 - **Two-phase timing unchanged:** terrain still only at `/close`. The landing is *dialogue*, at convergence.

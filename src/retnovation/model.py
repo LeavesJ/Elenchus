@@ -92,7 +92,13 @@ class Model(Protocol):
         voice: str = "",
     ) -> str: ...
     def concierge_land(
-        self, problem: str, recent: list[tuple[str, str]], stop_reason: str, *, voice: str = ""
+        self,
+        problem: str,
+        recent: list[tuple[str, str]],
+        stop_reason: str,
+        *,
+        steer: str = "",
+        voice: str = "",
     ) -> str: ...
     def screen_moves(self, moves: list[str], text: str) -> "EgressScreen": ...
 
@@ -161,7 +167,7 @@ class FakeModel:
     def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
         return "[converse winddown]"
 
-    def concierge_land(self, problem, recent, stop_reason, *, voice=""):
+    def concierge_land(self, problem, recent, stop_reason, *, steer="", voice=""):
         return f"[land:{stop_reason}]"
 
     def check_injection_expressed(self, injection: str, framed_output: str) -> InjectionExpressed:
@@ -492,7 +498,13 @@ class AnthropicModel:
         return ""
 
     def concierge_land(
-        self, problem: str, recent: list[tuple[str, str]], stop_reason: str, *, voice: str = ""
+        self,
+        problem: str,
+        recent: list[tuple[str, str]],
+        stop_reason: str,
+        *,
+        steer: str = "",
+        voice: str = "",
     ) -> str:
         # The felt landing at convergence/stop. `stop_reason` is the assessment's StopReason value —
         # the author lands honestly by it. Frame-blind; correctness is deliberately NOT supplied (L-4:
@@ -504,6 +516,8 @@ class AnthropicModel:
             f"Problem:\n{problem}\n\nStop reason: {stop_reason}\n\n"
             f"{_render_turns(recent, limit=20)}Write the landing."
         )
+        if steer:  # the one-shot retry steer (voice.land): re-land without restating the mechanism
+            user += "\n" + steer
         resp = self._get_client().messages.create(
             model=self._model,
             max_tokens=_ECHO_MAX_TOKENS,
