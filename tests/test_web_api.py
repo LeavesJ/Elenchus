@@ -306,3 +306,42 @@ def test_done_payload_carries_next_title(tmp_path, make_fake):
     assert isinstance(r["next_title"], str) and r["next_title"]
     assert "veldra" not in r["next_title"].lower()
     assert r["next_title"] != _ANCHOR_TITLE
+
+
+def _drive_to_done(client):
+    r = client.post(
+        "/api/session/s/say", json={"text": "reasoning that already holds the move"}
+    ).json()
+    while r["kind"] == "say":
+        r = client.post("/api/session/s/say", json={"text": "mechanism"}).json()
+    assert r["kind"] == "done"
+    return r
+
+
+def test_chained_sitting_continue_end_to_end(tmp_path, make_fake):
+    """One tap after the landing starts a NEW clean session in the same thread (opening say);
+    End mid-segment closes honestly (MF-5) with the village terrain."""
+    app = create_app(db_path=str(tmp_path / "chain.db"), model_factory=make_fake)
+    client = TestClient(app)
+    _, r = _choose_anchor(client)
+    d1 = _drive_to_done(client)
+    assert d1["next_title"] and d1["next_title"] != _ANCHOR_TITLE
+    r2 = client.post("/api/session/s/continue", json={}).json()
+    assert (
+        r2["kind"] == "say" and r2["text"]
+    )  # the NEW session's opening — the thread just continues
+    cl = client.post("/api/session/s/close").json()  # End mid-segment (segment 2 not converged)
+    assert cl["kind"] == "close" and isinstance(cl["terrain"], list)
+    assert "stepped away mid-problem" in cl["close"]  # MF-5: honest static, not a mirrored close
+
+
+def test_continue_menu_path_and_double_click_idempotency(tmp_path, make_fake):
+    app = create_app(db_path=str(tmp_path / "dc.db"), model_factory=make_fake)
+    client = TestClient(app)
+    _, r = _choose_anchor(client)
+    _drive_to_done(client)
+    m = client.post("/api/session/s/continue", json={"menu": True}).json()
+    assert m["kind"] == "menu" and m["problems"]  # inline picker path
+    # the menu path consumed the continuation; a second continue is refused (MF-6 idempotency)
+    again = client.post("/api/session/s/continue", json={}).json()
+    assert again["kind"] == "error"

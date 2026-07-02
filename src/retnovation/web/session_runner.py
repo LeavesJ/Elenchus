@@ -22,6 +22,19 @@ from . import voice
 # who keeps typing non-substantive input (or a mis-classifying model) pins the session open forever.
 _DOOR_MAX_NONSUBSTANTIVE = 3
 
+# Chained sittings: a poison-pill put on an ORPHANED segment's to_worker queue (continue/close over
+# a live channel). The worker raises _Abandoned at its next collect, swallows it, and exits through
+# finally so its store CLOSES (MF-4 — otherwise the parked worker leaks an open connection forever).
+_ABANDON = object()
+
+_STATIC_SITTING_CLOSE = (
+    "You stepped away mid-problem — that one stays unbuilt. Here's the village you built."
+)
+
+
+class _Abandoned(Exception):
+    pass
+
 
 class _Channel:
     def __init__(self):
@@ -76,6 +89,8 @@ class SessionRegistry:
                     theme = voice.resolve_presentation(posture, None)["visual"]
                     ch.from_worker.put(("menu", {"problems": labels, "refs": refs, "theme": theme}))
                     idx = ch.to_worker.get()
+                    if idx is _ABANDON:
+                        raise _Abandoned()
                     spec, receipt = menu[idx]
                     top_spec, top_rcpt = proposal.top
                     return Selection(
@@ -100,6 +115,8 @@ class SessionRegistry:
                     nonsubstantive = 0
                     while True:
                         text = ch.to_worker.get()
+                        if text is _ABANDON:
+                            raise _Abandoned()
                         ec = voice.gate(model, exp, text, recent)
                         recent.append(("student", text))
                         if ec is EntryClass.substantive:
@@ -129,6 +146,8 @@ class SessionRegistry:
                         ch.from_worker.put(("say", {"text": shown}))
                         recent.append(("Vera", shown))
                         student = ch.to_worker.get()
+                        if student is _ABANDON:
+                            raise _Abandoned()
                         recent.append(("student", student))
                         return student  # RAW reply to the engine — canonical push is what it grades
 
@@ -192,6 +211,8 @@ class SessionRegistry:
                 ch.from_worker.put(
                     ("done", {"state": state, "assessment": assessment, "landing": landing})
                 )
+            except _Abandoned:
+                pass  # orphaned segment (user continued/closed past it); store closes in finally
             except Exception as e:  # surface, never hang the client
                 ch.from_worker.put(("error", {"message": repr(e)}))
             finally:
@@ -239,13 +260,37 @@ class SessionRegistry:
             ch.terminal = True
         return tag, data
 
+    def continue_session(self, session_id: str, menu: bool = False) -> tuple[str, dict]:
+        """Chained sittings: start the NEXT bounded session in the same thread. One-click path
+        auto-picks the door the button NAMED (the guarded next pick); menu=True returns the inline
+        picker instead. Idempotent per converged segment (MF-6); reaps a live prior worker (MF-4);
+        an absent pick returns the MENU, never a silent door-0 (MF-3)."""
+        rec = self._last_record.get(session_id)
+        if rec is None:
+            return ("error", {"message": "nothing to continue from"})
+        if rec.get("continued"):
+            return ("error", {"message": "continuation already in flight"})
+        rec["continued"] = True
+        old_ch = self._ch.get(session_id)
+        if old_ch is not None and not old_ch.terminal:
+            old_ch.to_worker.put(_ABANDON)  # reap the parked mid-segment worker
+        pick = self._next_pick.get(session_id)
+        tag, data = self.start(session_id)
+        if tag != "menu" or menu or pick is None:
+            return (tag, data)
+        try:
+            idx = self.menu_index(session_id, pick)
+        except ValueError:
+            return (tag, data)  # the offered door vanished: show the doors honestly (MF-3)
+        return self.step(session_id, idx)
+
     def menu_index(self, session_id: str, ledger_ref: str) -> int:
         return self._ch[session_id].last_menu_refs.index(ledger_ref)
 
     def converse(self, session_id: str, value) -> tuple[str, dict]:
-        """Post-convergence engaged turn — engine-free, served from the record; never touches the
-        terminal-guarded worker queue. Appends both turns so the next converse sees the full thread."""
-        rec = self._ch[session_id].record
+        """Post-convergence engaged turn — engine-free, served from the SITTING's last converged
+        record (survives chained segments); never touches the terminal-guarded worker queue."""
+        rec = self._last_record.get(session_id)
         if rec is None:
             return ("error", {"message": "session has not converged"})
         reply = voice.converse(
@@ -261,10 +306,17 @@ class SessionRegistry:
         return ("say", {"text": reply})
 
     def close(self, session_id: str) -> tuple[str, dict]:
-        """User-owned close: author the honest close from the FULL dialogue (incl. post-convergence
-        turns) and return it with the frozen-at-convergence terrain. Engine-free; no step()."""
-        rec = self._ch[session_id].record
+        """User-owned close: author the honest close from the SITTING's last converged record and
+        return it with that record's terrain (the village, cumulative). Engine-free; no step().
+        MF-5: an in-flight segment past the last convergence gets an honest STATIC sign-off — a
+        mirrored close would reflect the PREVIOUS problem while the current turns vanish — and the
+        parked worker is reaped (MF-4)."""
+        rec = self._last_record.get(session_id)
         if rec is None:
             return ("error", {"message": "session has not converged"})
+        ch = self._ch.get(session_id)
+        if ch is not None and not ch.terminal and ch.record is None:
+            ch.to_worker.put(_ABANDON)
+            return ("close", {"close": _STATIC_SITTING_CLOSE, "terrain": rec["terrain"]})
         close_text = voice.close(rec["model"], rec["exp"], rec["recent"], rec["posture"])
         return ("close", {"close": close_text, "terrain": rec["terrain"]})

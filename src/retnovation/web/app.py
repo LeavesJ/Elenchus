@@ -32,6 +32,10 @@ class _Text(BaseModel):
     text: str
 
 
+class _Cont(BaseModel):
+    menu: bool = False
+
+
 def _default_model():
     from ..model import AnthropicModel
 
@@ -93,6 +97,11 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
         if not body.text.strip():
             return _BLANK_NUDGE  # blank never reaches the model (D1 guard); engine-free path
         return _emit(reg, *reg.converse(_SID, body.text))
+
+    @app.post("/api/session/{sid}/continue")
+    def continue_(sid: str, body: _Cont):
+        # Chained sittings: the next bounded engine session in the same thread (one-click or menu).
+        return _emit(reg, *reg.continue_session(_SID, body.menu))
 
     @app.post("/api/session/{sid}/close")
     def close_session(sid: str):

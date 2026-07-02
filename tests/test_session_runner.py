@@ -291,3 +291,54 @@ def test_probe_displays_carry_an_incrementing_arc(tmp_path):
     assert tag == "done"
     assert len(arcs) >= 2  # multiple probes: the increment itself is exercised, not just push 1
     assert arcs == [(i + 1, MAX_PUSHES) for i in range(len(arcs))]  # 1-based, pre-incremented
+
+
+def test_continue_reaps_the_parked_worker_and_restarts_arc(tmp_path, make_fake):
+    """MF-4: closing/continuing over a live mid-segment worker unblocks it via the poison pill so
+    its finally runs (store closes, thread exits). Also: the arc counter restarts at push 1 in the
+    chained segment (spy across both segments)."""
+    arcs = []
+
+    def factory():
+        m = make_fake()
+        orig = m.concierge_turn
+
+        def rec(problem, push, recent, *, arc=None, voice=""):
+            if push:
+                arcs.append(arc)
+            return orig(problem, push, recent, arc=arc, voice=voice)
+
+        m.concierge_turn = rec
+        # problem-AGNOSTIC doubles: the chained segment is a DIFFERENT problem, whose frame codes
+        # make_fake's scripted dicts don't know (a KeyError would error the worker and skip the
+        # static-close path). Intake derives from the actual rubric; every push closes -> converges.
+        m.classify_intake = lambda exp, opening: IntakeClassification(
+            frame_states={f.frame_code: FrameState.absent for f in exp.rubric.frames},
+            trap_states={t.trap_code: TrapState.not_tripped for t in exp.rubric.traps},
+        )
+        m.classify_response = lambda exp, kind, code, push, response, stress=False: (
+            ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+        )
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "reap.db"), model_factory=factory)
+    tag, _ = reg.start("s1", now=NOW)
+    tag, _ = reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    tag, data = reg.step("s1", "reasoning that already holds the move")
+    while tag == "say":
+        tag, data = reg.step("s1", "mechanism")
+    assert tag == "done"
+    n_first = len(arcs)
+    assert n_first >= 1
+    tag, data = reg.continue_session("s1")
+    assert tag == "say"  # the new segment's opening arrived in-thread
+    # drive one probe into segment 2 to observe the arc restart at push 1
+    tag, data = reg.step("s1", "an opening without the move")
+    if tag == "say" and len(arcs) > n_first:
+        assert arcs[n_first][0] == 1  # fresh segment: the counter restarted
+    # End over the LIVE mid-segment worker: honest static close + the worker is reaped
+    ch2 = reg._ch["s1"]
+    tag2, data2 = reg.close("s1")
+    assert tag2 == "close" and "stepped away mid-problem" in data2["close"]
+    ch2.thread.join(timeout=5)
+    assert not ch2.thread.is_alive()  # finally ran -> store closed, thread exited
