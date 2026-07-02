@@ -324,9 +324,19 @@ class SessionRegistry:
 
     def _cache_menu(self, session_id: str, ch: _Channel, data: dict) -> None:
         """Cache the menu server-side and stamp it with a nonce the client must echo on choose —
-        a stale tab's click then re-serves the menu instead of opening a door nobody picked."""
+        a stale tab's click then re-serves the menu instead of opening a door nobody picked.
+        Doors converged within the rolling window gain ' · just worked' (spec §2e): a repeat
+        becomes a visible, informed choice, never a silent re-serve. Title-layer only — the menu's
+        content and ORDER are untouched (reordering would corrupt proposed-vs-chosen selection
+        semantics), and refs stay server-side."""
+        refs = data.get("refs", [])
+        window = self._store.converged_within(datetime.now(timezone.utc)) if refs else set()
+        if window:
+            data["problems"] = [
+                p + " · just worked" if r in window else p for p, r in zip(data["problems"], refs)
+            ]
         ch.last_menu = data["problems"]
-        ch.last_menu_refs = data.get("refs", [])
+        ch.last_menu_refs = refs
         nonce = self._menu_nonce.get(session_id, 0) + 1
         self._menu_nonce[session_id] = nonce
         data["nonce"] = nonce

@@ -43,6 +43,24 @@ def _default_model():
     return AnthropicModel()
 
 
+def _build_stamp() -> str:
+    """Best-effort build identity (durable sittings §2f): tonight's incident was undiagnosable in
+    the tab because nothing said WHICH build the process was running. Never raises."""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["git", "describe", "--always", "--dirty"],
+            capture_output=True,
+            timeout=1,
+            text=True,
+            cwd=str(Path(__file__).resolve().parents[3]),
+        )
+        return out.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
 def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
     if tag == "menu":
         out = {"kind": "menu", "problems": data["problems"], "theme": data.get("theme", {})}
@@ -77,14 +95,17 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
     app = FastAPI(title="Retnovation — Cartographer MVP")
 
     reg = SessionRegistry(db_path, model_factory or (lambda: _default_model()))
+    build = _build_stamp()
 
     @app.get("/api/health")
     def health():
-        return {"ok": True}
+        return {"ok": True, "build": build}
 
     @app.get("/")
     def index():
-        return FileResponse(_STATIC / "index.html")
+        # no-store kills the stale-shell class structurally (durable sittings §2f) — a cached
+        # shell that predates kind:"resume" would render every page load as an error line.
+        return FileResponse(_STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
     app.mount("/static", StaticFiles(directory=_STATIC), name="static")
 
@@ -92,7 +113,9 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
     def start():
         # Durable sittings: a live sitting RESUMES (same room, whole conversation) — the
         # unconditional cold start was the founder's amnesia incident (spec §0).
-        return _emit(reg, *reg.resume_or_start(_SID))
+        out = _emit(reg, *reg.resume_or_start(_SID))
+        out["build"] = build  # visible in the tab (console/#mark tooltip) — §2f
+        return out
 
     @app.post("/api/session/{sid}/choose")
     def choose(sid: str, body: _Choice):

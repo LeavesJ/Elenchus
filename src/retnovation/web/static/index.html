@@ -88,18 +88,22 @@ let nextTitle='';
 let contBox=null;
 function renderContinue(title){
   if(contBox){ contBox.remove(); contBox=null; }
-  if(!title) return;
   contBox=document.createElement('div');
   contBox.style.cssText='align-self:center;display:flex;gap:12px;align-items:center;margin:6px 0';
-  const b=document.createElement('button'); b.type='button';
-  b.style.cssText='background:#155e63;color:#eafffb;border:0;border-radius:11px;padding:9px 16px;font:inherit;cursor:pointer';
-  b.textContent='Continue \u2192 '+title;
-  b.onclick=()=>goContinue(b,{});
+  if(title){
+    const b=document.createElement('button'); b.type='button';
+    b.style.cssText='background:#155e63;color:#eafffb;border:0;border-radius:11px;padding:9px 16px;font:inherit;cursor:pointer';
+    b.textContent='Continue \u2192 '+title;
+    b.onclick=()=>goContinue(b,{});
+    contBox.append(b);
+  }
+  // the doors link ALWAYS renders post-landing \u2014 a fully-worked window must not hide both
+  // continue affordances (durable sittings \u00a72e)
   const o=document.createElement('button'); o.type='button';
   o.style.cssText='background:none;border:0;color:#8aa0bf;font:inherit;cursor:pointer;text-decoration:underline';
   o.textContent='other doors\u2026';
   o.onclick=()=>goContinue(o,{menu:true});
-  contBox.append(b,o); thread.appendChild(contBox); thread.scrollTop=thread.scrollHeight;
+  contBox.append(o); thread.appendChild(contBox); thread.scrollTop=thread.scrollHeight;
 }
 async function goContinue(btn,body){
   btn.disabled=true; input.disabled=true; send.disabled=true; const t=thinking();
@@ -117,10 +121,14 @@ function applyTheme(t){ if(!t) return;
 
 async function start(){
   const r = await post('/api/session');
-  applyTheme(r.theme);
-  renderMenu(r.problems);
+  if(r.build){ const mk=document.getElementById('mark');
+    if(mk) mk.title=((mk.title?mk.title+' · ':'')+r.build);
+    console.info('retnovation build', r.build); }  // one glance answers "which build?" (§2f)
+  advance(r);
 }
-function renderMenu(problems){
+let menuNonce=null;  // stale-menu guard: choose echoes the nonce the menu carried
+function renderMenu(problems, nonce){
+  menuNonce = (nonce===undefined) ? null : nonce;
   muted('Pick a problem to work. You are never told the move to make.');
   const m=document.createElement('div'); m.className='menu';
   problems.forEach((p,i)=>{ const b=document.createElement('button'); b.innerHTML=esc(p);
@@ -129,19 +137,44 @@ function renderMenu(problems){
 }
 async function choose(i, menuEl){
   menuEl.remove();
-  const t=thinking(); const r=await post('/api/session/single/choose',{index:i}); t.remove();
+  const t=thinking(); const r=await post('/api/session/single/choose',{index:i, nonce:menuNonce}); t.remove();
   advance(r);
 }
+// Durable sittings: re-enter the SAME room — replay the persisted transcript in one fragment
+// (one reflow, one scroll), then restore the live affordances from the payload, never from the
+// replayed turns (a long sitting must not resurrect N dead Continue buttons).
+function renderResume(r){
+  applyTheme(r.theme);
+  const frag=document.createDocumentFragment();
+  (r.turns||[]).forEach(t=>{
+    const d=document.createElement('div');
+    if(t.kind==='you'){ d.className='msg you'; }
+    else if(t.kind==='vera'||t.kind==='landing'){ d.className='msg vera'; }
+    else { d.className='muted'; }  // muted + seam
+    d.innerHTML=esc(t.text); frag.appendChild(d);
+  });
+  thread.appendChild(frag);
+  if(r.honesty) muted(r.honesty);
+  mode = r.mode==='converse' ? 'converse' : 'engine';
+  nextTitle = r.next_title || '';
+  if(r.menu){ renderMenu(r.menu.problems, r.menu.nonce); }
+  else { showComposer(true); }
+  showEnd(!!r.end_visible);
+  if(mode==='converse') renderContinue(nextTitle);
+  thread.scrollTop=thread.scrollHeight;
+}
 function advance(r){
-  if(r.kind==='menu'){ renderMenu(r.problems); return; }
-  if(r.kind==='say'){ applyTheme(r.theme); bubble('vera', r.text); showComposer(true);
+  if(r.kind==='resume'){ renderResume(r); return; }
+  if(r.kind==='menu'){ applyTheme(r.theme); renderMenu(r.problems, r.nonce); return; }
+  if(r.kind==='say'){ if(r.seam) muted(r.seam); applyTheme(r.theme); bubble('vera', r.text); showComposer(true);
     if(mode==='converse') renderContinue(nextTitle); return; }
   if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); nextTitle=r.next_title||''; renderContinue(nextTitle); return; }
   if(r.kind==='close'){ renderClose(r); return; }
   if(r.kind==='nudge'){ muted(r.message); showComposer(true); return; }
   muted('error: '+(r.message||'')); showComposer(true);
 }
-function renderClose(r){ if(r.close) bubble('vera', r.close); renderTerrain(r.terrain||[]); showComposer(false); }
+function renderClose(r){ if(contBox){ contBox.remove(); contBox=null; }
+  if(r.close) bubble('vera', r.close); renderTerrain(r.terrain||[]); showComposer(false); }
 function renderTerrain(regions){
   regions = regions || [];
   const rendered = regions.filter(x=>x.render==='rendered').length;

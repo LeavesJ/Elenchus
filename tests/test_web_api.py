@@ -21,7 +21,9 @@ def _choose_anchor(client):
 
 def test_health_ok():
     client = TestClient(create_app(db_path=":memory:", model_factory=None))
-    assert client.get("/api/health").json() == {"ok": True}
+    health = client.get("/api/health").json()
+    assert health["ok"] is True
+    assert health.get("build")  # the running build is visible in one glance (durable sittings §2f)
 
 
 def test_full_session_and_l13_surface(tmp_path, make_fake):
@@ -434,3 +436,73 @@ def test_choose_marker_and_seam_ride_the_endpoints(tmp_path, make_fake):
     import json as _json
 
     assert "veldra:" not in _json.dumps([t["payload"] for t in turns])
+
+
+def test_shell_handles_resume_seam_and_empty_pick_doors():
+    """Served-shell assertions (durable sittings §2c/§2d/§2e): resume rendering via a fragment,
+    seam rendering on says, and the doors link surviving an empty pick."""
+    client = TestClient(create_app(db_path=":memory:", model_factory=None))
+    html = client.get("/").text
+    assert "renderResume(" in html and "kind==='resume'" in html
+    assert "DocumentFragment" in html or "createDocumentFragment" in html
+    assert "r.seam" in html  # the say-borne seam renders as a muted line
+    # the doors link renders even when next_title is empty (a fully-worked window must not hide
+    # both continue affordances)
+    assert "other doors" in html
+    assert "menuNonce" in html  # choose echoes the menu nonce
+
+
+def test_shell_is_served_no_store_and_build_stamp_rides_health_and_session(tmp_path, make_fake):
+    """§2f: the stale-shell class dies structurally; the running build is visible in one glance."""
+    app = create_app(db_path=str(tmp_path / "b.db"), model_factory=make_fake)
+    client = TestClient(app)
+    resp = client.get("/")
+    assert resp.headers.get("cache-control") == "no-store"
+    health = client.get("/api/health").json()
+    assert health["ok"] is True and health.get("build")
+    cold = client.post("/api/session").json()
+    assert cold["kind"] == "menu" and cold.get("build")
+    assert cold.get("nonce")  # the stale-menu guard rides the cold menu too
+
+
+def test_resume_over_http_carries_the_room(tmp_path, make_fake):
+    """The founder's incident, exercised end-to-end over HTTP: converge, 'restart' (new app over
+    the same db), and the front door returns the WHOLE room — transcript, End, Continue, mode."""
+    db = str(tmp_path / "resume-api.db")
+    app1 = create_app(db_path=db, model_factory=make_fake)
+    c1 = TestClient(app1)
+    _choose_anchor(c1)
+    d1 = _drive_to_done(c1)
+    assert d1["landing"]
+
+    app2 = create_app(db_path=db, model_factory=make_fake)  # the restart
+    c2 = TestClient(app2)
+    r = c2.post("/api/session").json()
+    assert r["kind"] == "resume"
+    assert r["mode"] == "converse" and r["end_visible"] is True
+    assert any(t["kind"] == "landing" and t["text"] == d1["landing"] for t in r["turns"])
+    assert r["next_title"] and "veldra:" not in str(r)
+    # converse works over the rebuilt record; End still closes with the village
+    cv = c2.post("/api/session/s/converse", json={"text": "one more thought"}).json()
+    assert cv["kind"] == "say" and cv["text"]
+    cl = c2.post("/api/session/s/close").json()
+    assert cl["kind"] == "close" and isinstance(cl["terrain"], list)
+
+
+def test_menu_suffix_marks_just_worked_doors(tmp_path, make_fake):
+    """§2e: a converged-within-24h door is a visible, informed choice on the next cold menu —
+    ' · just worked', title-layer only, refs still server-side."""
+    db = str(tmp_path / "suffix.db")
+    app1 = create_app(db_path=db, model_factory=make_fake)
+    c1 = TestClient(app1)
+    _choose_anchor(c1)
+    _drive_to_done(c1)
+    c1.post("/api/session/s/close")  # the sitting ends; the converged log survives
+
+    app2 = create_app(db_path=db, model_factory=make_fake)
+    menu = TestClient(app2).post("/api/session").json()
+    assert menu["kind"] == "menu"
+    marked = [p for p in menu["problems"] if p.endswith(" · just worked")]
+    assert _ANCHOR_TITLE + " · just worked" in menu["problems"]
+    assert len(marked) < len(menu["problems"])  # unworked doors stay clean
+    assert all("veldra:" not in p for p in menu["problems"])
