@@ -345,3 +345,15 @@ def test_continue_menu_path_and_double_click_idempotency(tmp_path, make_fake):
     # the menu path consumed the continuation; a second continue is refused (MF-6 idempotency)
     again = client.post("/api/session/s/continue", json={}).json()
     assert again["kind"] == "error"
+
+
+def test_index_has_continue_affordance_following_the_thread():
+    client = TestClient(create_app(db_path=":memory:", model_factory=None))
+    html = client.get("/").text
+    assert "renderContinue(" in html and "other doors" in html
+    assert "/continue" in html
+    # MF-6: proceed lives IN-THREAD; the sticky composer row never gains a Continue button
+    composer = html[html.index('<form id="composer"') : html.index("</form>")]
+    assert "Continue" not in composer
+    # the affordance re-renders after converse replies (never stranded in scrollback)
+    assert "renderContinue(nextTitle)" in html

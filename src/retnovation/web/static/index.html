@@ -81,6 +81,33 @@ function showEnd(on){ endBtn.hidden=!on; }
 endBtn.addEventListener('click', async ()=>{ endBtn.disabled=true; const t=thinking();
   try{ const r=await post('/api/session/single/close'); t.remove(); renderClose(r); }
   catch(_){ t.remove(); endBtn.disabled=false; muted('connection lost — try again.'); } });
+// Chained sittings: the in-thread Continue affordance. It FOLLOWS the conversation (re-rendered
+// after each converse reply so it is never stranded in scrollback); proceed lives in-thread, exit
+// stays in the sticky composer (deliberate layer split).
+let nextTitle='';
+let contBox=null;
+function renderContinue(title){
+  if(contBox){ contBox.remove(); contBox=null; }
+  if(!title) return;
+  contBox=document.createElement('div');
+  contBox.style.cssText='align-self:center;display:flex;gap:12px;align-items:center;margin:6px 0';
+  const b=document.createElement('button'); b.type='button';
+  b.style.cssText='background:#155e63;color:#eafffb;border:0;border-radius:11px;padding:9px 16px;font:inherit;cursor:pointer';
+  b.textContent='Continue \u2192 '+title;
+  b.onclick=()=>goContinue(b,{});
+  const o=document.createElement('button'); o.type='button';
+  o.style.cssText='background:none;border:0;color:#8aa0bf;font:inherit;cursor:pointer;text-decoration:underline';
+  o.textContent='other doors\u2026';
+  o.onclick=()=>goContinue(o,{menu:true});
+  contBox.append(b,o); thread.appendChild(contBox); thread.scrollTop=thread.scrollHeight;
+}
+async function goContinue(btn,body){
+  btn.disabled=true; input.disabled=true; send.disabled=true; const t=thinking();
+  try{ const r=await post('/api/session/single/continue',body); t.remove();
+    if(contBox){ contBox.remove(); contBox=null; } nextTitle=''; mode='engine'; advance(r); }
+  catch(_){ t.remove(); btn.disabled=false; input.disabled=false; send.disabled=false;
+    muted('connection lost — try again.'); }
+}
 function applyTheme(t){ if(!t) return;
   const w=document.getElementById('wrap'); w.className='';
   if(t.accent) w.classList.add('accent-'+t.accent);
@@ -106,8 +133,10 @@ async function choose(i, menuEl){
   advance(r);
 }
 function advance(r){
-  if(r.kind==='say'){ applyTheme(r.theme); bubble('vera', r.text); showComposer(true); return; }
-  if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); return; }
+  if(r.kind==='menu'){ renderMenu(r.problems); return; }
+  if(r.kind==='say'){ applyTheme(r.theme); bubble('vera', r.text); showComposer(true);
+    if(mode==='converse') renderContinue(nextTitle); return; }
+  if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); nextTitle=r.next_title||''; renderContinue(nextTitle); return; }
   if(r.kind==='close'){ renderClose(r); return; }
   if(r.kind==='nudge'){ muted(r.message); showComposer(true); return; }
   muted('error: '+(r.message||'')); showComposer(true);
