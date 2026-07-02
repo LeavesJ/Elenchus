@@ -342,3 +342,74 @@ def test_continue_reaps_the_parked_worker_and_restarts_arc(tmp_path, make_fake):
     assert tag2 == "close" and "stepped away mid-problem" in data2["close"]
     ch2.thread.join(timeout=5)
     assert not ch2.thread.is_alive()  # finally ran -> store closed, thread exited
+
+
+def _agnostic(make_fake, outcome):
+    """Problem-agnostic fake: intake from the actual rubric; every push -> `outcome`."""
+    m = make_fake()
+    m.classify_intake = lambda exp, opening: IntakeClassification(
+        frame_states={f.frame_code: FrameState.absent for f in exp.rubric.frames},
+        trap_states={t.trap_code: TrapState.not_tripped for t in exp.rubric.traps},
+    )
+    m.classify_response = lambda exp, kind, code, push, response, stress=False: (
+        ResponseClassification(
+            outcome=outcome, mechanism_supplied=(outcome == "closed"), hard_wrong=False
+        )
+    )
+    return m
+
+
+def _drive(reg, sid, opening="an opening"):
+    tag, data = reg.step(sid, opening)
+    while tag == "say":
+        tag, data = reg.step(sid, "again")
+    return tag, data
+
+
+def test_plateaued_segment_is_not_banked_and_can_be_reoffered(tmp_path, make_fake):
+    """F1: the sitting dedupe is by CONVERGED refs ONLY — a plateaued segment's problem may
+    legitimately be re-offered (it was not banked as a house)."""
+    reg = SessionRegistry(
+        str(tmp_path / "f1.db"), model_factory=lambda: _agnostic(make_fake, "unchanged")
+    )
+    tag, _ = reg.start("s1", now=NOW)
+    tag, _ = reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    tag, data = _drive(reg, "s1")
+    assert tag == "done"
+    rec = reg._last_record["s1"]
+    assert rec["stop_reason"] != "converged"  # the always-unchanged fake cannot converge
+    assert _ANCHOR not in reg._sitting_done.get("s1", set())  # NOT banked (F1)
+    # and the guarded pick may legitimately re-offer it
+    assert data["next_title"]  # a door is still offered
+
+
+def test_error_segment_does_not_strand_continuation(tmp_path, make_fake):
+    """F2: a chained segment that ERRORS must not leave continued=True stuck on the last converged
+    record — the user must be able to continue again after a transient failure."""
+
+    calls = {"n": 0}
+
+    def factory():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _agnostic(make_fake, "closed")  # segment 1 converges
+        m = _agnostic(make_fake, "closed")
+
+        def boom(exp, opening):
+            raise RuntimeError("transient model failure")
+
+        m.classify_intake = boom  # segment 2 errors at intake
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "f2.db"), model_factory=factory)
+    tag, _ = reg.start("s1", now=NOW)
+    tag, _ = reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    tag, data = _drive(reg, "s1", "reasoning that already holds the move")
+    assert tag == "done"
+    tag2, _ = reg.continue_session("s1")
+    assert tag2 == "say"  # segment 2 opened
+    tag3, _ = reg.step("s1", "an opening")  # intake raises -> error, terminal
+    assert tag3 == "error"
+    # the continuation flow is NOT stranded: a fresh continue is accepted
+    tag4, data4 = reg.continue_session("s1")
+    assert tag4 in ("say", "menu"), f"stranded: {tag4} {data4}"

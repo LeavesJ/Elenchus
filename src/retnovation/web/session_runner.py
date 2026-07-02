@@ -228,9 +228,18 @@ class SessionRegistry:
             ch.last_menu_refs = data.get("refs", [])
         if tag == "done":
             self._on_done(session_id, ch, data)
+        if tag == "error":
+            self._unstick_continue(session_id)
         if tag in ("done", "error"):
             ch.terminal = True
         return tag, data
+
+    def _unstick_continue(self, session_id: str) -> None:
+        # F2: a segment that ERRORS never reaches _on_done, so the prior record's idempotency flag
+        # would stick forever and dead-end every future continue. A failed segment re-enables it.
+        rec = self._last_record.get(session_id)
+        if rec is not None:
+            rec.pop("continued", None)
 
     def _on_done(self, session_id: str, ch: _Channel, data: dict) -> None:
         # Sitting bookkeeping (MF-1): bank the converged ref; the offered next door is the
@@ -239,7 +248,10 @@ class SessionRegistry:
         # policy alone cannot rotate a just-worked item away; the guard lives HERE, engine untouched).
         if ch.record is not None:
             self._last_record[session_id] = ch.record
-            self._sitting_done.setdefault(session_id, set()).add(ch.record["exp"].ledger_ref)
+            # F1: the dedupe banks CONVERGED refs ONLY — a plateaued/budget/errored problem was not
+            # built into a house and may legitimately be re-offered (spec §6).
+            if ch.record.get("stop_reason") == "converged":
+                self._sitting_done.setdefault(session_id, set()).add(ch.record["exp"].ledger_ref)
         done_refs = self._sitting_done.get(session_id, set())
         pick = next(((r, t) for r, t in ch.next_menu if r not in done_refs), None)
         self._next_pick[session_id] = pick[0] if pick else None
@@ -256,6 +268,8 @@ class SessionRegistry:
             ch.last_menu_refs = data.get("refs", [])
         if tag == "done":
             self._on_done(session_id, ch, data)
+        if tag == "error":
+            self._unstick_continue(session_id)
         if tag in ("done", "error"):
             ch.terminal = True
         return tag, data
@@ -265,12 +279,13 @@ class SessionRegistry:
         auto-picks the door the button NAMED (the guarded next pick); menu=True returns the inline
         picker instead. Idempotent per converged segment (MF-6); reaps a live prior worker (MF-4);
         an absent pick returns the MENU, never a silent door-0 (MF-3)."""
-        rec = self._last_record.get(session_id)
-        if rec is None:
-            return ("error", {"message": "nothing to continue from"})
-        if rec.get("continued"):
-            return ("error", {"message": "continuation already in flight"})
-        rec["continued"] = True
+        with self._lock:  # M1: atomic check-and-set (FastAPI threadpool can race two POSTs)
+            rec = self._last_record.get(session_id)
+            if rec is None:
+                return ("error", {"message": "nothing to continue from"})
+            if rec.get("continued"):
+                return ("error", {"message": "continuation already in flight"})
+            rec["continued"] = True
         old_ch = self._ch.get(session_id)
         if old_ch is not None and not old_ch.terminal:
             old_ch.to_worker.put(_ABANDON)  # reap the parked mid-segment worker

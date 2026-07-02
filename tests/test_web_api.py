@@ -379,6 +379,14 @@ def test_chained_sitting_builds_two_houses(tmp_path):
         )
         return m
 
+    # BASELINE: one session, one close, separate db
+    app1 = create_app(db_path=str(tmp_path / "one.db"), model_factory=factory)
+    c1 = TestClient(app1)
+    _choose_anchor(c1)
+    _drive_to_done(c1)
+    t1 = c1.post("/api/session/s/close").json()["terrain"]
+
+    # THE SITTING: two chained convergences, one close
     app = create_app(db_path=str(tmp_path / "houses.db"), model_factory=factory)
     client = TestClient(app)
     _, r = _choose_anchor(client)
@@ -387,12 +395,16 @@ def test_chained_sitting_builds_two_houses(tmp_path):
     r2 = client.post("/api/session/s/continue", json={}).json()
     assert r2["kind"] == "say"
     d2 = _drive_to_done(client)  # second convergence in the SAME sitting
+    assert d2["landing"]
     cl = client.post("/api/session/s/close").json()
     assert cl["kind"] == "close"
     t2 = cl["terrain"]
-    # two banked problems: the terrain carries more engaged state than one session could produce —
-    # at least one region draws on 2 problems (rendered) OR there are 2+ non-seed-only regions/seeds
-    # with distinct footprints. The coarse, honest assertion: the wire is non-empty AND the sitting
-    # dedupe held (second segment was a DIFFERENT problem).
     assert isinstance(t2, list) and t2
-    assert d2["landing"]  # both landings authored/fell back — the chain completed twice
+
+    # M3 (the hard gate): two banked problems produce STRICTLY more world than one — either a region
+    # ignited (a shared frame now spans 2 problems and clears the >=2-frames/>=2-problems guard) or
+    # the world simply has more regions than the single-session baseline.
+    def rendered(t):
+        return sum(1 for row in t if row["render"] == "rendered")
+
+    assert rendered(t2) > rendered(t1) or len(t2) > len(t1), (t1, t2)

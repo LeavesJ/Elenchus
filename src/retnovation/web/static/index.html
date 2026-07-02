@@ -161,6 +161,7 @@ composer.addEventListener('submit', async e=>{
   e.preventDefault();
   const text=input.value.trim(); if(!text) return;
   bubble('you', text); input.value=''; input.disabled=true; send.disabled=true;
+  if(contBox){ contBox.remove(); contBox=null; }  // M2: no continue while a converse is in flight
   const t=thinking();
   const url = mode==='converse' ? '/api/session/single/converse' : '/api/session/single/say';
   try { const r=await post(url,{text}); t.remove(); advance(r); }
