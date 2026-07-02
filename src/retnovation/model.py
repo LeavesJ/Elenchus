@@ -212,6 +212,14 @@ _MED_PARAMS = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "me
 
 _ECHO_MAX_TOKENS = 1024  # a push is a sentence or two; explicit per L-17 (adaptive thinking budget)
 
+# Graded-classifier headroom (L-17 third strike, founder dogfood 2026-07-01): classify_intake
+# MEASURED 1052-1828 output tokens (thinking included) on a real founder opening against the old
+# 2048 cap — one longer adaptive-thinking excursion crossed it, parsed_output=None, and _require
+# bricked the session terminally. Same rationale as _SCREEN_MAX_TOKENS: a larger cap only buys
+# thinking room; cost does not rise unless the model genuinely thinks more. classify_entry stays
+# at 2048 (measured ~19 output tokens — nowhere near the cap).
+_CLASSIFY_MAX_TOKENS = 4096
+
 # Egress screen headroom: the structured output (performed + evidence) is tiny, but medium-effort
 # adaptive thinking on a nuanced screen can exceed 1024 and trip the truncation guard — which raises
 # and would brick the turn in production. A larger cap only buys thinking room (adaptive spends what
@@ -277,7 +285,13 @@ def _target_detail(rubric, kind: str, code: str) -> str:
 
 
 def _require(resp):
-    """Doctrine-critical calls never silently default: raise on refusal / empty output."""
+    """Doctrine-critical calls never silently default: raise on refusal / empty output. Truncation
+    gets its OWN message (L-17 third strike): adaptive thinking eating the budget must never
+    masquerade as a refusal — it cost a live diagnosis to attribute the 2026-07-01 session brick."""
+    if getattr(resp, "stop_reason", None) == "max_tokens":
+        raise ModelError(
+            "structured output truncated at max_tokens — raise this call's budget (L-17)"
+        )
     if getattr(resp, "stop_reason", None) == "refusal" or resp.parsed_output is None:
         raise ModelError("model refused or returned no parsed output")
     return resp.parsed_output
@@ -307,7 +321,7 @@ class AnthropicModel:
         system = load_prompt("intake") + _situation_block(exp) + "\n\n" + _render_rubric(exp.rubric)
         resp = self._get_client().messages.parse(
             model=self._model,
-            max_tokens=2048,
+            max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": opening}],
             output_format=_IntakeWire,
@@ -369,7 +383,7 @@ class AnthropicModel:
         user = f"Push:\n{push}\n\nStudent reply:\n{response}"
         resp = self._get_client().messages.parse(
             model=self._model,
-            max_tokens=2048,
+            max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=ResponseClassification,

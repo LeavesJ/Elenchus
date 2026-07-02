@@ -528,6 +528,39 @@ def test_concierge_converse_is_frame_blind_and_carries_stop_reason():
     assert "plateau" in blob  # the stop reason IS available to the wind-down author
 
 
+def test_require_names_truncation_distinctly():
+    # A thinking-eats-the-budget truncation must not masquerade as a refusal: the founder-dogfood
+    # brick (2026-07-01) surfaced as the generic message and cost a live diagnosis to attribute.
+    from retnovation.model import ModelError, _require
+
+    import pytest as _pytest
+
+    with _pytest.raises(ModelError, match="max_tokens"):
+        _require(_Resp(parsed=None, stop_reason="max_tokens"))
+
+
+def test_graded_classifier_budgets_have_thinking_headroom():
+    """L-17 (third strike, founder dogfood 2026-07-01): classify_intake measured 1052-1828 output
+    tokens on a real founder opening against a 2048 cap — one longer adaptive-thinking excursion
+    crosses it, parsed_output=None, and the session BRICKS terminally. Intake + response get the
+    same 4096 headroom as the egress screen; entry stays 2048 (measured ~19 tokens)."""
+    from retnovation.model import _IntakeWire, ResponseClassification
+
+    stub = _StubClient(parsed=_IntakeWire(frames=[], traps=[]))
+    m = AnthropicModel(client=stub)
+    m.classify_intake(_exp(), "a long reasoned opening")
+    assert stub.last["max_tokens"] == 4096
+
+    stub2 = _StubClient(
+        parsed=ResponseClassification(
+            outcome="unchanged", mechanism_supplied=False, hard_wrong=False
+        )
+    )
+    m2 = AnthropicModel(client=stub2)
+    m2.classify_response(_exp(), "frame", "lead_with_what_you_refuse_to_do", "push?", "my reply")
+    assert stub2.last["max_tokens"] == 4096
+
+
 def test_display_titles_have_no_veldra_and_cover_open_ended():
     titles = voice.display_titles()
     assert titles, "expected at least one open-ended experience title"
