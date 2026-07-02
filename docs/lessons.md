@@ -223,3 +223,19 @@ Read this checklist before every code change. Update it after every correction o
   `pytest -q > /tmp/out 2>&1; echo "exit: $?"; tail -1 /tmp/out` and branch on the echoed status, or read the
   tail output and ONLY commit after seeing the literal "N passed" with 0 failed — never let `&&` after a piped
   pytest stand in for "tests passed."
+- **L-25 A founder-gated dogfood that spans a server restart tests the WRONG build — and, when the
+  experience under test lives in process memory, the restart DESTROYS the thing being tested.** The
+  chained-sittings dogfood (2026-07-01) never touched the built feature: the evening sitting ran
+  against a process started BEFORE the feature's commits existed, and the mid-evening restart done
+  to "pick up the new build" wiped the in-memory sitting (`_last_record`/`_sitting_done`/channels),
+  so the founder experienced exactly the amnesia the feature was built to kill — and reported it as
+  a defect in the feature. Diagnosis required forensics (selection_log timestamps × the server
+  PID's lstart × commit times) because NOTHING in the product said which build was running.
+  Prevention: (a) any dogfood-gated build must be VISIBLE in one glance — `/api/health` and the
+  session payload now carry `git describe` (`build`), and `/` is served `Cache-Control: no-store`
+  so a stale shell cannot render against a new server; (b) when handing a dogfood gate to the
+  founder, state the exact choreography ("restart the server FIRST, verify build X in the tab,
+  THEN start the sitting") — a restart mid-experience is part of the test surface, not setup;
+  (c) experience-critical state must not live only in process memory or the DOM — that is what
+  durable sittings fixed; after it, restarts/reloads are safe mid-sitting BY DESIGN and belong IN
+  the dogfood script rather than avoided.

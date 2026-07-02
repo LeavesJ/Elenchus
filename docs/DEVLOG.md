@@ -1,5 +1,53 @@
 # Retnovation — DEVLOG
 
+## 2026-07-01 (late) — feat(web): Durable Sittings — the sitting survives reloads and restarts
+- **The incident (founder dogfood, root-caused with forensics):** "Continue redirected her to a
+  brand-new session; the old convo gone; Vera amnesiac; same questions repeating." The
+  selection_log + the server PID's start time + commit timestamps proved the dogfood NEVER
+  exercised the built Chained-Sittings seam: the evening sitting's segments ran at 19:09/19:19
+  local against a pre-CS process (the feature's commits landed 20:13–20:32), and the 20:54 restart
+  — done to pick up the new build — destroyed the in-memory sitting; her 20:55 re-entry was an
+  unconditional cold start that re-proposed the problem she'd worked at 14:18. Three-layer root
+  cause: (1) the dogfooded moments predated the feature; (2) the sitting had NO durable existence
+  (DOM-only transcript, process-memory-only registry, no resume path — the "3-hour-chat amnesia"
+  returned through a different door, and ANY reload/restart reproduced it); (3) the voice seam is
+  cold by construction (sitting-aware authored openings remain founder-gated).
+- **Shipped (D1–D4, spec 2026-07-01-durable-sittings-design + 3-lens folds):** `sitting_store.py`
+  (WAL, open-per-op, `:memory:` inert) persists the PROJECTED client wire only — vera/you/landing/
+  seam/muted turns; menus and worker ERRORS never persist (L-14: exception text can carry frame
+  codes); the landed record (rebuildable by `experience_id`), the guarded next pick, an inflight
+  discriminator, and a converged log with full UTC timestamps. `POST /api/session` now RESUMES a
+  live sitting (verbatim transcript, End/Continue state, mode) — cross-restart, converse/close/
+  continue work over a lazily REBUILT record (degraded rebuild → statics, never unscreened, never
+  500); a restart-lost segment gets branch-accurate honesty copy + a reopen seam when re-entered,
+  and close() over an interrupted tail stays STATIC (MF-5 across restart). The repeat guard is a
+  ROLLING 24h window on real timestamps — a UTC date bucket would NOT have prevented the incident
+  (14:18 local = July 1 UTC; the evening = July 2 UTC); menu titles converged within the window
+  carry " · just worked" (informed repetition, never a silent re-serve; order untouched —
+  selection semantics preserved). The `continued` flag stays in-memory ONLY (persisting it would
+  brick Continue after any mid-segment restart); rebuilds clear it. Guards: stale-tab requests
+  nudge instead of KeyError-500; menus carry a nonce (stale click re-serves, never opens an
+  unpicked door); an 18h-idle sitting closes honestly (an evening, not an undying thread); the
+  close/continue drain is gated on no-step-in-flight (an unconditional get_nowait would STEAL the
+  emission from the blocked request — reviewer fold, corrected in implementation). Hardening:
+  `/api/health` + the session payload carry the git build stamp; `/` is `Cache-Control: no-store`
+  (kills the stale-shell class).
+- **Held:** engine byte-untouched (`git diff 13ab12f --stat -- src/retnovation/orchestration.py
+  src/retnovation/assessment/` still empty); L-13 (the durable mirror carries titles/text only,
+  refs server-side; the rebuilt exp restores the egress screens; interrupted-adjacent converse
+  screens the UNION of the landed and lost problems' moves); L-4 (nothing grades); two-phase
+  timing (resume never renders terrain); L-3 (closed sittings + converged log retained forever);
+  F1 (converged-only banking end-to-end).
+- **Verified:** suite 366 passed / 25 skipped (baseline 339) incl. restart-simulation
+  (new registry over the same db): transcript verbatim, converse surviving a SECOND restart,
+  continue-after-restart, window dedupe across processes + UTC midnight, degraded rebuild,
+  18h staleness, nonce, stale-tab nudges. PLUS a real-browser incident replay (FakeModel server,
+  preview harness): reload-after-landing restores the room; Continue appends seam+opening
+  in-thread; a mid-segment server restart resumes with the honesty line and working End/Continue;
+  re-entering the interrupted door gets the reopen seam; End mid-segment closes honestly and the
+  village RENDERS (460px host, live canvas). Founder gates: re-dogfood (reload + restart are now
+  safe to do mid-sitting — that's the point) + push.
+
 ## 2026-07-01 — feat(web): Chained Sittings — bounded engine sessions inside one continuous thread
 - **The founder's resolution of the short-vs-long tension:** "session" is the engine's concept
   (convergence-bounded, one house, clean signal); "sitting" is the user's (as long as they want, one
