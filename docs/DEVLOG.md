@@ -1,5 +1,33 @@
 # Retnovation — DEVLOG
 
+## 2026-07-01 — feat(web): Chained Sittings — bounded engine sessions inside one continuous thread
+- **The founder's resolution of the short-vs-long tension:** "session" is the engine's concept
+  (convergence-bounded, one house, clean signal); "sitting" is the user's (as long as they want, one
+  continuous thread). After each landing a `Continue → {next door}` button starts a fresh byte-clean engine
+  session in the same thread; houses bank quietly; End appears at the FIRST convergence and persists inert;
+  the village (all houses this sitting earned) reveals only at the true exit. Beta friction addressed at the
+  seam, not by giving up bounded diagnostics.
+- **The spec review's empirical catch (MF-1):** a simulated 12-segment same-day chain proved the policy
+  CANNOT rotate a just-worked problem away within a sitting (same-day retention_due≡0, staleness≡0) — an
+  unguarded chain re-serves the identical problem from segment 9. The chaining layer carries its own repeat
+  guard: the auto-pick is the highest-ranked proposal NOT already CONVERGED this sitting (plateaued problems
+  may honestly re-offer); all repeats -> no one-click door (menu/End remain).
+- **Shipped (S1-S3 + gate):** worker computes the next-door proposal at `done` (pure policy, zero model
+  calls, EXCEPTION-safe — "empty menu" raises in this codebase; failure -> `next_title=""`, never an error);
+  registry owns sitting state (`_last_record` for End/converse-anytime, converged-refs dedupe, guarded pick);
+  `continue_session` (one-click auto-pick of the door the button NAMED — an absent ref re-shows the MENU,
+  never a silent door-0; per-record idempotency kills double-click split-brain); a poison-pill reap so an
+  orphaned mid-segment worker exits through `finally` (its open store CLOSES); End-mid-segment returns an
+  honest engine-free static sign-off + the village (never a mirrored close about the wrong problem); the UI
+  Continue affordance follows the conversation (re-rendered after each converse reply), disables + freezes
+  the composer in flight; `other doors…` renders the picker inline.
+- **Held:** engine byte-untouched; L-13 (titles only; ranked refs server-side); two-phase timing per segment;
+  fresh intake per segment (the thread's history never enters a graded call); selection_log semantics intact
+  (auto-pick = accepted, consent via the titled button); cadence doctrine honest (the guard is chaining-layer).
+- **Verified:** suite 337 passed / 25 skipped incl. the end-to-end chain (converge → continue → converge →
+  End), reap-join, idempotency, honest static close, arc-restart-at-push-1, two-house sitting gate. 2-lens
+  OPUS batch review next; founder gates: chained-sitting dogfood + push.
+
 ## 2026-07-01 — feat(voice): Woven Stance Modulation — press → earned acknowledgment → late-arc narrowing
 - **The thread.** The felt dogfood confirmed the deferred half of the 2026-06-30 decision as THE remaining gap:
   "more interrogative than interactive" — zero acknowledgment beats across five probe turns (all recognition

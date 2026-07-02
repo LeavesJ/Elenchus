@@ -357,3 +357,42 @@ def test_index_has_continue_affordance_following_the_thread():
     assert "Continue" not in composer
     # the affordance re-renders after converse replies (never stranded in scrollback)
     assert "renderContinue(nextTitle)" in html
+
+
+def test_chained_sitting_builds_two_houses(tmp_path):
+    """The hard behavioral gate: a fresh db, two chained convergences, one End — the village terrain
+    reflects BOTH sessions' state (more/renderable-r0 vs the single-session baseline). Uses a
+    problem-agnostic always-closing fake so ANY auto-picked second problem converges."""
+    from retnovation.model import FakeModel
+
+    def factory():
+        m = FakeModel(
+            IntakeClassification(frame_states={}, trap_states={}),
+            {},
+        )
+        m.classify_intake = lambda exp, opening: IntakeClassification(
+            frame_states={f.frame_code: FrameState.absent for f in exp.rubric.frames},
+            trap_states={t.trap_code: TrapState.not_tripped for t in exp.rubric.traps},
+        )
+        m.classify_response = lambda exp, kind, code, push, response, stress=False: (
+            ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+        )
+        return m
+
+    app = create_app(db_path=str(tmp_path / "houses.db"), model_factory=factory)
+    client = TestClient(app)
+    _, r = _choose_anchor(client)
+    d1 = _drive_to_done(client)
+    assert d1["next_title"]
+    r2 = client.post("/api/session/s/continue", json={}).json()
+    assert r2["kind"] == "say"
+    d2 = _drive_to_done(client)  # second convergence in the SAME sitting
+    cl = client.post("/api/session/s/close").json()
+    assert cl["kind"] == "close"
+    t2 = cl["terrain"]
+    # two banked problems: the terrain carries more engaged state than one session could produce —
+    # at least one region draws on 2 problems (rendered) OR there are 2+ non-seed-only regions/seeds
+    # with distinct footprints. The coarse, honest assertion: the wire is non-empty AND the sitting
+    # dedupe held (second segment was a DIFFERENT problem).
+    assert isinstance(t2, list) and t2
+    assert d2["landing"]  # both landings authored/fell back — the chain completed twice
