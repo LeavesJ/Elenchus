@@ -47,8 +47,13 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
             out["theme"] = data["theme"]
         return out
     if tag == "done":  # the engine converged — the SESSION does not end; the user owns closure. The
-        # felt landing rides the done payload; the End affordance follows it (index.html).
-        return {"kind": "done", "terminal": True, "landing": data.get("landing", "")}
+        # felt landing rides the payload; the guarded next door (chained sittings) rides with it.
+        return {
+            "kind": "done",
+            "terminal": True,
+            "landing": data.get("landing", ""),
+            "next_title": data.get("next_title", ""),
+        }
     if tag == "close":  # user-driven end: the honest close + the frozen-at-convergence terrain
         return {"kind": "close", "close": data.get("close", ""), "terrain": data.get("terrain", [])}
     return {"kind": "error", "message": data.get("message", "")}

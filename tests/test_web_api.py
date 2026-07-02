@@ -289,3 +289,20 @@ def test_index_renders_landing_before_end_affordance():
     assert html.index("bubble('vera', r.landing)") < html.index("showEnd(true)")
     assert 'id="end"' in html  # the End control is part of the composer, not the scrolling thread
     assert "endButton" not in html  # the one-shot thread-anchored button is gone
+
+
+def test_done_payload_carries_next_title(tmp_path, make_fake):
+    app = create_app(db_path=str(tmp_path / "nt.db"), model_factory=make_fake)
+    client = TestClient(app)
+    _, r = _choose_anchor(client)
+    r = client.post(
+        "/api/session/s/say", json={"text": "reasoning that already holds the move"}
+    ).json()
+    while r["kind"] == "say":
+        r = client.post("/api/session/s/say", json={"text": "mechanism"}).json()
+    assert r["kind"] == "done"
+    # a next door is offered, as a clean TITLE (never the ref), and it is NOT the just-converged
+    # problem (MF-1: sitting dedupe — irreversible_anchor was banked this sitting)
+    assert isinstance(r["next_title"], str) and r["next_title"]
+    assert "veldra" not in r["next_title"].lower()
+    assert r["next_title"] != _ANCHOR_TITLE

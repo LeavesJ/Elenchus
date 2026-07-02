@@ -10,7 +10,9 @@ from ..assessment.judgment_loop import (
     MAX_PUSHES,
 )  # read-only: the arc hint's cap (engine untouched)
 from ..cli import build_store
+from ..content_loader import load_library, load_progression
 from ..orchestration import run_session
+from ..scheduler import propose_open_ended
 from ..terrain import project_terrain
 from ..types import EntryClass, Outcome, Regime, Selection, Work
 from . import voice
@@ -28,7 +30,11 @@ class _Channel:
         self.last_menu: list[str] = []
         self.last_menu_refs: list[str] = []  # server-side only (menu_index); never sent to client
         self.terminal: bool = False
+        self.thread: threading.Thread | None = None  # the worker (join target for the reap test)
         self.record: dict | None = None  # post-convergence: model+exp+recent+terrain (engine-free)
+        self.next_menu: list[
+            tuple[str, str]
+        ] = []  # (ref, title) ranked next doors; server-side ONLY
 
 
 class SessionRegistry:
@@ -37,6 +43,12 @@ class SessionRegistry:
         self._model_factory = model_factory
         self._ch: dict[str, _Channel] = {}
         self._lock = threading.Lock()
+        # Chained sittings (spec 2026-07-01): the LAST CONVERGED record (close/converse anytime),
+        # the refs CONVERGED this sitting (MF-1 repeat guard), and the guarded next pick (a ref;
+        # server-side only — L-13).
+        self._last_record: dict[str, dict] = {}
+        self._sitting_done: dict[str, set[str]] = {}
+        self._next_pick: dict[str, str | None] = {}
 
     def start(self, session_id: str, now: datetime | None = None) -> tuple[str, dict]:
         now = now or datetime.now(timezone.utc)
@@ -162,6 +174,21 @@ class SessionRegistry:
                 # The engine converged — but the SESSION does not end here. 'done' is an internal
                 # signal; the user owns closure (converse/close serve the rest from the record). The
                 # landing rides the done payload as a felt arrival; the End affordance follows it.
+                # The next door (chained sittings): the PURE policy over the post-session state.
+                # "Empty menu" is an EXCEPTION path here (select_next raises ValueError on no
+                # candidates; Proposal.top raises IndexError) — any failure means "no door offered",
+                # never an error emission (MF-2). Runs pre-finally; needs no store. Refs stay
+                # server-side (L-13).
+                try:
+                    exps = [e for e in load_library() if e.regime is Regime.open_ended]
+                    menu2 = propose_open_ended(state, exps, load_progression(), now).problem_menu()
+                    titles2 = voice.display_titles()
+                    ch.next_menu = [
+                        (sp.ledger_ref, titles2.get(sp.ledger_ref, "Untitled problem"))
+                        for sp, _ in menu2
+                    ]
+                except Exception:
+                    ch.next_menu = []
                 ch.from_worker.put(
                     ("done", {"state": state, "assessment": assessment, "landing": landing})
                 )
@@ -171,14 +198,31 @@ class SessionRegistry:
                 if store is not None:
                     store.close()
 
-        threading.Thread(target=worker, daemon=True).start()
+        t = threading.Thread(target=worker, daemon=True)
+        ch.thread = t
+        t.start()
         tag, data = ch.from_worker.get()
         if tag == "menu":
             ch.last_menu = data["problems"]
             ch.last_menu_refs = data.get("refs", [])
+        if tag == "done":
+            self._on_done(session_id, ch, data)
         if tag in ("done", "error"):
             ch.terminal = True
         return tag, data
+
+    def _on_done(self, session_id: str, ch: _Channel, data: dict) -> None:
+        # Sitting bookkeeping (MF-1): bank the converged ref; the offered next door is the
+        # highest-ranked proposal NOT already converged this sitting; if all repeat -> no door
+        # (the within-sitting clock is frozen — same-day retention/staleness are zero — so the
+        # policy alone cannot rotate a just-worked item away; the guard lives HERE, engine untouched).
+        if ch.record is not None:
+            self._last_record[session_id] = ch.record
+            self._sitting_done.setdefault(session_id, set()).add(ch.record["exp"].ledger_ref)
+        done_refs = self._sitting_done.get(session_id, set())
+        pick = next(((r, t) for r, t in ch.next_menu if r not in done_refs), None)
+        self._next_pick[session_id] = pick[0] if pick else None
+        data["next_title"] = pick[1] if pick else ""
 
     def step(self, session_id: str, value) -> tuple[str, dict]:
         ch = self._ch[session_id]
@@ -189,6 +233,8 @@ class SessionRegistry:
         if tag == "menu":
             ch.last_menu = data["problems"]
             ch.last_menu_refs = data.get("refs", [])
+        if tag == "done":
+            self._on_done(session_id, ch, data)
         if tag in ("done", "error"):
             ch.terminal = True
         return tag, data
