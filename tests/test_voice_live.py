@@ -403,7 +403,9 @@ def test_converse_winds_down_does_not_re_demand_a_position(tmp_path):
 
 # --- Woven stance modulation (live behavior) -------------------------------------------------------
 
-_ACK_OPENERS = ("you've", "you have", "you just", "you stopped", "you started")
+# bare "you have" removed: a legit cold press ("You have to answer the question") would false-red
+# the anti-flattery test — the doctrine prescribes the contracted "You've ..." ack shape.
+_ACK_OPENERS = ("you've", "you just", "you stopped", "you started")
 
 _MOVEMENT_REPLY = (
     "Fine — I'll say the part I was avoiding: locking this in costs me the next two quarters of "

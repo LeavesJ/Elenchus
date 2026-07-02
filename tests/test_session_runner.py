@@ -246,15 +246,27 @@ def test_converse_and_close_work_after_done_without_the_worker(tmp_path, make_fa
         assert "choose_the_failure_default_deliberately" not in blob
 
 
-def test_probe_displays_carry_an_incrementing_arc(tmp_path, make_fake):
+def test_probe_displays_carry_an_incrementing_arc(tmp_path):
     """Woven stance: every PROBE display call carries arc=(n, MAX_PUSHES), n starting at 1
-    (pre-incremented at the top of respond — never push 0). The door re-invite path carries none."""
+    (pre-incremented at the top of respond — never push 0). The door re-invite path carries none.
+    TWO absent frames + never-closing responses force MULTIPLE probes, so the increment itself is
+    exercised — a counter stuck at 1 would fail (batch-review Minor #1)."""
     from retnovation.assessment.judgment_loop import MAX_PUSHES
 
     arcs = []
 
     def factory():
-        m = make_fake()
+        intake = IntakeClassification(
+            frame_states={
+                "embed_credentials_as_a_list": FrameState.absent,
+                "choose_the_failure_default_deliberately": FrameState.absent,
+            },
+            trap_states={
+                "deferred_the_one_time_choice": TrapState.not_tripped,
+                "assumed_the_happy_path": TrapState.not_tripped,
+            },
+        )
+        m = FakeModel(intake, {})
         orig = m.concierge_turn
 
         def rec(problem, push, recent, *, arc=None, voice=""):
@@ -263,6 +275,9 @@ def test_probe_displays_carry_an_incrementing_arc(tmp_path, make_fake):
             return orig(problem, push, recent, arc=arc, voice=voice)
 
         m.concierge_turn = rec
+        m.classify_response = lambda exp, kind, code, push, response, stress=False: (
+            ResponseClassification(outcome="unchanged", mechanism_supplied=False, hard_wrong=False)
+        )
         return m
 
     reg = SessionRegistry(str(tmp_path / "arc.db"), model_factory=factory)
@@ -274,5 +289,5 @@ def test_probe_displays_carry_an_incrementing_arc(tmp_path, make_fake):
     while tag == "say":
         tag, data = reg.step("s1", "mechanism")
     assert tag == "done"
-    assert len(arcs) >= 1
+    assert len(arcs) >= 2  # multiple probes: the increment itself is exercised, not just push 1
     assert arcs == [(i + 1, MAX_PUSHES) for i in range(len(arcs))]  # 1-based, pre-incremented
