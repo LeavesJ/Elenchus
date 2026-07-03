@@ -690,6 +690,7 @@ def test_restart_mid_first_segment_offers_fresh_menu(tmp_path, make_fake):
     assert data["mode"] == "engine" and data["end_visible"] is False
     assert data["menu"] and data["menu"]["problems"]  # a fresh way forward
     assert "refs" not in data["menu"]  # L-13: the embedded menu is title-only
+    assert "eids" not in data["menu"]  # L-13: the F1 territory keys stay server-side too
 
 
 def test_rolling_window_dedupe_across_processes(tmp_path, make_fake):
@@ -952,6 +953,7 @@ from retnovation.web.session_runner import (  # noqa: E402
     _FRONTDOOR_ASK,
     _HONEST_FIT,
     _RESERVE_COPY,
+    _STATIC_BRIDGE,
     _territory_subtitle,
 )
 from retnovation.web.sitting_store import SittingStore  # noqa: E402
@@ -1122,6 +1124,30 @@ def test_front_door_low_confidence_int_takes_a_door(tmp_path, make_fake):
     assert tag == "say" and "other doors" in data["text"]
     tag, data = reg.step("s1", reg.menu_index("s1", _ANCHOR))
     assert tag == "say" and data["text"] == "[open]"  # curated door, no forge
+
+
+def test_leaking_reflection_serves_the_static_bridge(tmp_path, make_fake):
+    """L4 review F2 (D9 teeth): a reflection that PERFORMS a move of the mapped territory must
+    not ride the opening — the static bridge serves instead. The leak fake flags ONLY the exact
+    reflection text, so the forge's union screen (the scenario) and every other authored
+    surface stay clean — this test discriminates the reflection gate specifically."""
+    from retnovation.model import EgressScreen
+
+    def factory():
+        m = _world_factory(make_fake)()
+
+        def screen(moves, text):
+            if text == "[reflect]":
+                return EgressScreen(performed=[1], evidence="(fake: reflection leaks)")
+            return EgressScreen(performed=[], evidence="(fake: clean)")
+
+        m.screen_moves = screen
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "fd-leak.db"), model_factory=factory)
+    data = _open_world(reg)  # cold start -> free text -> forged opening
+    assert data["text"] == _SCENARIO  # the forge still serves (its union screen stayed clean)
+    assert data.get("bridge") == _STATIC_BRIDGE  # the leaked reflection never rides
 
 
 def test_resume_mid_front_door_same_process_reserves_the_ask(tmp_path, make_fake):
@@ -1388,7 +1414,8 @@ _REOPEN_SEAM_TEXT = (
 
 def test_return_visit_line_rides_the_cold_front_door(tmp_path, make_fake):
     """Review P10: a cold start with closed worlds is not amnesiac — one muted line above the
-    ask, counted from the converged log."""
+    ask, counted from the converged log. L4 review F4: both nouns pluralize correctly
+    ("1 house" / "2 houses"; the region count stays singular when both rows share a territory)."""
     db = str(tmp_path / "fd-return.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
     _open_world(reg, "s1")
@@ -1398,7 +1425,46 @@ def test_return_visit_line_rides_the_cold_front_door(tmp_path, make_fake):
     reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
     tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
     assert tag == "say" and data.get("frontdoor")
-    assert data["returning"] == "Your world so far: 1 houses, 1 regions alight."
+    assert data["returning"] == "Your world so far: 1 house, 1 region alight."
+
+    # A second sitting converges the SAME territory (the free-text map ignores the window):
+    # two houses, one region — the mixed case pins both plural branches at once.
+    tag, data = reg2.step("s1", _SITUATION)
+    assert tag == "say"
+    tag, _ = _drive(reg2, "s1", opening="p2")
+    assert tag == "done"
+    reg2.close("s1")
+
+    reg3 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg3.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "say" and data.get("frontdoor")
+    assert data["returning"] == "Your world so far: 2 houses, 1 region alight."
+
+
+def test_menu_marks_a_forge_converged_territory_as_just_worked(tmp_path, make_fake):
+    """L4 review F1: a forged convergence logs a gen: ref that never matches a curated menu
+    ref — the ' · just worked' marker keys on the TERRITORY too, so re-entering the doors
+    within the window is an informed choice, never a silent re-serve."""
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+        m.map_territories = lambda s, t: orig(s, t).model_copy(update={"ranked": [_T2, _T1, _T3]})
+        return m
+
+    db = str(tmp_path / "fd-mark.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    _open_world(reg, "s1")  # forges over _T2 (the fake ranks it first)
+    tag, _ = _drive(reg, "s1", opening="p1")
+    assert tag == "done"  # converged: the log holds (gen:{sit}:1, _T2)
+
+    tag, data = reg.continue_session("s1", menu=True)  # back through the front door
+    assert tag == "say" and data.get("frontdoor")
+    problems = data["menu"]["problems"]
+    title = _voice.display_titles()["veldra:concentrated_market_pricing_power"]
+    assert title + " · just worked" in problems  # territory-keyed (the gen: ref matches no door)
+    marked = [p for p in problems if p.endswith(" · just worked")]
+    assert len(marked) == 1  # the unworked doors stay clean
 
 
 def test_sitting_close_receives_all_segments_and_screens_once(tmp_path, make_fake):
@@ -1438,6 +1504,16 @@ def test_sitting_close_receives_all_segments_and_screens_once(tmp_path, make_fak
     assert len(screens) - n_before == 1  # ONE union screen call over the sitting's moves
     union = screens[-1]
     assert len(union) == len(set(union))  # deduped
+    # L4 review F6 (discriminating): the union must COVER every converged territory — a
+    # regression to a single-territory union would silently shrink it otherwise.
+    from retnovation.content_loader import load_library
+    from retnovation.web import voice as _v2
+
+    eids = {r["experience_id"] for r in SittingStore(db).converged_log()}
+    assert len(eids) == 2
+    by_eid = {e.experience_id: e for e in load_library()}
+    for eid in eids:
+        assert set(_v2._moves(by_eid[eid])) & set(union), f"union misses territory {eid}"
     assert isinstance(data["terrain"], list)
 
 

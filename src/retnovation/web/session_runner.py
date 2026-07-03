@@ -234,6 +234,11 @@ class SessionRegistry:
                     # open-ended experience, so the generic fallback is belt-and-suspenders only.
                     labels = [titles.get(s.ledger_ref, "Untitled problem") for s, _ in menu]
                     refs = [s.ledger_ref for s, _ in menu]  # server-side only; never sent to client
+                    # Territory keys for the just-worked marker (L4 review F1): a forged
+                    # convergence logs a gen: ref that never matches a curated door ref, so the
+                    # marker must also key on experience_id. Server-side only — _emit projects
+                    # menus as problems+nonce; the no-eids wire tests pin it.
+                    eids = [s.experience_id for s, _ in menu]
                     # Phase 1 of the visual theme: persona + subject (posture), no role yet (no exp).
                     theme = voice.resolve_presentation(posture, None)["visual"]
                     top_spec, top_rcpt = proposal.top
@@ -307,7 +312,7 @@ class SessionRegistry:
                             {
                                 "text": _FRONTDOOR_ASK,
                                 "frontdoor": True,
-                                "menu": {"problems": labels, "refs": refs},
+                                "menu": {"problems": labels, "refs": refs, "eids": eids},
                                 "theme": theme,
                             },
                         )
@@ -545,10 +550,18 @@ class SessionRegistry:
         content and ORDER are untouched (reordering would corrupt proposed-vs-chosen selection
         semantics), and refs stay server-side."""
         refs = data.get("refs", [])
-        window = self._store.converged_within(datetime.now(timezone.utc)) if refs else set()
-        if window:
+        eids = data.get("eids", [])
+        if len(eids) != len(refs):
+            eids = [""] * len(refs)
+        now = datetime.now(timezone.utc)
+        ref_window = self._store.converged_within(now) if refs else set()
+        # Territory-keyed too (L4 review F1): forged convergences log gen: refs that never match
+        # a curated door ref — without this, a forge-converged territory re-serves silently.
+        terr_window = self._store.territories_within(now) if refs else set()
+        if ref_window or terr_window:
             data["problems"] = [
-                p + " · just worked" if r in window else p for p, r in zip(data["problems"], refs)
+                p + " · just worked" if (r in ref_window or (e and e in terr_window)) else p
+                for p, r, e in zip(data["problems"], refs, eids)
             ]
         ch.last_menu = data["problems"]
         ch.last_menu_refs = refs
@@ -580,7 +593,9 @@ class SessionRegistry:
                 if rows:
                     n = len(rows)
                     m = len({r["experience_id"] for r in rows if r["experience_id"]})
-                    data["returning"] = f"Your world so far: {n} houses, {m} regions alight."
+                    houses = "house" if n == 1 else "houses"
+                    regions = "region" if m == 1 else "regions"
+                    data["returning"] = f"Your world so far: {n} {houses}, {m} {regions} alight."
             return (tag, data)
         return self._resume(session_id, row, now)
 

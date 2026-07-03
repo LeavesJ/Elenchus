@@ -560,6 +560,7 @@ def test_front_door_free_text_flow_over_http(tmp_path, make_fake):
     assert fd["text"] and fd["menu"]["problems"] and fd["menu"].get("nonce")
     assert fd.get("theme") and fd.get("build")
     assert "refs" not in fd["menu"]  # L-13: the embedded doors are title-only on the wire
+    assert "eids" not in fd["menu"]  # L-13: the F1 territory keys stay server-side too
     blobs.append(fd)
 
     r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
