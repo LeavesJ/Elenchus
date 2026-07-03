@@ -19,6 +19,9 @@
   .menu button{text-align:left;background:#0f1a2b;border:1px solid #1b2b44;color:#e8eef7;border-radius:10px;
     padding:12px 14px;font:inherit;cursor:pointer}
   .menu button:hover{background:#13203450;border-color:#2b4a6b}
+  /* the front door's small doors (living sitting §2a): visible ramp, never the emphasis */
+  .menu.compact{gap:5px;margin-top:2px}
+  .menu.compact button{padding:7px 11px;font-size:13px;color:#9fb2cd;background:#0c1524;border-color:#16233a}
   #composer{display:flex;gap:8px;padding:12px 18px;border-top:1px solid #14233b;background:#0a0f1c}
   #composer textarea{flex:1;background:#0f1a2b;color:#e8eef7;border:1px solid #1b2b44;border-radius:12px;
     padding:11px 13px;font:inherit;min-height:46px;max-height:160px;resize:none}
@@ -95,7 +98,9 @@ function renderContinue(title){
   if(title){
     const b=document.createElement('button'); b.type='button';
     b.style.cssText='background:#155e63;color:#eafffb;border:0;border-radius:11px;padding:9px 16px;font:inherit;cursor:pointer';
-    b.textContent='Continue \u2192 '+title;
+    // subtitled with the next territory's curated description (\u00a72c review P4): consent via
+    // the titled button, zero latency, zero new leak class
+    b.textContent='Continue \u2014 next pressure: '+title;
     b.onclick=()=>goContinue(b,{});
     contBox.append(b);
   }
@@ -135,13 +140,41 @@ async function start(){
   advance(r);
 }
 let menuNonce=null;  // stale-menu guard: choose echoes the nonce the menu carried
-function renderMenu(problems, nonce){
+function renderMenu(problems, nonce, compact){
   menuNonce = (nonce===undefined) ? null : nonce;
-  muted('Pick a problem to work. You are never told the move to make.');
-  const m=document.createElement('div'); m.className='menu';
+  if(!compact) muted('Pick a problem to work. You are never told the move to make.');
+  const m=document.createElement('div'); m.className=compact?'menu compact':'menu';
   problems.forEach((p,i)=>{ const b=document.createElement('button'); b.innerHTML=esc(p);
     b.onclick=()=>choose(i,m); m.appendChild(b); });
   thread.appendChild(m); thread.scrollTop=thread.scrollHeight;
+}
+// The front door (living sitting §2a): the composer is the emphasized first beat; the curated
+// doors render SMALL beneath the ask — genre orientation and a zero-effort ramp for the cold
+// user, no incantation parsing.
+function renderFrontdoor(r){
+  applyTheme(r.theme);
+  if(r.returning) muted(r.returning);  // the return visit is not amnesiac (§2f review P10)
+  bubble('vera', r.text);
+  muted('or start from one of these');
+  renderMenu(r.menu.problems, r.menu.nonce, true);
+  mode='engine';
+  showComposer(true);
+}
+// Every territory windowed (§2c review P3): the informed re-serve — a choice, never a refusal.
+function renderReserve(r){
+  muted(r.copy);
+  const box=document.createElement('div');
+  box.style.cssText='align-self:center;display:flex;gap:12px;align-items:center;margin:6px 0';
+  const labels = (r.choices && r.choices.length===2) ? r.choices : ['Work it anyway','Come back tomorrow'];
+  const w=document.createElement('button'); w.type='button';
+  w.style.cssText='background:#155e63;color:#eafffb;border:0;border-radius:11px;padding:9px 16px;font:inherit;cursor:pointer';
+  w.textContent=labels[0];
+  w.onclick=()=>{ box.remove(); goContinue(w,{work_anyway:true}); };
+  const l=document.createElement('button'); l.type='button';
+  l.style.cssText='background:none;border:0;color:#8aa0bf;font:inherit;cursor:pointer;text-decoration:underline';
+  l.textContent=labels[1];
+  l.onclick=()=>{ box.remove(); showComposer(true); if(mode==='converse') renderContinue(''); };
+  box.append(w,l); thread.appendChild(box); thread.scrollTop=thread.scrollHeight;
 }
 async function choose(i, menuEl){
   menuEl.remove();
@@ -165,7 +198,13 @@ function renderResume(r){
   if(r.honesty) muted(r.honesty);
   mode = r.mode==='converse' ? 'converse' : 'engine';
   nextTitle = r.next_title || '';
-  if(r.menu){ renderMenu(r.menu.problems, r.menu.nonce); }
+  if(r.frontdoor){ // a sitting parked at the front door resumes with its ask + small doors
+    bubble('vera', r.frontdoor.text);
+    muted('or start from one of these');
+    renderMenu(r.frontdoor.menu.problems, r.frontdoor.menu.nonce, true);
+    showComposer(true);
+  }
+  else if(r.menu){ renderMenu(r.menu.problems, r.menu.nonce); }
   else { showComposer(true); }
   showEnd(!!r.end_visible);
   if(mode==='converse') renderContinue(nextTitle);
@@ -173,8 +212,11 @@ function renderResume(r){
 }
 function advance(r){
   if(r.kind==='resume'){ renderResume(r); return; }
+  if(r.kind==='frontdoor'){ renderFrontdoor(r); return; }
+  if(r.kind==='reserve'){ renderReserve(r); return; }
   if(r.kind==='menu'){ applyTheme(r.theme); renderMenu(r.problems, r.nonce); return; }
-  if(r.kind==='say'){ if(r.seam) muted(r.seam); applyTheme(r.theme); bubble('vera', r.text); showComposer(true);
+  if(r.kind==='say'){ if(r.seam) muted(r.seam); if(r.bridge) muted(r.bridge);
+    applyTheme(r.theme); bubble('vera', r.text); showComposer(true);
     if(mode==='converse') renderContinue(nextTitle); return; }
   if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); nextTitle=r.next_title||''; renderContinue(nextTitle); return; }
   if(r.kind==='close'){ renderClose(r); return; }

@@ -786,3 +786,23 @@ def test_informed_reserve_over_http(tmp_path, make_fake):
 
     r2 = client.post("/api/session/s/continue", json={"work_anyway": True}).json()
     assert r2["kind"] == "say" and r2["text"] == _SCENARIO  # a real new problem, honestly framed
+
+
+def test_shell_renders_the_front_door_and_living_sitting_affordances():
+    """L6 (living sitting §2a/§2c/§2g): the shell handles the new wire kinds — the front-door ask
+    with SMALL doors beneath it, the heard-you/fallback bridge on says, the informed re-serve,
+    the subtitled Continue, the parked-front-door resume, and the return-visit line."""
+    client = TestClient(create_app(db_path=":memory:", model_factory=None))
+    html = client.get("/").text
+    assert "kind==='frontdoor'" in html and "renderFrontdoor(" in html
+    assert "menu compact" in html  # the doors are the ramp, never the emphasis
+    assert "or start from one of these" in html
+    assert "r.returning" in html  # the return visit is not amnesiac (review P10)
+    assert "r.bridge" in html  # the heard-you / fallback bridge renders as a muted line
+    assert "kind==='reserve'" in html and "renderReserve(" in html
+    assert "work_anyway" in html  # the informed re-serve's first choice posts it
+    # subtitled consent (review P4) — the source uses the file's \uXXXX escape convention;
+    # the RENDERED text is 'Continue — next pressure: {description}'
+    assert "Continue \\u2014 next pressure: " in html
+    assert "r.frontdoor" in html  # resume of a sitting parked at the front door
+    assert "veldra" not in html.lower()  # L-13 on the static shell, unchanged
