@@ -13,10 +13,14 @@ _ANCHOR_TITLE = "Shipping something you can't take back"
 
 
 def _choose_anchor(client):
-    menu = client.post("/api/session").json()
-    assert menu["kind"] == "menu"
+    # The cold beat is the FRONT DOOR (living sitting §2a): composer-first, the curated doors
+    # embedded small beneath it — the doors path clicks through exactly as before.
+    fd = client.post("/api/session").json()
+    assert fd["kind"] == "frontdoor"
+    menu = fd["menu"]
     idx = menu["problems"].index(_ANCHOR_TITLE)
-    return menu, client.post("/api/session/s/choose", json={"index": idx}).json()
+    choice = {"index": idx, "nonce": menu.get("nonce")}
+    return fd, client.post("/api/session/s/choose", json=choice).json()
 
 
 def test_health_ok():
@@ -33,11 +37,12 @@ def test_full_session_and_l13_surface(tmp_path, make_fake):
     client = TestClient(app)
     seen = []
 
-    menu, r = _choose_anchor(client)
+    fd, r = _choose_anchor(client)
     assert all(
-        "veldra:" not in p for p in menu["problems"]
+        "veldra:" not in p for p in fd["menu"]["problems"]
     )  # clean labels, no confidentiality leak
-    seen.append(str(menu["problems"]))
+    seen.append(str(fd["menu"]["problems"]))
+    seen.append(fd["text"])  # the static front-door ask is learner-facing too
     assert r["kind"] == "say"  # scenario + invite
     seen.append(r["text"])
 
@@ -343,7 +348,8 @@ def test_continue_menu_path_and_double_click_idempotency(tmp_path, make_fake):
     _, r = _choose_anchor(client)
     _drive_to_done(client)
     m = client.post("/api/session/s/continue", json={"menu": True}).json()
-    assert m["kind"] == "menu" and m["problems"]  # inline picker path
+    # the inline picker is the front door now (doors + composer — §2g re-entry)
+    assert m["kind"] == "frontdoor" and m["menu"]["problems"]
     # the menu path consumed the continuation; a second continue is refused (MF-6 idempotency)
     again = client.post("/api/session/s/continue", json={}).json()
     assert again["kind"] == "error"
@@ -430,8 +436,9 @@ def test_choose_marker_and_seam_ride_the_endpoints(tmp_path, make_fake):
     sit = store.live_sitting()
     turns = store.turns(sit["id"])
     kinds = [t["kind"] for t in turns]
-    assert kinds[0] == "muted" and turns[0]["payload"]["text"] == "door chosen"
-    assert kinds[1] == "you" and turns[1]["payload"]["text"] == _ANCHOR_TITLE
+    assert kinds[0] == "vera"  # the rendered front-door ask persists (§2g)
+    assert kinds[1] == "muted" and turns[1]["payload"]["text"] == "door chosen"
+    assert kinds[2] == "you" and turns[2]["payload"]["text"] == _ANCHOR_TITLE
     assert "seam" in kinds
     import json as _json
 
@@ -461,8 +468,8 @@ def test_shell_is_served_no_store_and_build_stamp_rides_health_and_session(tmp_p
     health = client.get("/api/health").json()
     assert health["ok"] is True and health.get("build")
     cold = client.post("/api/session").json()
-    assert cold["kind"] == "menu" and cold.get("build")
-    assert cold.get("nonce")  # the stale-menu guard rides the cold menu too
+    assert cold["kind"] == "frontdoor" and cold.get("build")
+    assert cold["menu"].get("nonce")  # the stale-menu guard rides the embedded doors too
 
 
 def test_resume_over_http_carries_the_room(tmp_path, make_fake):
@@ -500,9 +507,117 @@ def test_menu_suffix_marks_just_worked_doors(tmp_path, make_fake):
     c1.post("/api/session/s/close")  # the sitting ends; the converged log survives
 
     app2 = create_app(db_path=db, model_factory=make_fake)
-    menu = TestClient(app2).post("/api/session").json()
-    assert menu["kind"] == "menu"
-    marked = [p for p in menu["problems"] if p.endswith(" · just worked")]
-    assert _ANCHOR_TITLE + " · just worked" in menu["problems"]
-    assert len(marked) < len(menu["problems"])  # unworked doors stay clean
-    assert all("veldra:" not in p for p in menu["problems"])
+    fd = TestClient(app2).post("/api/session").json()
+    assert fd["kind"] == "frontdoor"
+    problems = fd["menu"]["problems"]
+    marked = [p for p in problems if p.endswith(" · just worked")]
+    assert _ANCHOR_TITLE + " · just worked" in problems
+    assert len(marked) < len(problems)  # unworked doors stay clean
+    assert all("veldra:" not in p for p in problems)
+
+
+# ---- The living sitting (plan L4) over HTTP: front door, forge, reserve, sitting close --------
+
+_SITUATION = "Signing a delivery commitment Thursday; the penalty clause is the fight."
+
+_SCENARIO = (
+    "You signed the delivery agreement on Thursday, and this morning your second-largest "
+    "customer asked for the same penalty terms before Fridays board review. The account team "
+    "wants an answer before the standup, and whatever you give one customer the others will "
+    "hear about. What do you do?"
+)
+
+
+def _world_factory(make_fake):
+    def factory():
+        m = make_fake()
+        m.classify_intake = lambda exp, opening: IntakeClassification(
+            frame_states={f.frame_code: FrameState.absent for f in exp.rubric.frames},
+            trap_states={t.trap_code: TrapState.not_tripped for t in exp.rubric.traps},
+        )
+        m.classify_response = lambda exp, kind, code, push, response, stress=False: (
+            ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+        )
+        m.forge_scenario = lambda brief, steer="": _SCENARIO
+        return m
+
+    return factory
+
+
+def test_front_door_free_text_flow_over_http(tmp_path, make_fake):
+    """The living sitting end-to-end at the HTTP layer: frontdoor kind → free text → bridge on
+    the opening say → done with the subtitled next_title → same-world continue → sitting-story
+    close. No gen: ref in any response."""
+    import json as _json
+
+    db = str(tmp_path / "living.db")
+    app = create_app(db_path=db, model_factory=_world_factory(make_fake))
+    client = TestClient(app)
+    blobs = []
+
+    fd = client.post("/api/session").json()
+    assert fd["kind"] == "frontdoor"
+    assert fd["text"] and fd["menu"]["problems"] and fd["menu"].get("nonce")
+    assert fd.get("theme") and fd.get("build")
+    assert "refs" not in fd["menu"]  # L-13: the embedded doors are title-only on the wire
+    blobs.append(fd)
+
+    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r["kind"] == "say" and r["text"] == _SCENARIO
+    assert r.get("bridge") == "[reflect]"  # the heard-you beat rides the opening
+    blobs.append(r)
+
+    d = _drive_to_done(client)
+    assert d["landing"] and d["next_title"]  # subtitled continue (the next territory's words)
+    blobs.append(d)
+
+    r2 = client.post("/api/session/s/continue", json={}).json()
+    assert r2["kind"] == "say" and r2["text"] == _SCENARIO  # next pressure, same world
+    assert r2.get("seam") == "Same sitting — next door."
+    blobs.append(r2)
+    d2 = _drive_to_done(client)
+    blobs.append(d2)
+
+    cl = client.post("/api/session/s/close").json()
+    assert cl["kind"] == "close" and cl["close"] == "[sitting close]"  # the whole-sitting story
+    assert isinstance(cl["terrain"], list)
+    blobs.append(cl)
+
+    assert "gen:" not in _json.dumps(blobs)  # L-13: the instance/world grain stays server-side
+
+
+def test_informed_reserve_over_http(tmp_path, make_fake):
+    """§2c P3 at the HTTP layer: all territories windowed → kind 'reserve' with the pinned copy
+    and both choices; work_anyway forges a real segment."""
+    from datetime import datetime, timedelta, timezone
+
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "reserve.db")
+    store = SittingStore(db)
+    wall = datetime.now(timezone.utc)
+    for i, eid in enumerate(
+        [
+            "irreversible_anchor",
+            "license_continuity",
+            "proof_before_promise",
+            "decision_under_stakes",
+        ]
+    ):
+        store.log_converged("prior", f"gen:prior:{i}", wall - timedelta(hours=4 - i), eid)
+
+    app = create_app(db_path=db, model_factory=_world_factory(make_fake))
+    client = TestClient(app)
+    fd = client.post("/api/session").json()
+    assert fd["kind"] == "frontdoor"
+    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r["kind"] == "say" and r["text"] == _SCENARIO
+    _drive_to_done(client)  # the fifth territory converges: every door is now windowed
+
+    rv = client.post("/api/session/s/continue", json={}).json()
+    assert rv["kind"] == "reserve"
+    assert rv["copy"].startswith("You worked this pressure")
+    assert rv["choices"] == ["Work it anyway", "Come back tomorrow"]
+
+    r2 = client.post("/api/session/s/continue", json={"work_anyway": True}).json()
+    assert r2["kind"] == "say" and r2["text"] == _SCENARIO  # a real new problem, honestly framed

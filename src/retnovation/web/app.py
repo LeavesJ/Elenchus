@@ -35,6 +35,7 @@ class _Text(BaseModel):
 
 class _Cont(BaseModel):
     menu: bool = False
+    work_anyway: bool = False  # the informed re-serve's first choice (living sitting §2c)
 
 
 def _default_model():
@@ -71,13 +72,36 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
         return {"kind": "resume", **data}
     if tag == "nudge":  # soft fail (stale tab) — the shell shows the message and recovers
         return {"kind": "nudge", "message": data.get("message", "")}
+    if tag == "say" and data.get("frontdoor"):
+        # The cold beat (living sitting §2a/§2g): the static ask + the small doors. The
+        # embedded menu is projected title-only — refs stay server-side (L-13).
+        out = {
+            "kind": "frontdoor",
+            "text": data["text"],
+            "menu": {
+                "problems": data["menu"]["problems"],
+                "nonce": data["menu"].get("nonce", 0),
+            },
+            "theme": data.get("theme", {}),
+        }
+        if data.get("returning"):  # the return-visit muted line (§2f review P10)
+            out["returning"] = data["returning"]
+        return out
     if tag == "say":  # every Concierge-authored visible turn (opening, re-invite, probe)
         out = {"kind": "say", "text": data["text"]}
         if "theme" in data:  # the opening say carries the role atmosphere (two-phase)
             out["theme"] = data["theme"]
         if "seam" in data:  # a continued segment's static seam line (durable sittings §2d)
             out["seam"] = data["seam"]
+        if "bridge" in data:  # the heard-you / fallback bridge on a forged opening (§2a/§2b)
+            out["bridge"] = data["bridge"]
         return out
+    if tag == "reserve":  # every territory windowed: the informed re-serve question (§2c P3)
+        return {
+            "kind": "reserve",
+            "copy": data.get("copy", ""),
+            "choices": data.get("choices", []),
+        }
     if tag == "done":  # the engine converged — the SESSION does not end; the user owns closure. The
         # felt landing rides the payload; the guarded next door (chained sittings) rides with it.
         return {
@@ -138,8 +162,9 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
 
     @app.post("/api/session/{sid}/continue")
     def continue_(sid: str, body: _Cont):
-        # Chained sittings: the next bounded engine session in the same thread (one-click or menu).
-        return _emit(reg, *reg.continue_session(_SID, body.menu))
+        # Chained sittings: the next bounded engine session in the same thread (one-click or
+        # menu); work_anyway honors the informed re-serve's first choice (living sitting §2c).
+        return _emit(reg, *reg.continue_session(_SID, body.menu, work_anyway=body.work_anyway))
 
     @app.post("/api/session/{sid}/close")
     def close_session(sid: str):

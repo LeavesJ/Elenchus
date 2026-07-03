@@ -277,6 +277,40 @@ class SittingStore:
             ).fetchall()
         return {r[0] for r in rows}
 
+    def converged_log(self) -> list[dict]:
+        """Every converged row, oldest first (converged_at, then insertion order). One read that
+        serves the living sitting's converged-derived needs — the return-visit counts, the
+        per-sitting engaged frames, the least-recent territory on an informed re-serve — and
+        L5's houses. Read-only; rows are retained forever (L-3)."""
+        if self._inert:
+            return []
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT sitting_id, ref, converged_at, experience_id FROM web_converged "
+                "ORDER BY converged_at, rowid"
+            ).fetchall()
+        return [
+            {"sitting_id": s, "ref": r, "converged_at": at, "experience_id": eid}
+            for s, r, at, eid in rows
+        ]
+
+    def max_generated_n(self, sitting_id: str) -> int:
+        """Highest instance n among this sitting's gen:{sitting}:{n} rows. The forge counter
+        seeds PAST it after a restart so a reused n can never upsert-overwrite a prior instance
+        row (the rebuild-fidelity substrate, §2f/M2)."""
+        if self._inert:
+            return 0
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT ref FROM web_generated_problem WHERE sitting_id=?", (sitting_id,)
+            ).fetchall()
+        best = 0
+        for (ref,) in rows:
+            tail = ref.rsplit(":", 1)[-1]
+            if tail.isdigit():
+                best = max(best, int(tail))
+        return best
+
     def territories_within(self, now: datetime, hours: int = 24) -> set[str]:
         """Territories (experience_ids) converged within the rolling window — same clock as
         converged_within, keyed on the world-independent TERRITORY identity (living sitting

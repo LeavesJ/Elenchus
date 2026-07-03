@@ -27,13 +27,13 @@ def test_start_emits_error_on_worker_failure(tmp_path, make_fake):
 
 
 def test_menu_titles_are_clean_and_never_leak_the_veldra_ref(tmp_path, make_fake):
-    """The picker must show human display titles, never the ledger_ref (veldra: slug)."""
+    """The doors must show human display titles, never the ledger_ref (veldra: slug)."""
     reg = SessionRegistry(str(tmp_path / "m.db"), model_factory=make_fake)
     tag, data = reg.start("sm", now=NOW)
-    assert tag == "menu"
-    assert data["problems"]  # non-empty
+    assert tag == "say" and data.get("frontdoor")  # the cold beat is the front door now
+    assert data["menu"]["problems"]  # non-empty small doors
     assert all(
-        "veldra:" not in p for p in data["problems"]
+        "veldra:" not in p for p in data["menu"]["problems"]
     )  # clean labels, no confidentiality leak
 
 
@@ -57,7 +57,7 @@ def test_runner_assessment_equals_direct_run_session(tmp_path, make_fake, steer)
     # same inputs via the runner's queue bridge (Concierge turns are display-only)
     reg = SessionRegistry(str(tmp_path / "b.db"), model_factory=make_fake)
     tag, _ = reg.start("s1", now=NOW)
-    assert tag == "menu"
+    assert tag == "say"  # the front door (doors embedded; menu_index reads the cached refs)
     menu_idx = reg.menu_index("s1", _ANCHOR)
     tag, _ = reg.step("s1", menu_idx)
     assert tag == "say"  # scenario + invite
@@ -77,7 +77,7 @@ def test_step_after_done_returns_error_and_does_not_hang(tmp_path, make_fake):
     """Terminal-state guard: step after 'done' must short-circuit, never put to the dead worker."""
     reg = SessionRegistry(str(tmp_path / "c.db"), model_factory=make_fake)
     tag, _ = reg.start("s_term", now=NOW)
-    assert tag == "menu"
+    assert tag == "say"  # front door
     menu_idx = reg.menu_index("s_term", _ANCHOR)
     tag, _ = reg.step("s_term", menu_idx)
     assert tag == "say"
@@ -179,7 +179,7 @@ def test_gate_loop_is_bounded_after_repeated_nonsubstantive_turns(tmp_path):
     show the FakeModel reinvite text; the cap-entry shows the first engine probe."""
     reg = SessionRegistry(str(tmp_path / "d.db"), model_factory=_greeting_factory)
     tag, _ = reg.start("sd", now=NOW)
-    assert tag == "menu"
+    assert tag == "say"  # front door
     menu_idx = reg.menu_index("sd", _ANCHOR)
     tag, _ = reg.step("sd", menu_idx)
     assert tag == "say"  # scenario + invite
@@ -282,7 +282,7 @@ def test_probe_displays_carry_an_incrementing_arc(tmp_path):
 
     reg = SessionRegistry(str(tmp_path / "arc.db"), model_factory=factory)
     tag, _ = reg.start("s1", now=NOW)
-    assert tag == "menu"
+    assert tag == "say"  # front door
     tag, _ = reg.step("s1", reg.menu_index("s1", _ANCHOR))
     assert tag == "say"  # opening
     tag, data = reg.step("s1", "reasoning that already holds the move")
@@ -437,8 +437,8 @@ def test_write_through_persists_projected_transcript_and_state(tmp_path, make_fa
     turns = store.turns(sit["id"])
     kinds = [t["kind"] for t in turns]
     assert "menu" not in kinds and "error" not in kinds  # menus/errors never persist
-    assert kinds[0] == "vera"  # the opening
-    assert kinds[1] == "you" and turns[1]["payload"]["text"] == "my position"
+    assert kinds[:2] == ["vera", "vera"]  # the front-door ask, then the opening
+    assert kinds[2] == "you" and turns[2]["payload"]["text"] == "my position"
     assert kinds[-1] == "landing" and turns[-1]["payload"]["text"] == data["landing"]
     import json as _json
 
@@ -532,7 +532,8 @@ def test_error_emissions_never_reach_the_durable_transcript(tmp_path, make_fake)
 
     blob = _json.dumps(turns)
     assert "Boom" not in blob and "choose_the_failure" not in blob
-    assert [t["kind"] for t in turns] == ["vera", "you"]  # opening + the user's words only
+    # ask + opening + the user's words only — never the error emission
+    assert [t["kind"] for t in turns] == ["vera", "vera", "you"]
 
 
 def test_close_marks_sitting_closed_and_clears_it(tmp_path, make_fake):
@@ -710,7 +711,8 @@ def test_rolling_window_dedupe_across_processes(tmp_path, make_fake):
     # the stale pick was re-validated against the window and dropped or replaced
     assert rdata["next_title"] == "" or rdata["next_title"] != reg._next_pick_title.get("s1")
     tag2, data2 = reg2.continue_session("s1")
-    assert tag2 == "menu"  # MF-3's honest path: the doors, never a silent converged re-serve
+    # MF-3's honest path: the doors (now the front door), never a silent converged re-serve
+    assert tag2 == "say" and data2.get("frontdoor")
 
 
 def test_rebuild_failure_degrades_to_statics(tmp_path, make_fake):
@@ -745,7 +747,7 @@ def test_stale_sitting_older_than_18h_cold_starts(tmp_path, make_fake):
     reg2 = SessionRegistry(db, model_factory=make_fake)
     later = datetime.now(timezone.utc) + timedelta(hours=19)
     tag, data = reg2.resume_or_start("s1", now=later)
-    assert tag == "menu"  # cold start
+    assert tag == "say" and data.get("frontdoor")  # cold start = the front door
     store = SittingStore(db)
     assert store.live_sitting() is not None  # the NEW sitting
     # exactly one closed + one live sitting exist; nothing deleted
@@ -766,8 +768,8 @@ def test_stale_menu_nonce_reserves_the_menu(tmp_path, make_fake):
     db = str(tmp_path / "nonce.db")
     reg = SessionRegistry(db, model_factory=make_fake)
     tag, data = reg.start("s1", now=NOW)
-    assert tag == "menu" and data.get("nonce")
-    stale = data["nonce"] - 1
+    assert tag == "say" and data["menu"].get("nonce")
+    stale = data["menu"]["nonce"] - 1
     tag2, data2 = reg.choose("s1", 0, nonce=stale)
     assert tag2 == "menu"  # re-served, no door opened
     tag3, _ = reg.choose("s1", reg.menu_index("s1", _ANCHOR), nonce=data2["nonce"])
@@ -789,7 +791,7 @@ def test_stale_start_reaps_the_replaced_parked_worker(tmp_path, make_fake):
 
     later = datetime.now(timezone.utc) + timedelta(hours=19)
     tag, _ = reg.resume_or_start("s1", now=later)  # stale -> close + cold start over the channel
-    assert tag == "menu"
+    assert tag == "say"  # the fresh front door
     old_ch.thread.join(timeout=5)
     assert not old_ch.thread.is_alive()  # reaped: finally ran, store closed
 
@@ -862,7 +864,7 @@ def test_choose_is_refused_when_no_menu_is_pending(tmp_path, make_fake):
     db = str(tmp_path / "replay.db")
     reg = SessionRegistry(db, model_factory=make_fake)
     tag, data = reg.start("s1", now=NOW)
-    nonce = data["nonce"]
+    nonce = data["menu"]["nonce"]
     idx = reg.menu_index("s1", _ANCHOR)
     tag, _ = reg.choose("s1", idx, nonce=nonce)
     assert tag == "say"  # accepted; menu consumed
@@ -939,3 +941,561 @@ def test_reopen_seam_on_reentering_the_interrupted_door(tmp_path, make_fake):
     assert data2.get("seam") == (
         "Starting this one over — restate your position, or build on what you wrote above."
     )
+
+
+# ---- The living sitting (plan L4): worker front door, same-world continue, rebuild fidelity,
+# ---- bounded difficulty, sitting close (spec §2a/§2c/§2e/§2f/§2g) ---------------------------
+
+from retnovation.content_loader import load_territory_text  # noqa: E402
+from retnovation.web import voice as _voice  # noqa: E402
+from retnovation.web.session_runner import (  # noqa: E402
+    _FRONTDOOR_ASK,
+    _HONEST_FIT,
+    _RESERVE_COPY,
+    _territory_subtitle,
+)
+from retnovation.web.sitting_store import SittingStore  # noqa: E402
+
+_SITUATION = "Signing a delivery commitment Thursday; the penalty clause is the fight."
+
+# Clears the forge's code gates against EVERY rubric (structural + validate_scene — verified in
+# dev against all five), so the same fake serves whatever territory the flow targets next.
+_SCENARIO = (
+    "You signed the delivery agreement on Thursday, and this morning your second-largest "
+    "customer asked for the same penalty terms before Fridays board review. The account team "
+    "wants an answer before the standup, and whatever you give one customer the others will "
+    "hear about. What do you do?"
+)
+
+# Library (glob-sorted) order — FakeModel.map_territories ranks in given order, so the mapped
+# territory is the first and Continue walks this order minus the window.
+_T1, _T2, _T3 = "continuity_lock_in", "decision_under_stakes", "irreversible_anchor"
+
+
+def _world_factory(make_fake, briefs=None, outcome=None, screens=None):
+    """Problem-agnostic fake whose forge_scenario clears the gates. `briefs` collects
+    (brief, steer) across segments (the level spy reads the Level: line); `outcome` is a mutable
+    {'v': ...} so a test can flip converge/plateau mid-sitting; `screens` counts screen_moves
+    calls (the ONE-union-call assertion)."""
+    outcome = outcome if outcome is not None else {"v": "closed"}
+
+    def factory():
+        m = make_fake()
+        m.classify_intake = lambda exp, opening: IntakeClassification(
+            frame_states={f.frame_code: FrameState.absent for f in exp.rubric.frames},
+            trap_states={t.trap_code: TrapState.not_tripped for t in exp.rubric.traps},
+        )
+        m.classify_response = lambda exp, kind, code, push, response, stress=False: (
+            ResponseClassification(
+                outcome=outcome["v"],
+                mechanism_supplied=(outcome["v"] == "closed"),
+                hard_wrong=False,
+            )
+        )
+
+        def fs(brief, steer=""):
+            if briefs is not None:
+                briefs.append((brief, steer))
+            return _SCENARIO
+
+        m.forge_scenario = fs
+        if screens is not None:
+            orig_screen = m.screen_moves
+
+            def counting(moves, text):
+                screens.append(list(moves))
+                return orig_screen(moves, text)
+
+            m.screen_moves = counting
+        return m
+
+    return factory
+
+
+def _open_world(reg, sid="s1", situation=_SITUATION, now=NOW):
+    """Cold start through the front door with free text; returns the forged opening say data."""
+    tag, data = reg.start(sid, now=now)
+    assert tag == "say" and data.get("frontdoor"), (tag, data)
+    tag, data = reg.step(sid, situation)
+    assert tag == "say", (tag, data)
+    return data
+
+
+def test_front_door_free_text_forges_the_world_end_to_end(tmp_path, make_fake):
+    """The battery's spine (spec §2a/§2g): static ask + small doors → free text → heard-you
+    bridge riding the forged opening (the scenario IS the opening) → engine grades → landing.
+    The world/instance rows persist; the transcript persists ask/text/bridge; no gen: on any
+    wire payload or persisted turn."""
+    db = str(tmp_path / "fd.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg.start("s1", now=NOW)
+    assert tag == "say" and data.get("frontdoor") is True
+    assert data["text"] == _FRONTDOOR_ASK  # STATIC — the coldest beat pays zero model calls
+    assert data["menu"]["problems"] and data["menu"].get("nonce")  # the small doors + nonce
+    assert data.get("theme")  # phase-1 persona theme rides the cold beat
+
+    tag, data = reg.step("s1", _SITUATION)
+    assert tag == "say" and data["text"] == _SCENARIO  # the forged scenario IS the opening (M6)
+    assert data.get("bridge") == "[reflect]"  # the screened heard-you reflection (D9)
+
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    assert store.read_world(sit) == _SITUATION  # written BEFORE forging (P1 no-poisoning)
+    row = store.read_generated_problem(f"gen:{sit}:1")
+    assert row == {"experience_id": _T1, "scenario": _SCENARIO}
+
+    tag, data = _drive(reg, "s1", opening="my position on the penalty")
+    assert tag == "done" and data["landing"]
+    # Continue is subtitled with the NEXT territory's description (P4), never the worked one
+    assert data["next_title"] == _territory_subtitle(_T2)
+    log = store.converged_log()
+    assert [(r["ref"], r["experience_id"]) for r in log] == [(f"gen:{sit}:1", _T1)]
+
+    turns = store.turns(sit)
+    kinds = [t["kind"] for t in turns]
+    assert kinds[:4] == ["vera", "you", "bridge", "vera"]  # ask, her text, bridge, opening
+    assert turns[0]["payload"]["text"] == _FRONTDOOR_ASK
+    assert turns[1]["payload"]["text"] == _SITUATION
+    assert turns[2]["payload"]["text"] == "[reflect]"
+    assert turns[3]["payload"]["text"] == _SCENARIO
+    import json as _json
+
+    assert "gen:" not in _json.dumps([t["payload"] for t in turns])  # L-13 on the durable mirror
+
+
+def test_front_door_menu_click_still_opens_a_curated_door(tmp_path, make_fake):
+    """Doors-path unchanged: an int through the front door is today's curated menu path — no
+    world row, no forge, the authored curated opening."""
+    db = str(tmp_path / "fd-doors.db")
+    reg = SessionRegistry(db, model_factory=make_fake)
+    tag, data = reg.start("s1", now=NOW)
+    assert tag == "say" and data.get("frontdoor")
+    tag, data = reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    assert tag == "say" and data["text"] == "[open]"  # voice.opening via concierge_open
+    assert "bridge" not in data
+    store = SittingStore(db)
+    assert store.read_world(store.live_sitting()["id"]) is None  # no world was opened
+
+
+def test_front_door_low_confidence_honest_fit_then_text_proceeds(tmp_path, make_fake):
+    """§2a honest fit: low mapper confidence serves the user-centric copy VERBATIM (territory
+    description inlined) and collects again — any text proceeds with the mapped territory."""
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+
+        def low(situation, territories):
+            out = orig(situation, territories)
+            return out.model_copy(update={"confidence": "low"})
+
+        m.map_territories = low
+        return m
+
+    db = str(tmp_path / "fd-low.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    tag, data = reg.start("s1", now=NOW)
+    assert tag == "say" and data.get("frontdoor")
+    tag, data = reg.step("s1", _SITUATION)
+    assert tag == "say"
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    assert data["text"] == _HONEST_FIT.format(desc=desc)  # the pinned copy, verbatim
+    tag, data = reg.step("s1", "yes — start there")
+    assert tag == "say" and data["text"] == _SCENARIO  # proceeds with the MAPPED territory
+    assert data.get("bridge") == "[reflect]"
+    store = SittingStore(db)
+    assert store.read_world(store.live_sitting()["id"]) == _SITUATION  # her ORIGINAL situation
+
+
+def test_front_door_low_confidence_int_takes_a_door(tmp_path, make_fake):
+    """The honest-fit round-trip's other exit: an int goes to today's menu path."""
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+        m.map_territories = lambda s, t: orig(s, t).model_copy(update={"confidence": "low"})
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "fd-low2.db"), model_factory=factory)
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", _SITUATION)
+    assert tag == "say" and "other doors" in data["text"]
+    tag, data = reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    assert tag == "say" and data["text"] == "[open]"  # curated door, no forge
+
+
+def test_resume_mid_front_door_same_process_reserves_the_ask(tmp_path, make_fake):
+    """New resume state (§2g): a session parked in the front-door loop (live worker) resumes
+    with the ask re-served over the same live queues — same nonce, composer alive."""
+    reg = SessionRegistry(str(tmp_path / "fd-park.db"), model_factory=_world_factory(make_fake))
+    tag, data = reg.start("s1", now=NOW)
+    nonce = data["menu"]["nonce"]
+    tag, rdata = reg.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume" and rdata["mode"] == "engine"
+    assert rdata["frontdoor"]["text"] == _FRONTDOOR_ASK
+    assert rdata["frontdoor"]["menu"]["problems"]
+    assert rdata["frontdoor"]["menu"]["nonce"] == nonce  # the SAME pending menu answers it
+    # the live loop is intact: her text still forges the world
+    tag, data = reg.step("s1", _SITUATION)
+    assert tag == "say" and data["text"] == _SCENARIO
+
+
+def test_restart_mid_front_door_resumes_honestly_with_the_world(tmp_path, make_fake):
+    """Cross-restart mid-front-door (§2g): her text + world row persisted, worker died before
+    the opening — the resume re-serves the static ask over her visible words; no false honesty
+    line (nothing graded was lost)."""
+
+    def factory():
+        m = _world_factory(make_fake)()
+
+        def boom(situation, territories):
+            raise RuntimeError("mapper down")
+
+        m.map_territories = boom
+        return m
+
+    db = str(tmp_path / "fd-mid.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    reg.start("s1", now=NOW)
+    tag, _ = reg.step("s1", _SITUATION)  # world written, then the mapper dies -> error
+    assert tag == "error"
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    assert store.read_world(sit) == _SITUATION  # the world survived the failed forge
+
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    assert data["frontdoor"]["text"] == _FRONTDOOR_ASK
+    assert data["honesty"] == ""  # no segment was lost — the ask is simply re-served
+    assert any(t["text"] == _SITUATION for t in data["turns"])  # her words, visible
+    tag, data = reg2.step("s1", _SITUATION)  # the live loop works after the restart
+    assert tag == "say" and data["text"] == _SCENARIO
+
+
+def test_restart_after_forged_convergence_rebuilds_the_generated_prompt(tmp_path, make_fake):
+    """Review M2 (must-fix): post-restart converse/close must author over the GENERATED
+    scenario, never the curated prompt beneath her generated conversation."""
+    problems = []
+
+    def spy_factory():
+        m = _world_factory(make_fake)()
+        orig = m.concierge_converse
+
+        def rec(problem, recent, *, stop_reason="converged", voice=""):
+            problems.append(problem)
+            return orig(problem, recent, stop_reason=stop_reason, voice=voice)
+
+        m.concierge_converse = rec
+        return m
+
+    db = str(tmp_path / "fd-rebuild.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    tag, _ = _drive(reg, "s1", opening="my position")
+    assert tag == "done"
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    ser = store.read_state(sit)["record"]
+    assert ser["ledger_ref"] == f"gen:{sit}:1"  # instance-grain identity persisted (M2)
+
+    reg2 = SessionRegistry(db, model_factory=spy_factory)
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume" and data["mode"] == "converse"
+    tag, data = reg2.converse("s1", "so what did that cost me?")
+    assert tag == "say" and data["text"]
+    assert problems == [_SCENARIO]  # the author saw the GENERATED prompt, not the curated one
+
+
+def test_missing_generated_row_degrades_to_statics(tmp_path, make_fake):
+    """M2's failure branch: a gen: record whose instance row is gone serves statics — never an
+    unscreened author, never a 500."""
+    db = str(tmp_path / "fd-gone.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="my position")
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    ser = store.read_state(sit)["record"]
+    ser["ledger_ref"] = "gen:someother:9"  # a row no store has
+    store.write_state(sit, record=ser)
+
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    tag, data = reg2.converse("s1", "hello again")
+    assert tag == "say" and data["text"] == _voice.SAFE_CONTRACT
+    tag, data = reg2.close("s1")
+    assert tag == "close" and isinstance(data["terrain"], list)
+
+
+def test_continue_forges_the_next_territory_and_windows_the_worked_one(tmp_path, make_fake):
+    """§2c: Continue targets the next territory (mapper rank minus the 24h territory window) on
+    the SAME world; the generic seam rides the forged opening; a new instance row lands."""
+    db = str(tmp_path / "fd-cont.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    tag, data = _drive(reg, "s1", opening="my position")
+    assert tag == "done"
+    tag, data = reg.continue_session("s1")
+    assert tag == "say" and data["text"] == _SCENARIO  # the next forged opening, one request
+    assert data.get("seam") == "Same sitting — next door."
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    row = store.read_generated_problem(f"gen:{sit}:2")
+    assert row is not None and row["experience_id"] == _T2  # T1 windowed -> T2 targeted
+    turns = store.turns(sit)
+    marker = next(t for t in turns if t["kind"] == "muted")
+    assert _territory_subtitle(_T2) in marker["payload"]["text"]  # Continue → {subtitle}
+
+
+def test_all_windowed_serves_informed_reserve_and_work_anyway_forges_least_recent(
+    tmp_path, make_fake
+):
+    """§2c review P3: every territory inside the window is a DEFINED state — the informed
+    re-serve copy (verbatim), never a false fresh door; work-anyway forges the least-recent
+    territory; 'tomorrow' costs nothing (the continuation was not consumed)."""
+    db = str(tmp_path / "fd-window.db")
+    store = SittingStore(db)
+    wall = datetime.now(timezone.utc)
+    aged = ["irreversible_anchor", "license_continuity", "proof_before_promise", _T2]
+    for i, eid in enumerate(aged):  # oldest first: irreversible_anchor
+        store.log_converged("prior", f"gen:prior:{i}", wall - timedelta(hours=4 - i), eid)
+
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    tag, data = _drive(reg, "s1", opening="my position")
+    assert tag == "done" and data["next_title"] == ""  # nothing honest to subtitle
+
+    tag, data = reg.continue_session("s1")
+    assert tag == "reserve"
+    assert data["copy"] == _RESERVE_COPY
+    assert data["choices"] == ["Work it anyway", "Come back tomorrow"]
+
+    tag, data = reg.continue_session("s1", work_anyway=True)  # not consumed by the question
+    assert tag == "say" and data["text"] == _SCENARIO
+    sit = store.live_sitting()["id"]
+    row = store.read_generated_problem(f"gen:{sit}:2")
+    assert row is not None and row["experience_id"] == "irreversible_anchor"  # least recent
+
+
+def test_fallback_rides_the_bridge_and_continue_retries_the_forge(tmp_path, make_fake):
+    """Review P1: a failed forge serves the CURATED base with the bridge line riding the
+    opening payload; the world persists and the NEXT continue runs the forge again — a
+    fallback never poisons the sitting."""
+    calls = {"n": 0}
+
+    def factory():
+        m = _world_factory(make_fake)()
+
+        def degenerate(brief, steer=""):
+            calls["n"] += 1
+            return "[forged scenario]"  # fails the structural gate both attempts
+
+        m.forge_scenario = degenerate
+        return m
+
+    db = str(tmp_path / "fd-fall.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", _SITUATION)
+    assert tag == "say" and data["text"] == "[open]"  # the curated base's authored opening
+    assert data.get("bridge") == (
+        "I'll hold your situation — first, work this one; "
+        "it's the same pressure you're standing in."
+    )
+    assert calls["n"] == 2  # one generation + ONE steered regen, then the honest fallback
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    assert store.read_world(sit) == _SITUATION  # the world row persists through the fallback
+    assert store.read_generated_problem(f"gen:{sit}:1") is None  # no instance row on fallback
+
+    tag, data = _drive(reg, "s1", opening="my position")
+    assert tag == "done"
+    tag, data = reg.continue_session("s1")
+    assert tag == "say" and data["text"] == "[open]"  # fallback again, honestly
+    assert calls["n"] == 4  # the forge RAN again on the next continue (no poisoning)
+
+
+def test_level_steps_one_per_move_and_snaps_back(tmp_path, make_fake):
+    """§2e: the brief's Level line walks base → firm → tight one step per converged move and
+    snaps back one step on any non-converged stop; never a prose delta."""
+    briefs: list[tuple[str, str]] = []
+    outcome = {"v": "closed"}
+    reg = SessionRegistry(
+        str(tmp_path / "lvl.db"),
+        model_factory=_world_factory(make_fake, briefs=briefs, outcome=outcome),
+    )
+    _open_world(reg, "s1")
+    assert "Level: base" in briefs[-1][0].splitlines()  # a new world opens at base
+    _drive(reg, "s1", opening="p1")
+    assert reg.continue_session("s1")[0] == "say"
+    assert "Level: firm" in briefs[-1][0].splitlines()  # one step up after a convergence
+    _drive(reg, "s1", opening="p2")
+    assert reg.continue_session("s1")[0] == "say"
+    assert "Level: tight" in briefs[-1][0].splitlines()  # capped top of the enum
+    outcome["v"] = "unchanged"  # this segment plateaus
+    tag, _ = _drive(reg, "s1", opening="p3")
+    assert tag == "done"
+    outcome["v"] = "closed"
+    assert reg.continue_session("s1")[0] == "say"
+    assert "Level: firm" in briefs[-1][0].splitlines()  # snap back ONE step, immediately
+
+
+def test_level_derives_from_durable_history_after_restart(tmp_path, make_fake):
+    """§2e across a restart: the level re-derives deterministically from the converged log +
+    the persisted record's stop_reason (converge once, then plateau -> back to base)."""
+    briefs: list[tuple[str, str]] = []
+    outcome = {"v": "closed"}
+    db = str(tmp_path / "lvl-r.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake, outcome=outcome))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="p1")  # converged: level idx 1
+    outcome["v"] = "unchanged"
+    assert reg.continue_session("s1")[0] == "say"
+    tag, _ = _drive(reg, "s1", opening="p2")  # plateau: snap back to 0
+    assert tag == "done"
+
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake, briefs=briefs))
+    tag, _ = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume"
+    assert reg2.continue_session("s1")[0] == "say"
+    assert "Level: base" in briefs[-1][0].splitlines()  # derived: 1 convergence − 1 snap-back
+
+
+def test_reopen_seam_keys_on_experience_id_after_restart(tmp_path, make_fake):
+    """Review M8: a forged lost segment's gen: ref never equals a menu ref — the reopen
+    comparison keys on the TERRITORY (experience_id) and survives a restart."""
+    db = str(tmp_path / "fd-reopen.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="p1")
+    tag, _ = reg.continue_session("s1")
+    assert tag == "say"  # segment 2 forged over _T2, opening served; now the process "dies"
+
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume" and "restarted mid-problem" in data["honesty"]
+    tag, data = reg2.continue_session("s1")
+    assert tag == "say" and data["text"] == _SCENARIO
+    assert data.get("seam") == _REOPEN_SEAM_TEXT  # re-entering the interrupted TERRITORY
+
+
+_REOPEN_SEAM_TEXT = (
+    "Starting this one over — restate your position, or build on what you wrote above."
+)
+
+
+def test_return_visit_line_rides_the_cold_front_door(tmp_path, make_fake):
+    """Review P10: a cold start with closed worlds is not amnesiac — one muted line above the
+    ask, counted from the converged log."""
+    db = str(tmp_path / "fd-return.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="p1")
+    reg.close("s1")  # the sitting ends; the log survives (L-3)
+
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "say" and data.get("frontdoor")
+    assert data["returning"] == "Your world so far: 1 houses, 1 regions alight."
+
+
+def test_sitting_close_receives_all_segments_and_screens_once(tmp_path, make_fake):
+    """§2f: the close author receives the whole sitting (kind-filtered you/vera turns per
+    segment + the situation) and its output crosses ONE union egress screen (M13)."""
+    closes = []
+    screens: list[list[str]] = []
+
+    def factory():
+        m = _world_factory(make_fake, screens=screens)()
+        orig = m.concierge_sitting_close
+
+        def rec(situation, segments, voice=""):
+            closes.append((situation, segments))
+            return orig(situation, segments, voice)
+
+        m.concierge_sitting_close = rec
+        return m
+
+    db = str(tmp_path / "fd-close.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="position one")
+    assert reg.continue_session("s1")[0] == "say"
+    _drive(reg, "s1", opening="position two")
+
+    n_before = len(screens)
+    tag, data = reg.close("s1")
+    assert tag == "close" and data["close"] == "[sitting close]"
+    assert len(closes) == 1
+    situation, segments = closes[0]
+    assert situation == _SITUATION
+    assert len(segments) == 2  # one per landed segment, split on landing turns
+    assert all(role in ("you", "vera") for seg in segments for role, _ in seg)
+    assert any(text == "position one" for role, text in segments[0] if role == "you")
+    assert any(text == "position two" for role, text in segments[1] if role == "you")
+    assert len(screens) - n_before == 1  # ONE union screen call over the sitting's moves
+    union = screens[-1]
+    assert len(union) == len(set(union))  # deduped
+    assert isinstance(data["terrain"], list)
+
+
+def test_sitting_close_falls_back_static_on_screen_failure(tmp_path, make_fake):
+    """The union screen flags the authored sitting close -> the safe static serves."""
+    from retnovation.model import EgressScreen
+
+    def factory():
+        m = _world_factory(make_fake)()
+
+        def screen(moves, text):
+            if text == "[sitting close]":
+                return EgressScreen(performed=[1], evidence="(fake: close leaks)")
+            return EgressScreen(performed=[], evidence="(fake: clean)")
+
+        m.screen_moves = screen
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "fd-close2.db"), model_factory=factory)
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="p1")
+    tag, data = reg.close("s1")
+    assert tag == "close"
+    assert data["close"] == _voice._STATIC_CLOSE  # never an unscreened sitting story
+
+
+def test_front_door_park_is_reaped_on_stale_cold_start(tmp_path, make_fake):
+    """The front-door collect honors the poison pill: an 18h-stale cold start over a
+    front-door-parked worker reaps it (store closes, thread exits)."""
+    reg = SessionRegistry(str(tmp_path / "fd-reap.db"), model_factory=_world_factory(make_fake))
+    tag, _ = reg.start("s1", now=NOW)
+    assert tag == "say"
+    old_ch = reg._ch["s1"]
+    assert old_ch.thread.is_alive()
+    later = datetime.now(timezone.utc) + timedelta(hours=19)
+    tag, data = reg.resume_or_start("s1", now=later)
+    assert tag == "say" and data.get("frontdoor")  # a fresh cold front door
+    old_ch.thread.join(timeout=5)
+    assert not old_ch.thread.is_alive()
+
+
+def test_forged_flow_never_leaks_gen_refs_on_the_wire(tmp_path, make_fake):
+    """L-13 extension: no gen: ref in ANY payload across the whole forged flow (front door,
+    opening, done, resume, close)."""
+    import json as _json
+
+    db = str(tmp_path / "fd-l13.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    blobs = []
+    tag, data = reg.start("s1", now=NOW)
+    blobs.append({"text": data["text"], "menu": {"problems": data["menu"]["problems"]}})
+    tag, data = reg.step("s1", _SITUATION)
+    blobs.append(data)
+    tag, data = _drive(reg, "s1", opening="my position")
+    blobs.append({"landing": data.get("landing", ""), "next_title": data.get("next_title", "")})
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    blobs.append(data)
+    tag, data = reg2.close("s1")
+    blobs.append(data)
+    assert "gen:" not in _json.dumps(blobs, default=str)

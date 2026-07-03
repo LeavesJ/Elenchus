@@ -11,14 +11,15 @@ _ANCHOR_TITLE = "Shipping something you can't take back"  # irreversible_anchor 
 def test_menu_carries_persona_theme_and_say_carries_role_theme(tmp_path, make_fake):
     app = create_app(db_path=str(tmp_path / "v.db"), model_factory=make_fake)
     client = TestClient(app)
-    menu = client.post("/api/session").json()
-    # two-phase: menu has the persona mark but NO role atmosphere yet
-    assert menu["theme"]["persona_mark"] == "V"
-    assert menu["theme"]["atmosphere_label"] == "neutral"  # role unknown at menu
-    assert set(menu["theme"]) == {"persona_mark", "accent", "atmosphere_label"}
-    assert "veldra" not in str(menu["theme"]) and "frame" not in str(menu["theme"]).lower()
+    fd = client.post("/api/session").json()
+    # two-phase: the cold front door has the persona mark but NO role atmosphere yet
+    assert fd["kind"] == "frontdoor"
+    assert fd["theme"]["persona_mark"] == "V"
+    assert fd["theme"]["atmosphere_label"] == "neutral"  # role unknown at the front door
+    assert set(fd["theme"]) == {"persona_mark", "accent", "atmosphere_label"}
+    assert "veldra" not in str(fd["theme"]) and "frame" not in str(fd["theme"]).lower()
     # pick the CTO problem -> the opening say carries the role (systems) atmosphere
-    idx = menu["problems"].index(_ANCHOR_TITLE)
+    idx = fd["menu"]["problems"].index(_ANCHOR_TITLE)
     r = client.post("/api/session/s/choose", json={"index": idx}).json()
     assert r["kind"] == "say"
     assert r["theme"]["atmosphere_label"] == "systems"

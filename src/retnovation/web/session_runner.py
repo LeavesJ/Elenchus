@@ -10,7 +10,8 @@ from ..assessment.judgment_loop import (
     MAX_PUSHES,
 )  # read-only: the arc hint's cap (engine untouched)
 from ..cli import build_store
-from ..content_loader import load_library, load_progression
+from ..content_loader import load_library, load_progression, load_territory_text
+from ..forge import _FALLBACK_BRIDGE, LEVELS, forge_experience
 from ..orchestration import run_session
 from ..scheduler import propose_open_ended
 from ..terrain import project_terrain
@@ -63,16 +64,50 @@ _STALE_NUDGE = "This room went stale — refresh to pick up where you left off."
 # A live sitting idle past this is abandoned: an evening, not an undying thread (spec §2c).
 _SITTING_MAX_IDLE = timedelta(hours=18)
 
+# ---- The living sitting (spec 2026-07-02): the front door, the forge path, the close ---------
+
+# The STATIC front-door ask (§2a): the coldest beat pays zero model calls.
+_FRONTDOOR_ASK = "What are you facing right now? Describe the decision."
+
+# Honest fit, user-centric (§2a, copy pinned): low mapper confidence never silently stretches.
+_HONEST_FIT = (
+    "There's more in that than one sitting can press. The sharpest pressure I can put on it: "
+    "{desc}. Start there — or look at the other doors first?"
+)
+
+# The static heard-you bridge when the mapper's reflection fails its egress screen (D9).
+_STATIC_BRIDGE = "Understood — stand in it:"
+
+# The informed re-serve (§2c review P3, copy pinned): all territories windowed is a DEFINED
+# state — a question, never a refusal, never a false fresh-situation door.
+_RESERVE_COPY = (
+    "You worked this pressure this morning — pressing it again now will echo more than it "
+    "reveals. Work it anyway, or come back tomorrow?"
+)
+_RESERVE_CHOICES = ["Work it anyway", "Come back tomorrow"]
+
+
+def _territory_subtitle(experience_id: str) -> str:
+    """The Continue button's subtitle (§2c review P4): the target territory's curated
+    description, whitespace-collapsed, capped at 80 chars — zero latency, zero new leak class
+    (the description already carries §2a's three teeth)."""
+    desc = " ".join(load_territory_text(experience_id).split())
+    return desc if len(desc) <= 80 else desc[:79].rstrip() + "…"
+
 
 def _serialize_record(rec: dict) -> dict | None:
     """The landed record, reduced to what a future process can rebuild from (spec §2a): the
     experience by id (never the object — the rubric reloads from the L-1 content library),
-    dialogue tuples, stop_reason, frozen terrain. None when the exp is missing (degraded)."""
+    dialogue tuples, stop_reason, frozen terrain. None when the exp is missing (degraded).
+    `ledger_ref` is the INSTANCE-grain identity (living sitting §2f/M2): for a forged segment it
+    is `gen:{sitting}:{n}` — the key the rebuild uses to reload the GENERATED scenario; for a
+    curated segment it equals the curated ref."""
     exp = rec.get("exp")
     if exp is None:
         return None
     return {
         "experience_id": exp.experience_id,
+        "ledger_ref": rec.get("ledger_ref") or exp.ledger_ref,
         "posture": rec.get("posture"),
         "recent": [list(t) for t in rec.get("recent", [])],
         "stop_reason": rec.get("stop_reason", "converged"),
@@ -99,6 +134,17 @@ class _Channel:
         self.inflight_exp: tuple[str, str] | None = None  # (experience_id, ledger_ref) of the
         # segment being presented — worker-set BEFORE the opening emit (happens-before via the
         # queue), registry-persisted as the lost-segment discriminator (spec §2c)
+        # Living sitting (§2b/§2g) — all three mirror the inflight_exp pattern: worker-set
+        # BEFORE the opening emit, consumed by _persist_emit at the dequeue layer (the queue
+        # put orders the write before the registry's read).
+        self.forged: tuple[str, str, str] | None = None  # (instance_ref, experience_id,
+        # scenario) — the instance row the registry persists (the worker never touches the
+        # SittingStore's write path for rows the write-through layer owns)
+        self.pending_bridge: str | None = None  # the heard-you / fallback bridge line: rides
+        # the NEXT opening say as data["bridge"] and persists as its own turn (the seam pattern
+        # — a second proactive emission would break the one-put-per-get handshake)
+        self.mapped_rank: list[str] | None = None  # the mapper's territory ranking, banked
+        # registry-side for Continue targeting (§2c)
 
 
 class SessionRegistry:
@@ -129,6 +175,18 @@ class SessionRegistry:
         # interrupted-adjacent converse union screen (spec §2c); cleared at the next landing.
         self._lost_ref: dict[str, str] = {}
         self._lost_exp_id: dict[str, str] = {}
+        # The living sitting (spec 2026-07-02): the mapper's territory ranking (in-memory; the
+        # fallback order is the policy's next_menu, then the library — §2c), the queued
+        # continue-target territory (set by continue_session, popped by the worker's decide),
+        # the bounded difficulty index into LEVELS (derived from durable history on a miss,
+        # §2e), the per-sitting forge instance counter (seeded past the store's max n so a
+        # restart can never overwrite a prior instance row), and the sids whose continue-boot
+        # front-door emission is INTERNAL (auto-picked past; never persisted).
+        self._territory_rank: dict[str, list[str]] = {}
+        self._continue_target: dict[str, str] = {}
+        self._level_idx: dict[str, int] = {}
+        self._forge_n: dict[str, int] = {}
+        self._frontdoor_swallow: set[str] = set()
 
     def start(self, session_id: str, now: datetime | None = None) -> tuple[str, dict]:
         now = now or datetime.now(timezone.utc)
@@ -144,10 +202,14 @@ class SessionRegistry:
             self._ch[session_id] = ch
 
         # Queue-handshake invariant (load-bearing for write-through, spec §2b): the worker emits
-        # exactly one from_worker.put per consumed to_worker.get (plus the initial menu put), and
-        # `done` is put while the final step() is still blocked on from_worker.get — so EVERY
-        # emission is dequeued inside the HTTP request that triggered it, and persistence lives
-        # entirely at the dequeue/endpoint layer. A future PROACTIVE emission breaks this.
+        # exactly one from_worker.put per consumed to_worker.get (plus the INITIAL put — the
+        # front-door say, or the forged opening say when a continue-target skips the front
+        # door), and `done` is put while the final step() is still blocked on from_worker.get —
+        # so EVERY emission is dequeued inside the HTTP request that triggered it, and
+        # persistence lives entirely at the dequeue/endpoint layer. A future PROACTIVE emission
+        # breaks this. The front-door loop preserves it: each of its puts answers exactly one
+        # consumed get, and the heard-you/fallback bridge RIDES the opening say (a standalone
+        # bridge put would be a second put for one get).
         def worker():
             store = None
             try:
@@ -156,6 +218,13 @@ class SessionRegistry:
                 core = derive_core(a)
                 posture = a.posture  # resolves the presentation profile (voice + visual theme)
                 model = self._model_factory()
+                captured: dict = {}
+                # The sitting id was ensured before this thread started; None on an inert
+                # (:memory:) store. The SittingStore opens a connection per operation, so the
+                # worker thread may READ it (world, positions, history) and write the world row
+                # (which must precede the forge — a dequeue-layer write would only land at the
+                # next emission, after the very failure it guards against).
+                sit = self._sitting_id.get(session_id)
 
                 def decide(proposal):
                     menu = proposal.problem_menu()
@@ -166,20 +235,125 @@ class SessionRegistry:
                     refs = [s.ledger_ref for s, _ in menu]  # server-side only; never sent to client
                     # Phase 1 of the visual theme: persona + subject (posture), no role yet (no exp).
                     theme = voice.resolve_presentation(posture, None)["visual"]
-                    ch.from_worker.put(("menu", {"problems": labels, "refs": refs, "theme": theme}))
-                    idx = ch.to_worker.get()
-                    if idx is _ABANDON:
-                        raise _Abandoned()
-                    spec, receipt = menu[idx]
                     top_spec, top_rcpt = proposal.top
-                    return Selection(
-                        proposed_receipt=top_rcpt,
-                        chosen_spec=spec,
-                        chosen_receipt=receipt,
-                        outcome=Outcome.accepted if spec is top_spec else Outcome.redirected,
-                    )
+                    open_exps = [e for e in load_library() if e.regime is Regime.open_ended]
 
-                captured: dict = {}
+                    def menu_selection(idx):
+                        spec, receipt = menu[idx]
+                        return Selection(
+                            proposed_receipt=top_rcpt,
+                            chosen_spec=spec,
+                            chosen_receipt=receipt,
+                            outcome=Outcome.accepted if spec is top_spec else Outcome.redirected,
+                        )
+
+                    def forge_selection(eid, situation):
+                        # Forge a generated problem over the curated base (spec §2b). Brief
+                        # inputs come from the DURABLE sitting: her final substantive `you`
+                        # turns per landed segment, the frames engaged this sitting, the
+                        # bounded level — empty by construction at a sitting's first door.
+                        base = next(e for e in open_exps if e.experience_id == eid)
+                        res = forge_experience(
+                            base,
+                            sit or session_id,  # inert stores have no sitting id; the ref only
+                            self._next_instance_n(session_id, sit),  # needs process uniqueness
+                            situation,
+                            self._positions(sit),
+                            self._engaged_frames(sit),
+                            self._level(session_id),
+                            model,
+                            store,  # the worker's ENGINE store: ledger seeding, M9
+                        )
+                        if res.fallback:
+                            # Honest fallback (P1): the curated base serves untouched; the
+                            # bridge line rides the opening payload; no instance row persists
+                            # (the record rebuilds through the curated path).
+                            ch.pending_bridge = _FALLBACK_BRIDGE
+                        else:
+                            captured["instance_ref"] = res.instance_ref
+                            ch.forged = (res.instance_ref, base.experience_id, res.scenario)
+                        # Honest selection_log: the chosen spec carries the instance ref (the
+                        # gen: seam key) + the base id; the receipt is the base's scored
+                        # candidate when the policy ranked it (candidates, not the deduped
+                        # menu — two territories can share a curated ledger_ref), else the top.
+                        spec_src, receipt = next(
+                            ((s, r) for s, r in proposal.candidates if s.experience_id == eid),
+                            (top_spec, top_rcpt),
+                        )
+                        spec = spec_src.model_copy(
+                            update={"ledger_ref": res.instance_ref, "experience_id": eid}
+                        )
+                        return Selection(
+                            proposed_receipt=top_rcpt,
+                            chosen_spec=spec,
+                            chosen_receipt=receipt,
+                            outcome=Outcome.accepted,  # she authored the ask
+                        )
+
+                    # Same-world Continue (§2c): a queued target territory + a persisted world
+                    # skip the front door — straight to the forge; the opening say is the boot's
+                    # first emission.
+                    with self._lock:
+                        target = self._continue_target.pop(session_id, None)
+                    world = self._store.read_world(sit) if sit is not None else None
+                    if target is not None and world is not None:
+                        return forge_selection(target, world)
+
+                    # THE FRONT DOOR (§2a/§2g): the static ask + the small doors, one say.
+                    ch.from_worker.put(
+                        (
+                            "say",
+                            {
+                                "text": _FRONTDOOR_ASK,
+                                "frontdoor": True,
+                                "menu": {"problems": labels, "refs": refs},
+                                "theme": theme,
+                            },
+                        )
+                    )
+                    value = ch.to_worker.get()
+                    if value is _ABANDON:
+                        raise _Abandoned()
+                    if isinstance(value, int):
+                        return menu_selection(value)  # today's curated path, unchanged
+                    situation = value
+                    if sit is not None:
+                        # BEFORE forging (P1/§2g): the world persists even if the forge falls
+                        # back or the process dies mid-map — mid-front-door is a durable state.
+                        self._store.write_world(sit, situation, now)
+                    territories = [
+                        (e.experience_id, load_territory_text(e.experience_id)) for e in open_exps
+                    ]
+                    known = {eid for eid, _ in territories}
+                    tmap = model.map_territories(situation, territories)
+                    ranked = [eid for eid in tmap.ranked if eid in known]
+                    if not ranked:  # a hallucinated ranking cannot pick the door (voice parity)
+                        ranked = [eid for eid, _ in territories]
+                    eid = ranked[0]
+                    ch.mapped_rank = ranked  # banked registry-side at the next dequeue (§2c)
+                    if tmap.confidence == "low":
+                        # Honest fit (§2a): her situation stays the world; no silent stretching.
+                        desc = " ".join(load_territory_text(eid).split()).rstrip(".")
+                        ch.from_worker.put(("say", {"text": _HONEST_FIT.format(desc=desc)}))
+                        value = ch.to_worker.get()
+                        if value is _ABANDON:
+                            raise _Abandoned()
+                        if isinstance(value, int):
+                            return menu_selection(value)
+                        # any text proceeds with the MAPPED territory (branch kept simple)
+                    base = next(e for e in open_exps if e.experience_id == eid)
+                    sel = forge_selection(eid, situation)
+                    if ch.pending_bridge is None:
+                        # The heard-you beat (§2a, gated per D9): the mapper's reflection is
+                        # learner-facing text from a frame-aware call — screened before it
+                        # rides; the static bridge on refusal/empty/leak.
+                        reflection = tmap.reflection.strip()
+                        ch.pending_bridge = (
+                            reflection
+                            if reflection and voice.egress_safe_reply(model, base, reflection)
+                            else _STATIC_BRIDGE
+                        )
+                    return sel
 
                 def present(exp):
                     # The Concierge authors every visible turn. Opening = scenario verbatim + the
@@ -190,9 +364,15 @@ class SessionRegistry:
                     # queue put orders this write before the registry's read — spec §2c).
                     ch.inflight_exp = (exp.experience_id, exp.ledger_ref)
                     role_theme = voice.resolve_presentation(posture, exp)["visual"]
-                    ch.from_worker.put(
-                        ("say", {"text": voice.opening(model, exp, posture), "theme": role_theme})
-                    )
+                    if exp.ledger_ref.startswith("gen:"):
+                        # A forged experience's scenario IS the opening (spec §2b/M6): authored
+                        # in opening voice and already gated by the forge — a second
+                        # concierge_open pass would re-author screened content. Verbatim; the
+                        # bridge/seam ride per _persist_emit.
+                        opening_text = exp.prompt
+                    else:
+                        opening_text = voice.opening(model, exp, posture)
+                    ch.from_worker.put(("say", {"text": opening_text, "theme": role_theme}))
                     recent: list[tuple[str, str]] = []
                     nonsubstantive = 0
                     while True:
@@ -268,6 +448,10 @@ class SessionRegistry:
                         "model": model,
                         "posture": posture,
                         "exp": captured["exp"],
+                        # Instance-grain identity (§2f/M2): the forged instance ref when this
+                        # segment was forged (decide set it; fallback/menu segments carry the
+                        # curated ref) — what _serialize_record persists for rebuild fidelity.
+                        "ledger_ref": captured.get("instance_ref") or captured["exp"].ledger_ref,
                         "recent": captured["recent"],
                         "stop_reason": assessment.stop_reason.value,
                         "terrain": project_terrain(state, now).learner_view(),
@@ -313,6 +497,10 @@ class SessionRegistry:
             self._step_end(session_id)
         if tag == "menu":
             self._cache_menu(session_id, ch, data)
+        elif tag == "say" and isinstance(data.get("menu"), dict):
+            # The front door embeds the small doors (§2a): cache + nonce-stamp them exactly
+            # like a bare menu so choose()/menu_index answer the same protocol.
+            self._cache_menu(session_id, ch, data["menu"])
         self._persist_emit(session_id, ch, tag, data)
         if tag == "done":
             self._on_done(session_id, ch, data)
@@ -383,7 +571,16 @@ class SessionRegistry:
                 self._end_sitting(session_id)  # idempotent; clears any same-process maps
                 row = None
         if row is None:
-            return self.start(session_id, now=now)
+            tag, data = self.start(session_id, now=now)
+            if tag == "say" and data.get("frontdoor"):
+                # The return visit is not amnesiac (§2f review P10): one muted line above the
+                # ask, counted from the all-time converged log (L5 refines the region count).
+                rows = self._store.converged_log()
+                if rows:
+                    n = len(rows)
+                    m = len({r["experience_id"] for r in rows if r["experience_id"]})
+                    data["returning"] = f"Your world so far: {n} houses, {m} regions alight."
+            return (tag, data)
         return self._resume(session_id, row, now)
 
     def _resume(self, session_id: str, row: dict, now: datetime) -> tuple[str, dict]:
@@ -398,21 +595,25 @@ class SessionRegistry:
         ch = self._ch.get(session_id)
         honesty = ""
         menu_block = None
+        frontdoor_block = None
 
         if ch is not None and not ch.terminal:
             # States 1–3 (same process, live worker): queues intact — nothing restarts.
             rec = self._last_record.get(session_id)
             mode = "converse" if ch.record is not None else "engine"
             if ch.inflight_exp is None and ch.record is None and ch.last_menu:
-                # State 3: parked at the picker — re-derive from the live channel (same nonce:
-                # it is the same menu; the reloaded tab must be able to answer it).
+                # State 3: parked at the front door (the loop that holds the doors) —
+                # re-derive from the live channel (same nonce: it is the same pending menu;
+                # the reloaded tab must be able to answer it). The static ask re-serves over
+                # her visible turns (§2g's mid-front-door state, same-process face).
                 menu_block = {
                     "problems": list(ch.last_menu),
                     "nonce": self._menu_nonce.get(session_id, 0),
                 }
+                frontdoor_block = {"text": _FRONTDOOR_ASK, "menu": menu_block}
                 mode = "engine"
         else:
-            # States 4–7: terminal channel (done/error) or a different process entirely.
+            # States 4–8: terminal channel (done/error) or a different process entirely.
             rec = self._rebuild(session_id)
             inflight = st["inflight"]
             lost = inflight is not None
@@ -427,13 +628,19 @@ class SessionRegistry:
                 )
             mode = "converse" if rec is not None else "engine"
             if rec is None:
-                # Nothing landed: embed a fresh way forward (states 6-no-record / 7) — the
-                # composer must never dead-end (the D1/D2-class brick).
+                # Nothing landed: embed a fresh way forward (states 6-no-record / 7, and the
+                # NEW state 8 — mid-front-door across a restart: a world row may exist, no
+                # inflight, no record; the fresh boot re-serves the static ask over her
+                # visible turns, honestly). The composer must never dead-end.
                 tag, data = self.start(session_id, now=now)
                 if tag == "error":
                     return (tag, data)
-                if tag == "menu":
-                    menu_block = {"problems": data["problems"], "nonce": data.get("nonce", 0)}
+                if tag == "say" and data.get("frontdoor"):
+                    menu_block = {
+                        "problems": data["menu"]["problems"],
+                        "nonce": data["menu"].get("nonce", 0),
+                    }
+                    frontdoor_block = {"text": data["text"], "menu": menu_block}
 
         rec = self._last_record.get(session_id)
         end_visible = rec is not None
@@ -448,6 +655,11 @@ class SessionRegistry:
             self._next_pick[session_id] = pick[0]
             self._next_pick_title[session_id] = pick[1]
             next_title = pick[1]
+        if rec is not None and self._store.read_world(sit) is not None:
+            # A world sitting's Continue is subtitled with the NEXT territory's description
+            # (§2c review P4) — recomputed here; the window may have moved while we were away.
+            target = self._next_territory(session_id, now)
+            next_title = _territory_subtitle(target) if target else ""
         payload = {
             "turns": turns,
             "next_title": next_title,
@@ -458,6 +670,8 @@ class SessionRegistry:
         }
         if menu_block is not None:
             payload["menu"] = menu_block
+        if frontdoor_block is not None:
+            payload["frontdoor"] = frontdoor_block
         return ("resume", payload)
 
     def _rebuild(self, session_id: str) -> dict | None:
@@ -482,10 +696,25 @@ class SessionRegistry:
                 )
             except Exception:
                 exp = None  # content library unreadable: degrade, don't die
+            ser_ref = ser.get("ledger_ref", "") or ""
+            if exp is not None and ser_ref.startswith("gen:"):
+                # Rebuild fidelity (§2f review M2): a forged segment rebuilds over the
+                # GENERATED scenario — post-restart converse/close must never author about the
+                # curated prompt beneath her generated conversation. A missing instance row
+                # degrades to statics (exp=None), matching every other rebuild failure.
+                row = self._store.read_generated_problem(ser_ref)
+                exp = (
+                    None
+                    if row is None
+                    else exp.model_copy(
+                        update={"prompt": row["scenario"], "ledger_ref": ser_ref, "scene": None}
+                    )
+                )
             rec = {
                 "model": self._model_factory(),
                 "posture": ser.get("posture"),
                 "exp": exp,
+                "ledger_ref": ser_ref or (exp.ledger_ref if exp is not None else ""),
                 "recent": [tuple(t) for t in ser.get("recent", [])],
                 "stop_reason": ser.get("stop_reason", "converged"),
                 "terrain": ser.get("terrain", []),
@@ -497,16 +726,47 @@ class SessionRegistry:
         """Write-through at the PROJECTION layer (spec §2b): only what the client renders is
         persisted — vera text for says (menus, errors, and raw registry data never land; error
         text can carry frame codes, L-14). The pending seam is consumed by the next say (the
-        opening of a continued segment) and rides the response for the shell to render."""
+        opening of a continued segment) and rides the response for the shell to render; the
+        pending bridge (heard-you / fallback) rides the forged opening the same way. The
+        worker-set channel attributes consumed here (mapped_rank, forged, pending_bridge,
+        inflight_exp) are ordered before this read by the queue put."""
         sit = self._sitting_id.get(session_id)
         if sit is None:
             return
         now = datetime.now(timezone.utc)
+        if tag == "say" and data.get("frontdoor"):
+            # The front door is signage + doors. A continue-boot's ask is INTERNAL (the boot
+            # auto-picks past it; the user never sees it): nothing persists and a pending seam
+            # survives to the opening say. A RENDERED front door persists the ask and CLEARS
+            # any pending seam (§2g: the seam attaches to the forged opening; a Continue that
+            # re-enters the front door clears it).
+            if session_id in self._frontdoor_swallow:
+                return
+            self._seam_pending.pop(session_id, None)
+            self._store.append_turn(sit, "vera", {"text": data["text"]}, now)
+            if data.get("theme"):
+                self._store.write_state(sit, theme=data["theme"])
+            return
         if tag == "say":
+            if ch.mapped_rank is not None:
+                with self._lock:
+                    self._territory_rank[session_id] = list(ch.mapped_rank)
+                ch.mapped_rank = None
             seam = self._seam_pending.pop(session_id, None)
             if seam:
                 self._store.append_turn(sit, "seam", {"text": seam}, now)
                 data["seam"] = seam
+            if ch.pending_bridge:
+                bridge = ch.pending_bridge
+                ch.pending_bridge = None
+                self._store.append_turn(sit, "bridge", {"text": bridge}, now)
+                data["bridge"] = bridge
+            if ch.forged is not None:
+                # The instance row (§2f): persisted at the dequeue layer, before the opening
+                # turn lands — the rebuild key exists the moment the segment is visible.
+                ref, eid, scenario = ch.forged
+                ch.forged = None
+                self._store.add_generated_problem(ref, sit, eid, scenario, now)
             if (
                 ch.inflight_exp is not None
                 and self._inflight_synced.get(session_id) != ch.inflight_exp
@@ -527,6 +787,10 @@ class SessionRegistry:
         # A pending seam must die with the errored segment (batch-review C5) — otherwise a stale
         # reopen line renders (and durably persists) on a completely unrelated later door.
         self._seam_pending.pop(session_id, None)
+        # A continue-target queued for a worker that died before decide() consumed it must not
+        # leak into a later boot (it would silently skip that boot's front door).
+        with self._lock:
+            self._continue_target.pop(session_id, None)
 
     def _on_done(self, session_id: str, ch: _Channel, data: dict) -> None:
         # Sitting bookkeeping (MF-1): bank the converged ref; the offered next door is the
@@ -535,33 +799,65 @@ class SessionRegistry:
         # policy alone cannot rotate a just-worked item away; the guard lives HERE, engine untouched).
         now = datetime.now(timezone.utc)
         sit = self._sitting_id.get(session_id)
+        world = self._store.read_world(sit) if sit is not None else None
         if ch.record is not None:
+            # Bounded difficulty (§2e): one step per converged move, snap back one step on any
+            # non-converged stop. Stepped BEFORE this convergence is logged so a derive-on-miss
+            # (restart) sees the same pre-landing history the in-memory walk saw.
+            lvl = self._level_idx.get(session_id)
+            if lvl is None:
+                lvl = self._derive_level_idx(session_id)
+            if ch.record.get("stop_reason") == "converged":
+                lvl = min(lvl + 1, len(LEVELS) - 1)
+            else:
+                lvl = max(lvl - 1, 0)
+            self._level_idx[session_id] = lvl
             self._last_record[session_id] = ch.record
+            # Instance-grain identity (§1): forged segments bank/log their gen:{sitting}:{n}
+            # ref + the territory's experience_id (the window/houses key); curated segments
+            # carry their curated ref, and logging their experience_id windows the SAME
+            # territory a forge over that rubric would (the five doors are the five territories).
+            rec_ref = ch.record.get("ledger_ref") or ch.record["exp"].ledger_ref
             # F1: the dedupe banks CONVERGED refs ONLY — a plateaued/budget/errored problem was not
             # built into a house and may legitimately be re-offered (spec §6).
             if ch.record.get("stop_reason") == "converged":
-                self._sitting_done.setdefault(session_id, set()).add(ch.record["exp"].ledger_ref)
+                self._sitting_done.setdefault(session_id, set()).add(rec_ref)
                 if sit is not None:
-                    self._store.log_converged(sit, ch.record["exp"].ledger_ref, now)
+                    self._store.log_converged(sit, rec_ref, now, ch.record["exp"].experience_id)
             if sit is not None:
                 # The landed record + cleared inflight marker, one honest boundary (spec §2b).
                 self._store.write_state(sit, record=_serialize_record(ch.record), inflight=None)
                 self._inflight_synced[session_id] = None
-        # The guard window: this sitting's converged refs UNION anything converged within the
-        # rolling 24h across sittings/processes (spec §2e; the union keeps :memory: registries —
-        # whose durable log is inert — on today's behavior).
-        done_refs = self._sitting_done.get(session_id, set()) | self._store.converged_within(now)
-        pick = next(((r, t) for r, t in ch.next_menu if r not in done_refs), None)
-        self._next_pick[session_id] = pick[0] if pick else None
-        self._next_pick_title[session_id] = pick[1] if pick else ""
-        data["next_title"] = pick[1] if pick else ""
+        if world is not None:
+            # The living sitting's Continue (§2c): the next TERRITORY, subtitled with its
+            # curated description (P4). No ref pick persists — the target is recomputed at
+            # continue time against the live window; all-windowed → empty title (the informed
+            # re-serve owns that state).
+            target = self._next_territory(session_id, now)
+            subtitle = _territory_subtitle(target) if target else ""
+            self._next_pick[session_id] = None
+            self._next_pick_title[session_id] = subtitle
+            data["next_title"] = subtitle
+            if sit is not None:
+                self._store.write_state(sit, next_pick=None)
+        else:
+            # The guard window: this sitting's converged refs UNION anything converged within the
+            # rolling 24h across sittings/processes (spec §2e; the union keeps :memory: registries —
+            # whose durable log is inert — on today's behavior).
+            done_refs = self._sitting_done.get(session_id, set()) | self._store.converged_within(
+                now
+            )
+            pick = next(((r, t) for r, t in ch.next_menu if r not in done_refs), None)
+            self._next_pick[session_id] = pick[0] if pick else None
+            self._next_pick_title[session_id] = pick[1] if pick else ""
+            data["next_title"] = pick[1] if pick else ""
+            if sit is not None:
+                self._store.write_state(sit, next_pick=pick if pick else None)
         # A landing supersedes any restart-lost context: the tip of the sitting is this record.
         self._lost_ref.pop(session_id, None)
         self._lost_exp_id.pop(session_id, None)
-        if sit is not None:
-            self._store.write_state(sit, next_pick=pick if pick else None)
-            if data.get("landing"):
-                self._store.append_turn(sit, "landing", {"text": data["landing"]}, now)
+        if sit is not None and data.get("landing"):
+            self._store.append_turn(sit, "landing", {"text": data["landing"]}, now)
 
     def step(self, session_id: str, value) -> tuple[str, dict]:
         ch = self._ch.get(session_id)
@@ -584,6 +880,8 @@ class SessionRegistry:
             self._step_end(session_id)
         if tag == "menu":
             self._cache_menu(session_id, ch, data)
+        elif tag == "say" and isinstance(data.get("menu"), dict):
+            self._cache_menu(session_id, ch, data["menu"])  # embedded doors (front door)
         self._persist_emit(session_id, ch, tag, data)
         if tag == "done":
             self._on_done(session_id, ch, data)
@@ -657,11 +955,17 @@ class SessionRegistry:
         if tag in ("done", "error"):
             ch.terminal = True
 
-    def continue_session(self, session_id: str, menu: bool = False) -> tuple[str, dict]:
-        """Chained sittings: start the NEXT bounded session in the same thread. One-click path
-        auto-picks the door the button NAMED (the guarded next pick); menu=True returns the inline
-        picker instead. Idempotent per converged segment (MF-6); reaps a live prior worker (MF-4);
-        an absent pick returns the MENU, never a silent door-0 (MF-3)."""
+    def continue_session(
+        self, session_id: str, menu: bool = False, work_anyway: bool = False
+    ) -> tuple[str, dict]:
+        """Chained sittings: start the NEXT bounded session in the same thread. On a WORLD
+        sitting (living sitting §2c) the one-click path forges the next territory over the same
+        world (no picker, no front door); all-windowed serves the informed re-serve — a
+        question, never a false door — and work_anyway=True honors its first choice on the
+        least-recent territory. On a curated sitting the one-click path auto-picks the door the
+        button NAMED (the guarded next pick); menu=True re-enters the front door (doors +
+        composer). Idempotent per converged segment (MF-6); reaps a live prior worker (MF-4);
+        an absent pick returns the front door, never a silent door-0 (MF-3)."""
         self._drain(session_id)
         with self._lock:  # M1: atomic check-and-set (FastAPI threadpool can race two POSTs)
             rec = self._last_record.get(session_id)
@@ -673,44 +977,86 @@ class SessionRegistry:
         old_ch = self._ch.get(session_id)
         if old_ch is not None and not old_ch.terminal:
             old_ch.to_worker.put(_ABANDON)  # reap the parked mid-segment worker
+        now = datetime.now(timezone.utc)
+        sit = self._sitting_id.get(session_id)
+        world = self._store.read_world(sit) if sit is not None else None
+
+        if world is not None and not menu:
+            # The living sitting's forge path (§2c): target the next territory; the boot's
+            # first emission is the forged opening say (decide skips the front door).
+            target = self._next_territory(session_id, now)
+            if target is None and work_anyway:
+                target = self._least_recent_territory(session_id, now)
+            if target is None:
+                # Informed re-serve (P3): a QUESTION, not a segment — the continuation is not
+                # consumed, so both of its answers (work_anyway / tomorrow) stay available.
+                with self._lock:
+                    rec.pop("continued", None)
+                return ("reserve", {"copy": _RESERVE_COPY, "choices": list(_RESERVE_CHOICES)})
+            # Reopen honesty keys on the TERRITORY (review M8): a forged lost segment's gen:
+            # ref never equals a menu ref, but its experience_id names the same pressure.
+            self._seam_pending[session_id] = (
+                _REOPEN_SEAM if target == self._lost_exp_id.get(session_id) else _SEAM_TEXT
+            )
+            with self._lock:
+                self._continue_target[session_id] = target
+            if sit is not None:
+                self._store.append_turn(
+                    sit, "muted", {"text": f"Continue → {_territory_subtitle(target)}"}, now
+                )
+            self._step_begin(session_id)
+            try:
+                return self.start(session_id)
+            finally:
+                self._step_end(session_id)
+                with self._lock:  # decide pops it; belt-and-suspenders against an early error
+                    self._continue_target.pop(session_id, None)
+
         pick = self._next_pick.get(session_id)
-        if pick is not None and pick in self._store.converged_within(datetime.now(timezone.utc)):
+        if pick is not None and pick in self._store.converged_within(now):
             # The persisted pick was converged since it was offered (another sitting, this window):
-            # drop to the menu — MF-3's honest path, never a silent converged re-serve (spec §2e).
+            # drop to the doors — MF-3's honest path, never a silent converged re-serve (spec §2e).
             pick = None
             self._next_pick[session_id] = None
             self._next_pick_title[session_id] = ""
         # Durable sittings: the seam line rides the NEXT opening say (one-click or via the
-        # inline picker); the one-click marker mirrors the button the user pressed (spec §2b).
+        # front-door picker; a RENDERED front door clears it per §2g); the one-click marker
+        # mirrors the button the user pressed (spec §2b).
         self._seam_pending[session_id] = (
             _REOPEN_SEAM
             if pick is not None and pick == self._lost_ref.get(session_id)
             else _SEAM_TEXT
         )
-        sit = self._sitting_id.get(session_id)
-        if sit is not None and not menu and pick is not None:
-            title = self._next_pick_title.get(session_id, "")
-            self._store.append_turn(
-                sit,
-                "muted",
-                {"text": f"Continue → {title}" if title else "Continue"},
-                datetime.now(timezone.utc),
-            )
+        if not menu and pick is not None:
+            if sit is not None:
+                title = self._next_pick_title.get(session_id, "")
+                self._store.append_turn(
+                    sit, "muted", {"text": f"Continue → {title}" if title else "Continue"}, now
+                )
+            # The boot's front-door emission is INTERNAL on the auto-pick path: the user never
+            # sees the ask, so it must not persist (a swallowed ask in the transcript would be
+            # a fabricated turn) and the seam must survive to the opening say.
+            self._frontdoor_swallow.add(session_id)
         # The whole boot window counts as in-flight (batch-review C4): a concurrent close must not
         # pill the NEW channel in the gap between start()'s dequeue and the auto-pick step — the
         # pill would be consumed as the decide input and the step would block forever.
         self._step_begin(session_id)
         try:
             tag, data = self.start(session_id)
-            if tag != "menu" or menu or pick is None:
+            if tag != "say" or not data.get("frontdoor") or menu or pick is None:
                 return (tag, data)
             try:
                 idx = self.menu_index(session_id, pick)
             except ValueError:
-                return (tag, data)  # the offered door vanished: show the doors honestly (MF-3)
+                # The offered door vanished: show the doors honestly (MF-3). This front door
+                # WAS swallowed at the dequeue (edge: its ask is unpersisted); the pending
+                # seam must not leak onto an unrelated later say.
+                self._seam_pending.pop(session_id, None)
+                return (tag, data)
             return self.step(session_id, idx)
         finally:
             self._step_end(session_id)
+            self._frontdoor_swallow.discard(session_id)
 
     def menu_index(self, session_id: str, ledger_ref: str) -> int:
         return self._ch[session_id].last_menu_refs.index(ledger_ref)
@@ -806,10 +1152,176 @@ class SessionRegistry:
             # Degraded rebuild: static close + the persisted village — never an unscreened author.
             result = ("close", {"close": _STATIC_SITTING_CLOSE, "terrain": rec["terrain"]})
         else:
-            close_text = voice.close(rec["model"], rec["exp"], rec["recent"], rec["posture"])
+            sit = self._sitting_id.get(session_id)
+            world = self._store.read_world(sit) if sit is not None else None
+            if world is not None:
+                # The sitting-level close (§2f): the world's story over every landed segment,
+                # ONE union egress screen over the sitting's territories' moves (M13).
+                close_text = voice.sitting_close(
+                    rec["model"],
+                    world,
+                    self._sitting_segments(sit),
+                    self._sitting_exps(sit, rec),
+                    rec["posture"],
+                )
+            else:
+                close_text = voice.close(rec["model"], rec["exp"], rec["recent"], rec["posture"])
             result = ("close", {"close": close_text, "terrain": rec["terrain"]})
         self._end_sitting(session_id)
         return result
+
+    # ---- Living-sitting helpers (spec §2c/§2e/§2f): durable-history readers ------------------
+
+    def _positions(self, sit: str | None) -> list[str]:
+        """Her committed positions for the forge brief (§2b review D3): the final substantive
+        STUDENT turn per landed segment — the last `you` turn before each landing; never any
+        Vera-authored text. Empty by construction at a sitting's first door."""
+        if sit is None:
+            return []
+        out: list[str] = []
+        last_you: str | None = None
+        for t in self._store.turns(sit):
+            if t["kind"] == "you":
+                last_you = t["payload"].get("text", "")
+            elif t["kind"] == "landing" and last_you:
+                out.append(last_you)
+                last_you = None
+        return out
+
+    def _engaged_frames(self, sit: str | None) -> list[str]:
+        """Frame codes engaged this sitting (§2b review D1's union screen): the frames of every
+        territory CONVERGED this sitting, from the durable log — server-side only; the brief
+        never sees them (the forge resolves details behind its own gate)."""
+        if sit is None:
+            return []
+        eids = {
+            r["experience_id"]
+            for r in self._store.converged_log()
+            if r["sitting_id"] == sit and r["experience_id"]
+        }
+        if not eids:
+            return []
+        codes: list[str] = []
+        for e in load_library():
+            if e.rubric is not None and e.experience_id in eids:
+                for f in e.rubric.frames:
+                    if f.frame_code not in codes:
+                        codes.append(f.frame_code)
+        return codes
+
+    def _level(self, session_id: str) -> str:
+        """The bounded difficulty enum (§2e review P8): base/firm/tight, one step per move,
+        snap-back on any non-converged stop, base for a new world. In-memory walk, derived
+        from durable history on a miss (restart)."""
+        with self._lock:
+            idx = self._level_idx.get(session_id)
+        if idx is None:
+            idx = self._derive_level_idx(session_id)
+            with self._lock:
+                self._level_idx[session_id] = idx
+        return LEVELS[idx]
+
+    def _derive_level_idx(self, session_id: str) -> int:
+        """Deterministic from the durable rows: min(convergences this sitting, top), one step
+        back if the last persisted record stopped non-converged. (Consecutive earlier
+        non-converged stops beyond the last record are not reconstructable — the log holds
+        convergences only; documented approximation, coarse by design.)"""
+        sit = self._sitting_id.get(session_id)
+        if sit is None:
+            return 0
+        converged = sum(1 for r in self._store.converged_log() if r["sitting_id"] == sit)
+        idx = min(converged, len(LEVELS) - 1)
+        ser = self._store.read_state(sit)["record"]
+        if ser is not None and ser.get("stop_reason") != "converged":
+            idx = max(idx - 1, 0)
+        return idx
+
+    def _next_instance_n(self, session_id: str, sit: str | None) -> int:
+        """The forge instance counter, seeded PAST the store's max persisted n so a restarted
+        process can never upsert-overwrite a prior instance row (§2f/M2)."""
+        with self._lock:
+            n = self._forge_n.get(session_id)
+            if n is None:
+                n = self._store.max_generated_n(sit) if sit is not None else 0
+            n += 1
+            self._forge_n[session_id] = n
+            return n
+
+    def _territory_order(self, session_id: str) -> list[str]:
+        """Continue targeting order (§2c review M10, rank-based): the mapper's ranking where we
+        have it, else the policy's post-session proposal order (next_menu), completed by the
+        library order so every territory is always reachable."""
+        with self._lock:
+            rank = list(self._territory_rank.get(session_id, ()))
+        open_exps = [e for e in load_library() if e.regime is Regime.open_ended]
+        if not rank:
+            ch = self._ch.get(session_id)
+            if ch is not None and ch.next_menu:
+                by_ref: dict[str, list[str]] = {}
+                for e in open_exps:
+                    by_ref.setdefault(e.ledger_ref, []).append(e.experience_id)
+                for ref, _title in ch.next_menu:
+                    for eid in by_ref.get(ref, []):
+                        if eid not in rank:
+                            rank.append(eid)
+        return rank + [e.experience_id for e in open_exps if e.experience_id not in rank]
+
+    def _next_territory(self, session_id: str, now: datetime) -> str | None:
+        """The highest-ranked territory outside the rolling window (§2c review M3: within a
+        sitting the policy clock is frozen — the window is the ONLY rotation). None when every
+        territory is windowed (the informed re-serve owns that state)."""
+        windowed = self._store.territories_within(now)
+        return next((eid for eid in self._territory_order(session_id) if eid not in windowed), None)
+
+    def _least_recent_territory(self, session_id: str, now: datetime) -> str:
+        """work-anyway's target (§2c review P3): the territory converged longest ago — the
+        least echo. Falls back to the targeting order's head if the log carries no territories."""
+        last: dict[str, str] = {}
+        for r in self._store.converged_log():  # oldest-first: the last write is the latest
+            if r["experience_id"]:
+                last[r["experience_id"]] = r["converged_at"]
+        order = self._territory_order(session_id)
+        known = [eid for eid in order if eid in last]
+        if not known:
+            return order[0]
+        return min(known, key=lambda eid: last[eid])
+
+    def _sitting_segments(self, sit: str | None) -> list[list[tuple[str, str]]]:
+        """The sitting-close author's input (§2f): kind-filtered you/vera turns per segment,
+        split on landing turns; a non-empty tail (post-landing converse) rides as a final
+        segment — it is part of the story."""
+        if sit is None:
+            return []
+        segments: list[list[tuple[str, str]]] = []
+        current: list[tuple[str, str]] = []
+        for t in self._store.turns(sit):
+            kind = t["kind"]
+            if kind in ("you", "vera"):
+                current.append((kind, t["payload"].get("text", "")))
+            elif kind == "landing":
+                if current:
+                    segments.append(current)
+                    current = []
+        if current:
+            segments.append(current)
+        return segments
+
+    def _sitting_exps(self, sit: str | None, rec: dict) -> list:
+        """The union-egress move sources for the sitting close (§2f/M13): every territory
+        converged this sitting plus the record's own experience — curated rubrics, loaded from
+        the library (a forged clone's rubric is byte-equal to its base's)."""
+        eids = set()
+        if sit is not None:
+            eids = {
+                r["experience_id"]
+                for r in self._store.converged_log()
+                if r["sitting_id"] == sit and r["experience_id"]
+            }
+        exps = [e for e in load_library() if e.experience_id in eids]
+        exp = rec.get("exp")
+        if exp is not None and exp.experience_id not in eids:
+            exps.append(exp)
+        return exps
 
     def _end_sitting(self, session_id: str) -> None:
         """The sitting is over: mark it closed (rows retained, L-3) and clear the per-sid state —
@@ -841,3 +1353,11 @@ class SessionRegistry:
         self._inflight_synced.pop(session_id, None)
         self._lost_ref.pop(session_id, None)
         self._lost_exp_id.pop(session_id, None)
+        # Living-sitting state is sitting-scoped: a new world opens at base with a fresh rank
+        # and a fresh instance counter (the sitting id changes, so refs cannot collide anyway).
+        self._territory_rank.pop(session_id, None)
+        self._level_idx.pop(session_id, None)
+        self._forge_n.pop(session_id, None)
+        self._frontdoor_swallow.discard(session_id)
+        with self._lock:
+            self._continue_target.pop(session_id, None)

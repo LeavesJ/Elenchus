@@ -95,6 +95,34 @@ def close(
     return text
 
 
+def sitting_close(
+    model: Model,
+    situation: str,
+    segments: list[list[tuple[str, str]]],
+    exps: list[Experience],
+    posture: str | None = None,
+) -> str:
+    """Author the whole-sitting close (living sitting §2f): the world's story over every landed
+    segment — retrospective, no verdicts (L-4; correctness is never supplied). Egress is ONE
+    batched screen over the UNION of the sitting's territories' moves (D1/M13 — the caller
+    passes the territory experiences; the scale is measured @live before it is trusted). Flat
+    check — a close performs no move — with the safe static close on refusal/empty/leak."""
+    v = resolve_presentation(posture, None)["voice"]
+    text = model.concierge_sitting_close(situation, segments, voice=v)
+    if not text:
+        return _STATIC_CLOSE
+    union: list[str] = []
+    for exp in exps:
+        for move in _moves(exp):
+            if move not in union:
+                union.append(move)
+    if union:
+        valid = range(1, len(union) + 1)
+        if any(i in valid for i in model.screen_moves(union, text).performed):
+            return _STATIC_CLOSE
+    return text
+
+
 _RETRY_STEER = (
     "Your previous attempt restated the problem's mechanism too plainly. Land again without "
     "describing any mechanism or move — point at what THEY said and what it cost them, never at "
