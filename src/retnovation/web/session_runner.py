@@ -597,14 +597,22 @@ class SessionRegistry:
             tag, data = self.start(session_id, now=now)
             if tag == "say" and data.get("frontdoor"):
                 # The return visit is not amnesiac (§2f review P10): one muted line above the
-                # ask, counted from the all-time converged log (L5 refines the region count).
+                # ask. Houses = the all-time converged log; "regions alight" quotes the RENDERED
+                # count of the village she last SAW (the frozen learner_view — batch-review fold:
+                # counting territories here could contradict the close copy). No terrain yet, or
+                # nothing rendered → houses only; a seed-stage world is not "alight".
                 rows = self._store.converged_log()
                 if rows:
                     n = len(rows)
-                    m = len({r["experience_id"] for r in rows if r["experience_id"]})
                     houses = "house" if n == 1 else "houses"
-                    regions = "region" if m == 1 else "regions"
-                    data["returning"] = f"Your world so far: {n} {houses}, {m} {regions} alight."
+                    line = f"Your world so far: {n} {houses}."
+                    terrain = self._store.latest_terrain()
+                    if terrain:
+                        m = sum(1 for r in terrain if r.get("render") == "rendered")
+                        if m:
+                            regions = "region" if m == 1 else "regions"
+                            line = f"Your world so far: {n} {houses}, {m} {regions} alight."
+                    data["returning"] = line
             return (tag, data)
         return self._resume(session_id, row, now)
 

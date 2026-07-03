@@ -1412,10 +1412,27 @@ _REOPEN_SEAM_TEXT = (
 )
 
 
+def _expected_return_line(db: str) -> str:
+    """The invariant, computed the honest way: houses from the converged log; 'regions alight'
+    QUOTES the rendered count of the frozen village the user last saw (never a territory count —
+    batch-review fold: the two can diverge and the line must never contradict the close copy)."""
+    store = SittingStore(db)
+    n = len(store.converged_log())
+    houses = "house" if n == 1 else "houses"
+    line = f"Your world so far: {n} {houses}."
+    terrain = store.latest_terrain()
+    if terrain:
+        m = sum(1 for r in terrain if r.get("render") == "rendered")
+        if m:
+            regions = "region" if m == 1 else "regions"
+            line = f"Your world so far: {n} {houses}, {m} {regions} alight."
+    return line
+
+
 def test_return_visit_line_rides_the_cold_front_door(tmp_path, make_fake):
     """Review P10: a cold start with closed worlds is not amnesiac — one muted line above the
-    ask, counted from the converged log. L4 review F4: both nouns pluralize correctly
-    ("1 house" / "2 houses"; the region count stays singular when both rows share a territory)."""
+    ask. Pinned as the INVARIANT (the line quotes the frozen village + the converged log — it can
+    never contradict the close copy), plus both plural branches ('1 house' / '2 houses')."""
     db = str(tmp_path / "fd-return.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
     _open_world(reg, "s1")
@@ -1425,10 +1442,11 @@ def test_return_visit_line_rides_the_cold_front_door(tmp_path, make_fake):
     reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
     tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
     assert tag == "say" and data.get("frontdoor")
-    assert data["returning"] == "Your world so far: 1 house, 1 region alight."
+    assert data["returning"] == _expected_return_line(db)
+    assert data["returning"].startswith("Your world so far: 1 house")  # singular branch
 
     # A second sitting converges the SAME territory (the free-text map ignores the window):
-    # two houses, one region — the mixed case pins both plural branches at once.
+    # the house count grows; the regions clause keeps quoting the frozen village.
     tag, data = reg2.step("s1", _SITUATION)
     assert tag == "say"
     tag, _ = _drive(reg2, "s1", opening="p2")
@@ -1438,7 +1456,8 @@ def test_return_visit_line_rides_the_cold_front_door(tmp_path, make_fake):
     reg3 = SessionRegistry(db, model_factory=_world_factory(make_fake))
     tag, data = reg3.resume_or_start("s1", now=datetime.now(timezone.utc))
     assert tag == "say" and data.get("frontdoor")
-    assert data["returning"] == "Your world so far: 2 houses, 1 region alight."
+    assert data["returning"] == _expected_return_line(db)
+    assert data["returning"].startswith("Your world so far: 2 houses")  # plural branch
 
 
 def test_menu_marks_a_forge_converged_territory_as_just_worked(tmp_path, make_fake):

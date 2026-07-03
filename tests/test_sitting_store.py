@@ -204,3 +204,40 @@ def test_l3_surfaces_are_inert_on_memory():
     assert st.read_generated_problem("gen:s1:1") is None
     st.log_converged("s1", "gen:s1:1", NOW, experience_id="license_continuity")
     assert st.territories_within(NOW) == set()
+
+
+def test_latest_terrain_quotes_the_most_recent_landed_village(tmp_path):
+    """The return-visit line's regions clause quotes the frozen village the user last SAW —
+    latest_terrain returns the most recently updated sitting's record terrain, skipping
+    record-less sittings, and None when nothing ever landed."""
+    st = _store(tmp_path)
+    assert st.latest_terrain() is None
+    sid1 = st.create_sitting(NOW)
+    st.write_state(
+        sid1,
+        record={
+            "experience_id": "e1",
+            "recent": [],
+            "stop_reason": "converged",
+            "terrain": [{"render": "rendered"}, {"render": "seed"}],
+        },
+    )
+    st.close_sitting(sid1)
+    sid2 = st.create_sitting(NOW + timedelta(hours=1))
+    st.append_turn(
+        sid2, "vera", {"text": "newer sitting, nothing landed yet"}, NOW + timedelta(hours=1)
+    )
+    # sid2 is more recent but has NO record -> the landed village still wins
+    assert st.latest_terrain() == [{"render": "rendered"}, {"render": "seed"}]
+    st.write_state(
+        sid2,
+        record={
+            "experience_id": "e2",
+            "recent": [],
+            "stop_reason": "converged",
+            "terrain": [{"render": "rendered"}, {"render": "rendered"}],
+        },
+    )
+    st.append_turn(sid2, "you", {"text": "bump freshness"}, NOW + timedelta(hours=2))
+    assert st.latest_terrain() == [{"render": "rendered"}, {"render": "rendered"}]
+    assert SittingStore(":memory:").latest_terrain() is None

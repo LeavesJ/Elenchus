@@ -250,6 +250,26 @@ class SittingStore:
             ).fetchone()
         return None if row is None else {"experience_id": row[0], "scenario": row[1]}
 
+    def latest_terrain(self) -> list | None:
+        """The frozen learner_view from the most recently updated sitting that landed a record —
+        i.e. the exact village the user last SAW at a close. The return-visit line counts its
+        rendered regions so it can never contradict the close copy (batch-review fold: counting
+        territories as 'regions' diverged from the village's frame-component geometry)."""
+        if self._inert:
+            return None
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT st.record_json FROM web_sitting_state st "
+                "JOIN web_sitting s ON s.id = st.sitting_id "
+                "WHERE st.record_json IS NOT NULL ORDER BY s.updated_at DESC"
+            ).fetchall()
+        for (record_j,) in rows:
+            record = json.loads(record_j)
+            terrain = record.get("terrain")
+            if terrain:
+                return terrain
+        return None
+
     def generated_territories(self, sitting_id: str) -> set[str]:
         """Every territory FORGED this sitting, landed or not (batch-review fold: the D1 union
         screens must cover plateaued/errored segments too — their dialogue feeds the brief and
