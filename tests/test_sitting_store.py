@@ -6,6 +6,7 @@ what the shell-only tests rely on.
 """
 
 import json
+import sqlite3
 from datetime import datetime, timedelta, timezone
 
 from retnovation.web.sitting_store import SittingStore
@@ -122,3 +123,84 @@ def test_payloads_survive_json_round_trip_verbatim(tmp_path):
     assert st.turns(sid)[0]["payload"] == {"text": text, "theme": {"accent": "amber"}}
     # stored as JSON, not repr (a reader in another process can parse it)
     assert json.loads(json.dumps(text)) == text
+
+
+# --- Living sitting Task L3: the world, generated problems, territory window (spec §2f/§2c) ---
+
+
+def test_world_round_trip_and_upsert(tmp_path):
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    assert st.read_world(sid) is None  # no world yet
+    st.write_world(sid, "signing a delivery commitment Thursday", NOW)
+    assert st.read_world(sid) == "signing a delivery commitment Thursday"
+    # the world persists and updates in place — one world per sitting, situation may sharpen
+    st.write_world(sid, "the penalty clause is the fight", NOW + timedelta(minutes=5))
+    assert st.read_world(sid) == "the penalty clause is the fight"
+    assert st.read_world("no-such-sitting") is None
+
+
+def test_generated_problem_round_trip(tmp_path):
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.add_generated_problem(f"gen:{sid}:1", sid, "license_continuity", "You signed Thursday…", NOW)
+    got = st.read_generated_problem(f"gen:{sid}:1")
+    assert got == {"experience_id": "license_continuity", "scenario": "You signed Thursday…"}
+    assert st.read_generated_problem("gen:unknown:9") is None  # missing row -> M2's static path
+
+
+def test_territories_within_windows_by_experience_id_across_sittings(tmp_path):
+    st = _store(tmp_path)
+    sid1 = st.create_sitting(NOW)
+    st.log_converged(sid1, f"gen:{sid1}:1", NOW, experience_id="license_continuity")
+    st.close_sitting(sid1)
+    sid2 = st.create_sitting(NOW + timedelta(hours=2))
+    st.log_converged(
+        sid2, f"gen:{sid2}:1", NOW + timedelta(hours=2), experience_id="irreversible_anchor"
+    )
+    read_at = NOW + timedelta(hours=3)
+    # the window spans sittings and keys on the TERRITORY (M3: the only rotation mechanism)
+    assert st.territories_within(read_at) == {"license_continuity", "irreversible_anchor"}
+    # a >24h-old convergence falls out; the ref-keyed window still sees both refs meanwhile
+    assert st.territories_within(NOW + timedelta(hours=25)) == {"irreversible_anchor"}
+    assert st.converged_within(read_at) == {f"gen:{sid1}:1", f"gen:{sid2}:1"}
+    # rows logged without a territory (pre-forge curated path) never enter the territory window
+    st.log_converged(sid2, "veldra:pricing", read_at)
+    assert "" not in st.territories_within(read_at + timedelta(minutes=1))
+    assert st.territories_within(read_at + timedelta(minutes=1)) == {
+        "license_continuity",
+        "irreversible_anchor",
+    }
+
+
+def test_existing_db_gains_the_experience_id_column(tmp_path):
+    # A db created BEFORE the living sitting has web_converged without experience_id; the
+    # defensive ALTER must migrate it and keep the old rows readable.
+    path = tmp_path / "old.db"
+    c = sqlite3.connect(str(path))
+    c.execute(
+        "CREATE TABLE web_converged "
+        "(sitting_id TEXT NOT NULL, ref TEXT NOT NULL, converged_at TEXT NOT NULL)"
+    )
+    c.execute(
+        "INSERT INTO web_converged VALUES ('s0', 'veldra:pricing', ?)",
+        ((NOW - timedelta(hours=1)).isoformat(),),
+    )
+    c.commit()
+    c.close()
+    st = SittingStore(str(path))
+    assert not st.inert
+    st.log_converged("s1", "gen:s1:1", NOW, experience_id="license_continuity")
+    assert st.converged_within(NOW) == {"veldra:pricing", "gen:s1:1"}  # old rows survive
+    assert st.territories_within(NOW) == {"license_continuity"}  # old rows: no territory
+
+
+def test_l3_surfaces_are_inert_on_memory():
+    st = SittingStore(":memory:")
+    assert st.inert
+    st.write_world("s1", "her situation", NOW)
+    assert st.read_world("s1") is None
+    st.add_generated_problem("gen:s1:1", "s1", "license_continuity", "scenario", NOW)
+    assert st.read_generated_problem("gen:s1:1") is None
+    st.log_converged("s1", "gen:s1:1", NOW, experience_id="license_continuity")
+    assert st.territories_within(NOW) == set()

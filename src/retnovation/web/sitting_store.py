@@ -31,7 +31,13 @@ CREATE TABLE IF NOT EXISTS web_sitting_state (
   sitting_id TEXT PRIMARY KEY, record_json TEXT, next_pick_ref TEXT, next_pick_title TEXT,
   inflight_json TEXT, theme_json TEXT);
 CREATE TABLE IF NOT EXISTS web_converged (
-  sitting_id TEXT NOT NULL, ref TEXT NOT NULL, converged_at TEXT NOT NULL);
+  sitting_id TEXT NOT NULL, ref TEXT NOT NULL, converged_at TEXT NOT NULL,
+  experience_id TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS web_world (
+  sitting_id TEXT PRIMARY KEY, situation TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS web_generated_problem (
+  ref TEXT PRIMARY KEY, sitting_id TEXT NOT NULL, experience_id TEXT NOT NULL,
+  scenario TEXT NOT NULL, created_at TEXT NOT NULL);
 """
 
 
@@ -45,6 +51,15 @@ class SittingStore:
             with self._conn() as c:
                 c.execute("PRAGMA journal_mode=WAL")
                 c.executescript(_SCHEMA)
+                # Defensive migration: dbs created before the living sitting lack the column
+                # (the CREATE above carries it, so fresh dbs raise duplicate-column here).
+                try:
+                    c.execute(
+                        "ALTER TABLE web_converged "
+                        "ADD COLUMN experience_id TEXT NOT NULL DEFAULT ''"
+                    )
+                except sqlite3.OperationalError:
+                    pass
         except sqlite3.OperationalError:
             # An unopenable path must not crash the registry at construction — the WORKER surfaces
             # the db error per-session (its build_store fails the same way and emits `error`).
@@ -184,15 +199,69 @@ class SittingStore:
             "theme": None if theme_j is None else json.loads(theme_j),
         }
 
-    # -- converged log (the rolling repeat guard) --------------------------------------------
+    # -- the world (living sitting §2f: one generated world per sitting) ----------------------
 
-    def log_converged(self, sitting_id: str, ref: str, now: datetime) -> None:
+    def write_world(self, sitting_id: str, situation: str, now: datetime) -> None:
+        """Persist the sitting's world (her situation). Upsert: the world survives fallbacks —
+        the NEXT Continue retries the forge on it (§2b) — and outlives restarts (mid-front-door
+        is a durable state, §2g)."""
         if self._inert:
             return
         with self._conn() as c:
             c.execute(
-                "INSERT INTO web_converged (sitting_id, ref, converged_at) VALUES (?, ?, ?)",
-                (sitting_id, ref, now.isoformat()),
+                "INSERT INTO web_world (sitting_id, situation, updated_at) VALUES (?, ?, ?) "
+                "ON CONFLICT(sitting_id) DO UPDATE SET situation=excluded.situation, "
+                "updated_at=excluded.updated_at",
+                (sitting_id, situation, now.isoformat()),
+            )
+
+    def read_world(self, sitting_id: str) -> str | None:
+        if self._inert:
+            return None
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT situation FROM web_world WHERE sitting_id=?", (sitting_id,)
+            ).fetchone()
+        return None if row is None else row[0]
+
+    # -- generated problems (instance grain: gen:{sitting}:{n} — rebuild fidelity, §2f/M2) ----
+
+    def add_generated_problem(
+        self, ref: str, sitting_id: str, experience_id: str, scenario: str, now: datetime
+    ) -> None:
+        if self._inert:
+            return
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO web_generated_problem "
+                "(ref, sitting_id, experience_id, scenario, created_at) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(ref) DO UPDATE SET experience_id=excluded.experience_id, "
+                "scenario=excluded.scenario",  # upsert, never delete (L-3); freshest forge wins
+                (ref, sitting_id, experience_id, scenario, now.isoformat()),
+            )
+
+    def read_generated_problem(self, ref: str) -> dict | None:
+        """The scenario a `gen:` record must rebuild over (M2) — None degrades to statics."""
+        if self._inert:
+            return None
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT experience_id, scenario FROM web_generated_problem WHERE ref=?", (ref,)
+            ).fetchone()
+        return None if row is None else {"experience_id": row[0], "scenario": row[1]}
+
+    # -- converged log (the rolling repeat guard) --------------------------------------------
+
+    def log_converged(
+        self, sitting_id: str, ref: str, now: datetime, experience_id: str = ""
+    ) -> None:
+        if self._inert:
+            return
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO web_converged (sitting_id, ref, converged_at, experience_id) "
+                "VALUES (?, ?, ?, ?)",
+                (sitting_id, ref, now.isoformat(), experience_id),
             )
 
     def converged_within(self, now: datetime, hours: int = 24) -> set[str]:
@@ -205,5 +274,21 @@ class SittingStore:
         with self._conn() as c:
             rows = c.execute(
                 "SELECT DISTINCT ref FROM web_converged WHERE converged_at > ?", (cutoff,)
+            ).fetchall()
+        return {r[0] for r in rows}
+
+    def territories_within(self, now: datetime, hours: int = 24) -> set[str]:
+        """Territories (experience_ids) converged within the rolling window — same clock as
+        converged_within, keyed on the world-independent TERRITORY identity (living sitting
+        §2c/M3: within a sitting the policy clock is frozen; this window is the only rotation).
+        Rows logged without a territory (the pre-forge curated path) never enter it."""
+        if self._inert:
+            return set()
+        cutoff = (now - timedelta(hours=hours)).isoformat()
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT DISTINCT experience_id FROM web_converged "
+                "WHERE converged_at > ? AND experience_id != ''",
+                (cutoff,),
             ).fetchall()
         return {r[0] for r in rows}

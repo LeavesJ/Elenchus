@@ -164,6 +164,15 @@ def _coverage(exp: Experience, target_frames: list[str]) -> int:
 
 
 def select_open_ended(core, state, ledger, corpus, spec, root=None) -> Experience:
+    if spec is not None and spec.ledger_ref.startswith("gen:"):
+        # Living-sitting seam (spec §2b / review M1): a gen: spec pops the forged Experience
+        # the worker registered pre-selection (instance grain, "gen:{sitting}:{n}"). FIRST
+        # branch on purpose — forged specs also carry the base experience_id, and the curated
+        # bypass below would otherwise serve the curated prompt from disk. Late import: forge
+        # imports this module's validate_scene/GateError (a top-level import would cycle).
+        from .forge import forge_registry
+
+        return forge_registry.pop(spec.ledger_ref)
     if spec is not None and spec.experience_id is not None:
         return load_experience(
             spec.experience_id, root

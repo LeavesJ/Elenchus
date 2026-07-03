@@ -1,8 +1,10 @@
-"""Living sitting Tasks L1+L2: wire models, the four model methods, territories, the DF matrix.
+"""Living sitting Tasks L1+L2+L3: wire models, the four model methods, territories, the DF
+matrix, and the forge (gates, regen, honest fallback, registry seam, two-grain identity).
 
 Live behavior of the AnthropicModel methods is @live-only; here we pin the wire shapes,
 the FakeModel constants, the exact signatures later tasks consume verbatim (plan L1), the
-territory descriptions' code teeth, and the pinned decision_frame matrix (plan L2, spec §2a/§2d).
+territory descriptions' code teeth, the pinned decision_frame matrix (plan L2, spec §2a/§2d),
+and the forge's gate order + seam (plan L3, spec §2b).
 """
 
 import inspect
@@ -10,15 +12,24 @@ import re
 
 import pytest
 
+from retnovation import forge
 from retnovation.content_loader import (
     load_denylist,
     load_experience,
     load_library,
     load_territory_text,
 )
-from retnovation.generator import validate_scene
+from retnovation.generator import select_open_ended, validate_scene
 from retnovation.model import AnthropicModel, FakeModel, IntakeClassification, Model
-from retnovation.types import FitCheck, Scene, TerritoryMap
+from retnovation.persistence import Store
+from retnovation.types import (
+    EgressScreen,
+    FitCheck,
+    NextExperienceSpec,
+    Regime,
+    Scene,
+    TerritoryMap,
+)
 from retnovation.web import voice
 
 
@@ -163,3 +174,249 @@ def test_df_matrix_is_pinned_and_the_rule_holds():
             f"{code} is decision_frame on every territory where it appears — "
             "it would lose its unprompted channel entirely (§2d rule)"
         )
+
+
+# --- Task L3: the forge — gates, regen, honest fallback, registry seam (spec §2b) ---
+
+SITUATION = "Signing a delivery commitment Thursday; the penalty clause is the fight."
+POSITIONS = [
+    "I capped the penalty at 2% and told the board why.",
+    "I won't move the ship date.",
+]
+
+# A realistic forged scenario that clears the code gates against license_continuity's rubric:
+# second person, real stakes, ends on the decision ask, no frame/trap code (snake or spaced),
+# no framework/scaffold/wrapper word. FakeModel's constant "[forged scenario]" is deliberately
+# too degenerate to clear the structural gate, so forge tests subclass (the
+# _ConciergeFidelityModel convention the plan names for leak/reject fakes).
+_SCENARIO = (
+    "You signed the delivery agreement on Thursday, and this morning your second-largest "
+    "customer asked for the same penalty terms before Friday's board review. The account team "
+    "wants an answer before the standup, and whatever you give one customer the others will "
+    "hear about. What do you do?"
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_forge_registry():
+    forge.forge_registry.clear()
+    yield
+    forge.forge_registry.clear()
+
+
+class _ForgeFake(FakeModel):
+    """FakeModel whose forge_scenario returns a gate-clearing scenario and records every
+    (brief, steer) call — the spy the brief-purity and steered-regen tests read."""
+
+    def __init__(self):
+        super().__init__(IntakeClassification(frame_states={}, trap_states={}), responses={})
+        self.briefs: list[tuple[str, str]] = []
+
+    def forge_scenario(self, brief, steer=""):
+        self.briefs.append((brief, steer))
+        return _SCENARIO
+
+
+class _LeakScreenModel(_ForgeFake):
+    """screen_moves scripted-pop (plan L3: list-pop scripts — the regen path needs different
+    behavior across attempts). One `performed` list per call; empty script -> clean."""
+
+    def __init__(self, script):
+        super().__init__()
+        self._script = script
+
+    def screen_moves(self, moves, text):
+        performed = self._script.pop(0) if self._script else []
+        return EgressScreen(performed=performed, evidence="(scripted)")
+
+
+class _FitRejectModel(_ForgeFake):
+    """fit_check scripted-pop; empty script -> fits."""
+
+    def __init__(self, script):
+        super().__init__()
+        self._script = script
+
+    def fit_check(self, scenario, requirements):
+        return self._script.pop(0) if self._script else FitCheck(fits=True, reason="")
+
+
+class _MovesSpyModel(_ForgeFake):
+    """Records the move list handed to the union egress screen."""
+
+    def __init__(self):
+        super().__init__()
+        self.moves = None
+        self.screened_text = None
+
+    def screen_moves(self, moves, text):
+        self.moves = list(moves)
+        self.screened_text = text
+        return EgressScreen(performed=[], evidence="(spy)")
+
+
+def _engine_store(tmp_path):
+    return Store(tmp_path / "engine.db")
+
+
+def _forge(model, store, *, sid="s1", n=1, level="base", engaged=None, base=None):
+    base = base or load_experience("license_continuity")
+    return forge.forge_experience(
+        base, sid, n, SITUATION, POSITIONS, engaged or [], level, model, store
+    )
+
+
+def test_forge_happy_path_world_grain_scene_none_rubric_byte_equal(tmp_path):
+    base = load_experience("license_continuity")
+    res = _forge(_ForgeFake(), _engine_store(tmp_path))
+    assert isinstance(res, forge.ForgeResult)
+    assert res.fallback is False
+    assert res.instance_ref == "gen:s1:1"  # instance grain — registry key + store identity
+    exp = res.experience
+    assert exp.ledger_ref == "gen:s1"  # WORLD grain — what the engine grades/banks
+    assert exp.scene is None  # a cloned curated scene would feed the wrong situation (D5)
+    assert exp.experience_id == base.experience_id
+    assert exp.prompt == _SCENARIO and res.scenario == _SCENARIO
+    forged_dump, base_dump = exp.model_dump(), base.model_dump()
+    for key in ("prompt", "ledger_ref", "scene"):
+        forged_dump.pop(key)
+        base_dump.pop(key)
+    assert forged_dump == base_dump  # rubric (and everything else) byte-equal to the base
+
+
+def test_forge_registry_pop_via_select_open_ended(tmp_path):
+    res = _forge(_ForgeFake(), _engine_store(tmp_path))
+    spec = NextExperienceSpec(
+        target_frames=[],
+        ledger_ref=res.instance_ref,
+        regime=Regime.open_ended,
+        experience_id="license_continuity",  # forged specs carry the base id — the gen: branch
+    )  # must fire FIRST or the curated bypass would load the curated prompt from disk
+    exp = select_open_ended(None, None, [], [], spec)
+    assert exp is res.experience and exp.prompt == _SCENARIO
+    assert res.instance_ref not in forge.forge_registry  # pop, not read — consumed once
+
+
+def test_leak_flagged_once_regens_with_steer_then_serves(tmp_path):
+    m = _LeakScreenModel([[1], []])
+    res = _forge(m, _engine_store(tmp_path))
+    assert res.fallback is False and res.experience.prompt == _SCENARIO
+    assert len(m.briefs) == 2  # one generation + ONE steered regen
+    assert m.briefs[0][1] == ""
+    assert m.briefs[1][1] != ""  # steer = the failing gate's reason
+    assert m.briefs[1][0] == m.briefs[0][0]  # same brief; the steer rides separately
+
+
+def test_leak_flagged_twice_falls_back_to_the_curated_base(tmp_path):
+    base = load_experience("license_continuity")
+    m = _LeakScreenModel([[1], [2]])
+    res = _forge(m, _engine_store(tmp_path))
+    assert res.fallback is True
+    assert res.experience.prompt == base.prompt  # the CURATED base, untouched
+    assert res.experience.ledger_ref == base.ledger_ref
+    assert res.scenario == base.prompt
+    assert len(m.briefs) == 2  # exactly one regen, then the honest fallback — never a loop
+
+
+def test_fit_reject_steers_with_the_reason_then_serves(tmp_path):
+    m = _FitRejectModel([FitCheck(fits=False, reason="the scenario establishes no deadline")])
+    res = _forge(m, _engine_store(tmp_path))
+    assert res.fallback is False
+    assert m.briefs[1][1] == "the scenario establishes no deadline"  # the reason IS the steer
+
+
+def test_fit_reject_twice_falls_back(tmp_path):
+    base = load_experience("license_continuity")
+    m = _FitRejectModel(
+        [
+            FitCheck(fits=False, reason="no deadline"),
+            FitCheck(fits=False, reason="still no deadline"),
+        ]
+    )
+    res = _forge(m, _engine_store(tmp_path))
+    assert res.fallback is True and res.experience.prompt == base.prompt
+
+
+def test_hallucinated_screen_index_does_not_gate(tmp_path):
+    # Parity with voice._performed: out-of-range indices from the judge are dropped.
+    m = _LeakScreenModel([[99]])
+    res = _forge(m, _engine_store(tmp_path))
+    assert res.fallback is False and len(m.briefs) == 1
+
+
+def test_degenerate_generation_fails_structural_gate_then_falls_back(tmp_path):
+    # The plain FakeModel constant "[forged scenario]" is not a scenario: no second person, no
+    # decision ask, too short. Both attempts fail the CODE gate -> honest fallback.
+    base = load_experience("license_continuity")
+    res = _forge(_fake(), _engine_store(tmp_path))
+    assert res.fallback is True and res.experience.prompt == base.prompt
+
+
+def test_fallback_bridge_is_the_pinned_line():
+    assert forge._FALLBACK_BRIDGE == (
+        "I'll hold your situation — first, work this one; "
+        "it's the same pressure you're standing in."
+    )
+
+
+def test_build_brief_purity_and_level_line():
+    territory = load_territory_text("license_continuity")
+    brief = forge.build_brief(territory, SITUATION, POSITIONS, "ceo", "base")
+    assert SITUATION in brief
+    for p in POSITIONS:
+        assert p in brief
+    assert territory.strip() in brief
+    assert "Level: base" in brief.splitlines()  # the 3-value enum line, exact — never prose
+    assert "Vera" not in brief  # Vera-free (D3): no persona, no landing text
+    exp = load_experience("license_continuity")
+    for detail in [f.frame_detail for f in exp.rubric.frames] + [
+        t.trap_detail for t in exp.rubric.traps
+    ]:
+        assert detail not in brief  # frame-blind: never frame/trap details or rubric text
+    with pytest.raises(ValueError):
+        forge.build_brief(territory, SITUATION, POSITIONS, "ceo", "one notch past")
+
+
+def test_forge_passes_build_brief_output_verbatim(tmp_path):
+    m = _ForgeFake()
+    _forge(m, _engine_store(tmp_path), level="firm")
+    expected = forge.build_brief(
+        load_territory_text("license_continuity"), SITUATION, POSITIONS, "ceo", "firm"
+    )
+    assert m.briefs[0][0] == expected  # brief inputs are EXACTLY build_brief's — no extras
+
+
+def test_union_screen_covers_base_moves_and_engaged_frames(tmp_path):
+    base = load_experience("license_continuity")
+    m = _MovesSpyModel()
+    engaged = "choose_the_failure_default_deliberately"  # engaged this sitting; not on the base
+    _forge(m, _engine_store(tmp_path), engaged=[engaged])
+    assert m.screened_text == _SCENARIO
+    base_moves = [f.frame_detail for f in base.rubric.frames] + [
+        t.trap_detail for t in base.rubric.traps
+    ]
+    for move in base_moves:
+        assert m.moves.count(move) == 1  # base moves present, never duplicated
+    lib_details = {
+        f.frame_detail
+        for e in load_library()
+        if e.rubric
+        for f in e.rubric.frames
+        if f.frame_code == engaged
+    }
+    assert lib_details and lib_details <= set(m.moves)  # D1: the cross-segment echo is screened
+
+
+def test_ledger_seeded_once_per_world(tmp_path):
+    store = _engine_store(tmp_path)
+    _forge(_ForgeFake(), store, n=1)
+    _forge(_ForgeFake(), store, n=2)  # two forges, ONE world
+    gen_rows = [e for e in store.load_ledger() if e.id == "gen:s1"]
+    assert len(gen_rows) == 1  # add_ledger_entry upserts on id — idempotent per world
+    assert gen_rows[0].owned_problem == SITUATION  # her real situation IS the owned problem
+
+
+def test_fallback_does_not_seed_the_ledger(tmp_path):
+    store = _engine_store(tmp_path)
+    _forge(_LeakScreenModel([[1], [1]]), store)
+    assert [e for e in store.load_ledger() if e.id.startswith("gen:")] == []
