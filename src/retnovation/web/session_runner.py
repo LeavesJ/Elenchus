@@ -61,6 +61,10 @@ _STATIC_RESTART_CLOSE = "That last door closed unfinished — here's the village
 # Stale-tab soft fail (a request against a channel this process never had).
 _STALE_NUDGE = "This room went stale — refresh to pick up where you left off."
 
+# An errored segment's dead channel: every reply must point at the honest way forward (refresh →
+# durable-sitting resume: transcript + honesty line + working doors), never a bare dead end.
+_DOOR_FAILED_NUDGE = "That door hit an error — refresh to pick up where you left off."
+
 # A live sitting idle past this is abandoned: an evening, not an undying thread (spec §2c).
 _SITTING_MAX_IDLE = timedelta(hours=18)
 
@@ -126,6 +130,7 @@ class _Channel:
         self.from_worker: queue.Queue = queue.Queue()
         self.last_menu: list[str] = []
         self.last_menu_refs: list[str] = []  # server-side only (menu_index); never sent to client
+        self.last_menu_eids: list[str] = []  # server-side only — territory grain (reopen seam)
         self.terminal: bool = False
         self.thread: threading.Thread | None = None  # the worker (join target for the reap test)
         self.record: dict | None = None  # post-convergence: model+exp+recent+terrain (engine-free)
@@ -337,7 +342,10 @@ class SessionRegistry:
                         ranked = [eid for eid, _ in territories]
                     eid = ranked[0]
                     ch.mapped_rank = ranked  # banked registry-side at the next dequeue (§2c)
-                    if tmap.confidence == "low":
+                    # Conservative read (batch-review fold): anything a live model returns that
+                    # is not clearly "high" takes the honest-fit beat — silent stretching costs
+                    # signal; the extra beat costs one collect.
+                    if tmap.confidence.strip().lower() != "high":
                         # Honest fit (§2a): her situation stays the world; no silent stretching.
                         desc = " ".join(load_territory_text(eid).split()).rstrip(".")
                         ch.from_worker.put(("say", {"text": _HONEST_FIT.format(desc=desc)}))
@@ -565,6 +573,7 @@ class SessionRegistry:
             ]
         ch.last_menu = data["problems"]
         ch.last_menu_refs = refs
+        ch.last_menu_eids = eids
         nonce = self._menu_nonce.get(session_id, 0) + 1
         self._menu_nonce[session_id] = nonce
         data["nonce"] = nonce
@@ -664,7 +673,11 @@ class SessionRegistry:
         pick = st["next_pick"]
         if pick is not None:
             ref, title = pick
-            if ref in self._store.converged_within(now):
+            if ref in self._store.converged_within(now) or (
+                # territory grain too (batch-review fold): a forge-convergence of this door's
+                # TERRITORY logs a gen: ref that never matches the curated pick ref
+                self._ref_territories(ref) & self._store.territories_within(now)
+            ):
                 pick = None  # a since-converged door: drop honestly (MF-3 path on continue)
                 self._store.write_state(sit, next_pick=None)
         if pick is not None and rec is not None:
@@ -687,6 +700,15 @@ class SessionRegistry:
         if menu_block is not None:
             payload["menu"] = menu_block
         if frontdoor_block is not None:
+            # The block re-serves the ask — drop a trailing identical transcript turn so the
+            # replay never shows the ask twice (founder live dogfood 2026-07-02: the doubled
+            # intro was the first thing on his screen).
+            if (
+                turns
+                and turns[-1]["kind"] == "vera"
+                and turns[-1]["text"] == frontdoor_block["text"]
+            ):
+                turns.pop()
             payload["frontdoor"] = frontdoor_block
         return ("resume", payload)
 
@@ -762,7 +784,16 @@ class SessionRegistry:
             if session_id in self._frontdoor_swallow:
                 return
             self._seam_pending.pop(session_id, None)
-            self._store.append_turn(sit, "vera", {"text": data["text"]}, now)
+            # Dedupe the durable ask (founder live dogfood 2026-07-02: reload-at-the-door replays
+            # the persisted ask AND re-serves it — the transcript must hold ONE): skip when the
+            # tail turn is already this exact ask.
+            prior = self._store.turns(sit)
+            if not (
+                prior
+                and prior[-1]["kind"] == "vera"
+                and prior[-1]["payload"].get("text") == data["text"]
+            ):
+                self._store.append_turn(sit, "vera", {"text": data["text"]}, now)
             if data.get("theme"):
                 self._store.write_state(sit, theme=data["theme"])
             return
@@ -897,6 +928,11 @@ class SessionRegistry:
             # KeyError 500 (spec §2c stale-tab rule).
             return ("nudge", {"message": _STALE_NUDGE})
         if ch.terminal:
+            if ch.record is None:
+                # The segment ERRORED (founder live dogfood 2026-07-02: a truncated model call
+                # killed the worker and every reply dead-ended into 'session already ended').
+                # Durable sittings make refresh an honest resume — say THAT.
+                return ("nudge", {"message": _DOOR_FAILED_NUDGE})
             return ("error", {"message": "session already ended"})
         sit = self._sitting_id.get(session_id)
         if sit is not None and isinstance(value, str):
@@ -954,10 +990,17 @@ class SessionRegistry:
             now = datetime.now(timezone.utc)
             self._store.append_turn(sit, "muted", {"text": "door chosen"}, now)
             self._store.append_turn(sit, "you", {"text": ch.last_menu[idx]}, now)
-        if 0 <= idx < len(ch.last_menu_refs) and ch.last_menu_refs[idx] == self._lost_ref.get(
-            session_id
-        ):
-            # Re-entering the restart-interrupted door: the seam says so honestly (spec §2c).
+        lost_ref = self._lost_ref.get(session_id)
+        lost_eid = self._lost_exp_id.get(session_id)
+        reopened = (0 <= idx < len(ch.last_menu_refs) and ch.last_menu_refs[idx] == lost_ref) or (
+            # eid-grain too (batch-review fold, M8's door-click half): a forged lost segment's
+            # ref is gen:-grain and never matches a curated door ref
+            bool(lost_eid)
+            and 0 <= idx < len(ch.last_menu_eids)
+            and ch.last_menu_eids[idx] == lost_eid
+        )
+        if reopened:
+            # Re-entering the interrupted door: the seam says so honestly (spec §2c).
             self._seam_pending[session_id] = _REOPEN_SEAM
         return self.step(session_id, idx)
 
@@ -1044,9 +1087,13 @@ class SessionRegistry:
                     self._continue_target.pop(session_id, None)
 
         pick = self._next_pick.get(session_id)
-        if pick is not None and pick in self._store.converged_within(now):
-            # The persisted pick was converged since it was offered (another sitting, this window):
-            # drop to the doors — MF-3's honest path, never a silent converged re-serve (spec §2e).
+        if pick is not None and (
+            pick in self._store.converged_within(now)
+            or self._ref_territories(pick) & self._store.territories_within(now)
+        ):
+            # The persisted pick was converged since it was offered (another sitting, this window;
+            # territory grain covers forge-convergences whose gen: refs never match) — drop to the
+            # doors: MF-3's honest path, never a silent converged re-serve (spec §2e).
             pick = None
             self._next_pick[session_id] = None
             self._next_pick_title[session_id] = ""
@@ -1091,6 +1138,14 @@ class SessionRegistry:
 
     def menu_index(self, session_id: str, ledger_ref: str) -> int:
         return self._ch[session_id].last_menu_refs.index(ledger_ref)
+
+    def _ref_territories(self, ref: str) -> set[str]:
+        """The territory ids a curated ledger_ref belongs to (window checks need BOTH grains —
+        a forge-convergence logs gen: refs that never match a curated door ref)."""
+        try:
+            return {e.experience_id for e in load_library() if e.ledger_ref == ref}
+        except Exception:
+            return set()
 
     def _lost_context(self, session_id: str) -> tuple[str, str] | None:
         """(ledger_ref, experience_id) of a segment that died before landing — from the in-memory
@@ -1247,15 +1302,17 @@ class SessionRegistry:
 
     def _engaged_frames(self, sit: str | None) -> list[str]:
         """Frame codes engaged this sitting (§2b review D1's union screen): the frames of every
-        territory CONVERGED this sitting, from the durable log — server-side only; the brief
-        never sees them (the forge resolves details behind its own gate)."""
+        territory this sitting TOUCHED — converged (the log) AND forged-but-not-landed
+        (plateaued/errored segments' dialogue still feeds the brief; batch-review fold) —
+        server-side only; the brief never sees them (the forge resolves details behind its own
+        gate)."""
         if sit is None:
             return []
         eids = {
             r["experience_id"]
             for r in self._store.converged_log()
             if r["sitting_id"] == sit and r["experience_id"]
-        }
+        } | self._store.generated_territories(sit)
         if not eids:
             return []
         codes: list[str] = []
@@ -1364,16 +1421,17 @@ class SessionRegistry:
         return segments
 
     def _sitting_exps(self, sit: str | None, rec: dict) -> list:
-        """The union-egress move sources for the sitting close (§2f/M13): every territory
-        converged this sitting plus the record's own experience — curated rubrics, loaded from
-        the library (a forged clone's rubric is byte-equal to its base's)."""
+        """The union-egress move sources for the sitting close (§2f/M13): every territory this
+        sitting TOUCHED — converged AND forged-but-not-landed (batch-review fold: plateaued
+        segments' turns reach the close author too) — plus the record's own experience. Curated
+        rubrics, loaded from the library (a forged clone's rubric is byte-equal to its base's)."""
         eids = set()
         if sit is not None:
             eids = {
                 r["experience_id"]
                 for r in self._store.converged_log()
                 if r["sitting_id"] == sit and r["experience_id"]
-            }
+            } | self._store.generated_territories(sit)
         exps = [e for e in load_library() if e.experience_id in eids]
         exp = rec.get("exp")
         if exp is not None and exp.experience_id not in eids:

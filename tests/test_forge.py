@@ -420,3 +420,43 @@ def test_fallback_does_not_seed_the_ledger(tmp_path):
     store = _engine_store(tmp_path)
     _forge(_LeakScreenModel([[1], [1]]), store)
     assert [e for e in store.load_ledger() if e.id.startswith("gen:")] == []
+
+
+def test_parse_required_retries_once_on_truncation_then_fails_loud():
+    """Founder live dogfood 2026-07-02: one adaptive-thinking excursion past the base budget must
+    cost a RETRY at 2x, never the segment; a second truncation still fails LOUD (L-17)."""
+    import pytest
+
+    from retnovation.model import AnthropicModel, ModelError
+
+    class _Resp:
+        def __init__(self, stop, parsed):
+            self.stop_reason = stop
+            self.parsed_output = parsed
+
+    class _Msgs:
+        def __init__(self, script):
+            self.script = script
+            self.budgets = []
+
+        def parse(self, **kw):
+            self.budgets.append(kw["max_tokens"])
+            return self.script.pop(0)
+
+    class _Client:
+        def __init__(self, script):
+            self.messages = _Msgs(script)
+
+    m = AnthropicModel.__new__(AnthropicModel)  # no key, no network
+    m._model = "test-model"
+    m._client = _Client([_Resp("max_tokens", None), _Resp("end_turn", {"ok": True})])
+    out = m._parse_required(max_tokens=100, system="s", messages=[])
+    assert out == {"ok": True}
+    assert m._client.messages.budgets == [100, 200]  # exactly one doubled retry
+
+    m2 = AnthropicModel.__new__(AnthropicModel)
+    m2._model = "test-model"
+    m2._client = _Client([_Resp("max_tokens", None), _Resp("max_tokens", None)])
+    with pytest.raises(ModelError, match="truncated"):
+        m2._parse_required(max_tokens=100, system="s", messages=[])
+    assert m2._client.messages.budgets == [100, 200]  # retry spent; loud, not looping

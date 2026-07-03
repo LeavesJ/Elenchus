@@ -1575,3 +1575,58 @@ def test_forged_flow_never_leaks_gen_refs_on_the_wire(tmp_path, make_fake):
     tag, data = reg2.close("s1")
     blobs.append(data)
     assert "gen:" not in _json.dumps(blobs, default=str)
+
+
+def test_errored_segment_reply_nudges_refresh_not_dead_end(tmp_path, make_fake):
+    """Founder live dogfood 2026-07-02: after a mid-press model error killed the worker, every
+    reply dead-ended in 'session already ended'. An errored (record-less) terminal channel must
+    point at the honest way forward — refresh resumes the durable sitting."""
+
+    def factory():
+        m = make_fake()
+
+        def boom(exp, opening):
+            raise RuntimeError("truncated mid-press")
+
+        m.classify_intake = boom
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "doorfail.db"), model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    tag, _ = reg.step("s1", "a real position")
+    assert tag == "error"  # the worker died loudly
+    tag2, data2 = reg.step("s1", "hello? are you still there?")
+    assert tag2 == "nudge"
+    assert "refresh" in data2["message"]  # actionable, not 'session already ended'
+
+
+def test_resume_at_the_front_door_shows_one_ask(tmp_path, make_fake):
+    """Founder live dogfood 2026-07-02: the doubled intro. A reload parked at the front door must
+    render the ask ONCE — the replayed transcript turn and the re-served block dedupe, and
+    repeated cross-restart resumes never accumulate ask turns durably."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "oneask.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg.start("s1", now=NOW)
+    assert tag == "say" and data.get("frontdoor")
+
+    # same-process reload parked at the ask
+    tag, data = reg.resume_or_start("s1", now=datetime.now(timezone.utc))
+    assert tag == "resume" and data.get("frontdoor")
+    ask = data["frontdoor"]["text"]
+    replayed_asks = [t for t in data["turns"] if t["kind"] == "vera" and t["text"] == ask]
+    assert replayed_asks == []  # the block re-serves it; the replay must not double it
+
+    # cross-restart resumes never accumulate duplicate ask turns in the durable mirror
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
+    reg3 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    reg3.resume_or_start("s1", now=datetime.now(timezone.utc))
+    store = SittingStore(db)
+    sit = store.live_sitting()
+    asks = [
+        t for t in store.turns(sit["id"]) if t["kind"] == "vera" and t["payload"].get("text") == ask
+    ]
+    assert len(asks) == 1

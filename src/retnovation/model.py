@@ -349,17 +349,28 @@ class AnthropicModel:
             self._client = anthropic.Anthropic(api_key=self._api_key)
         return self._client
 
+    def _parse_required(self, *, max_tokens: int, **kwargs):
+        """One structured parse, output REQUIRED — with a single budget-doubled retry on
+        truncation. L-17 keeps failing loud as the backstop, but one adaptive-thinking excursion
+        past the base budget must cost a RETRY, not the segment (founder live dogfood 2026-07-02:
+        a truncated structured call mid-press killed the worker — 'session already ended' — on a
+        door he was working well). Cost rises only when the model genuinely thought past base."""
+        client = self._get_client()
+        resp = client.messages.parse(model=self._model, max_tokens=max_tokens, **kwargs)
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            resp = client.messages.parse(model=self._model, max_tokens=max_tokens * 2, **kwargs)
+        return _require(resp)  # the doubled retry is spent; truncation now fails LOUD (L-17)
+
     def classify_intake(self, exp: Experience, opening: str) -> IntakeClassification:
         system = load_prompt("intake") + _situation_block(exp) + "\n\n" + _render_rubric(exp.rubric)
-        resp = self._get_client().messages.parse(
-            model=self._model,
+        resp = self._parse_required(
             max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": opening}],
             output_format=_IntakeWire,
             **_PARAMS,
         )
-        wire = _require(resp)
+        wire = resp
         frame_states = {f.frame_code: FrameState.absent for f in exp.rubric.frames}
         trap_states = {t.trap_code: TrapState.not_tripped for t in exp.rubric.traps}
         # Ignore codes the model invented that are not in the rubric — a hallucinated key
@@ -413,30 +424,28 @@ class AnthropicModel:
             + f"\nTarget angle: {detail}"
         )
         user = f"Push:\n{push}\n\nStudent reply:\n{response}"
-        resp = self._get_client().messages.parse(
-            model=self._model,
+        resp = self._parse_required(
             max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=ResponseClassification,
             **_PARAMS,
         )
-        return _require(resp)
+        return resp
 
     def classify_entry(
         self, prompt: str, opening: str, recent: list[tuple[str, str]]
     ) -> EntryClassification:
         system = load_prompt("entry")  # frame-blind: doctrine only, never the rubric
         user = f"Problem:\n{prompt}\n\n{_render_turns(recent)}Student's latest message:\n{opening}"
-        resp = self._get_client().messages.parse(
-            model=self._model,
+        resp = self._parse_required(
             max_tokens=2048,
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=EntryClassification,
             **_PARAMS,  # measured ~1.3s at high; lowering effort here is slower, not faster
         )
-        return _require(resp)
+        return resp
 
     def concierge_turn(
         self,
@@ -587,15 +596,14 @@ class AnthropicModel:
             + f"\nReference answer(s): {question.answer_key}"
             + f"\nCriteria: {question.criteria}"
         )
-        resp = self._get_client().messages.parse(
-            model=self._model,
+        resp = self._parse_required(
             max_tokens=1024,
             system=system,
             messages=[{"role": "user", "content": f"Student answer:\n{answer}"}],
             output_format=CheckableGrade,
             **_PARAMS,
         )
-        return _require(resp)
+        return resp
 
     def grade_sharper(
         self, exp: Experience, kind: str, code: str, push: str, response: str
@@ -603,15 +611,14 @@ class AnthropicModel:
         detail = _target_detail(exp.rubric, kind, code)
         system = load_prompt("grade_sharper") + f"\n\nTarget angle: {detail}"
         user = f"Push:\n{push}\n\nStudent reply:\n{response}"
-        resp = self._get_client().messages.parse(
-            model=self._model,
+        resp = self._parse_required(
             max_tokens=1024,
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=SharperVerdict,
             **_PARAMS,
         )
-        return _require(resp)
+        return resp
 
     def generate_output(
         self, scenario_prompt: str, injection: str | None, *, max_tokens: int = 1024
@@ -642,27 +649,25 @@ class AnthropicModel:
     ) -> PreferenceRating:
         system = load_prompt("lift_rate")
         user = f"Task:\n{scenario_prompt}\n\nOutput A:\n{output_a}\n\nOutput B:\n{output_b}"
-        resp = self._get_client().messages.parse(
-            model=self._model,
+        resp = self._parse_required(
             max_tokens=1024,
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=PreferenceRating,
             **_PARAMS,
         )
-        return _require(resp)
+        return resp
 
     def check_injection_expressed(self, injection: str, framed_output: str) -> InjectionExpressed:
         system = load_prompt("lift_manipulation") + f"\n\nThe move to check for:\n{injection}"
-        resp = self._get_client().messages.parse(
-            model=self._model,
+        resp = self._parse_required(
             max_tokens=1024,
             system=system,
             messages=[{"role": "user", "content": f"Output:\n{framed_output}"}],
             output_format=InjectionExpressed,
             **_PARAMS,
         )
-        return _require(resp)
+        return resp
 
     def screen_moves(self, moves: list[str], text: str) -> EgressScreen:
         # Batched egress (the L-13 backstop): which of the hidden moves does `text` PERFORM, in ONE
@@ -671,8 +676,7 @@ class AnthropicModel:
         numbered = "\n".join(f"{i + 1}. {m}" for i, m in enumerate(moves))
         system = load_prompt("egress")
         user = f"Hidden moves:\n{numbered}\n\nText to screen:\n{text}"
-        resp = self._get_client().messages.parse(
-            model=self._model,
+        resp = self._parse_required(
             max_tokens=_SCREEN_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user}],
@@ -683,7 +687,7 @@ class AnthropicModel:
         # false-negative (a leak passes), the one direction the backstop must never fail quietly.
         if getattr(resp, "stop_reason", None) == "max_tokens":
             raise ModelError("screen_moves truncated at max_tokens — egress screen unreliable")
-        return _require(resp)
+        return resp
 
     def map_territories(self, situation: str, territories: list[tuple[str, str]]) -> TerritoryMap:
         # The front-door mapper (living sitting §2a): ONE batched parse over every territory
@@ -704,15 +708,14 @@ class AnthropicModel:
             "vocabulary, never the territory text."
         )
         user = f"Her situation:\n{situation}\n\nTerritories:\n{numbered}"
-        resp = self._get_client().messages.parse(
-            model=self._model,
+        resp = self._parse_required(
             max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=TerritoryMap,
             **_MED_PARAMS,
         )
-        return _require(resp)  # fails LOUD on truncation (L-17) and refusal
+        return resp  # fails LOUD on truncation (L-17) and refusal
 
     def forge_scenario(self, brief: str, steer: str = "") -> str:
         # Authors the scenario IN OPENING VOICE — it IS the opening say (§2b/M6: one generation,
@@ -753,15 +756,14 @@ class AnthropicModel:
             "person should respond; describe only what the situation must contain."
         )
         user = f"Scenario:\n{scenario}\n\nRequirements:\n{requirements}"
-        resp = self._get_client().messages.parse(
-            model=self._model,
+        resp = self._parse_required(
             max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=FitCheck,
             **_MED_PARAMS,
         )
-        return _require(resp)  # fails LOUD on truncation (L-17) and refusal
+        return resp  # fails LOUD on truncation (L-17) and refusal
 
     def concierge_sitting_close(
         self, situation: str, segments: list[list[tuple[str, str]]], voice: str = ""

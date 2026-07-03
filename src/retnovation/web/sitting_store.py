@@ -250,6 +250,19 @@ class SittingStore:
             ).fetchone()
         return None if row is None else {"experience_id": row[0], "scenario": row[1]}
 
+    def generated_territories(self, sitting_id: str) -> set[str]:
+        """Every territory FORGED this sitting, landed or not (batch-review fold: the D1 union
+        screens must cover plateaued/errored segments too — their dialogue feeds the brief and
+        the close author even though the converged log never saw them)."""
+        if self._inert:
+            return set()
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT DISTINCT experience_id FROM web_generated_problem WHERE sitting_id=?",
+                (sitting_id,),
+            ).fetchall()
+        return {r[0] for r in rows if r[0]}
+
     # -- converged log (the rolling repeat guard) --------------------------------------------
 
     def log_converged(
