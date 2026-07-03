@@ -12,11 +12,13 @@ from .types import (
     EntryClass,
     EntryClassification,
     Experience,
+    FitCheck,
     FrameState,
     GeneratedOutput,
     InjectionExpressed,
     PreferenceRating,
     SharperVerdict,
+    TerritoryMap,
     TrapState,
 )
 
@@ -101,6 +103,14 @@ class Model(Protocol):
         voice: str = "",
     ) -> str: ...
     def screen_moves(self, moves: list[str], text: str) -> "EgressScreen": ...
+    def map_territories(
+        self, situation: str, territories: list[tuple[str, str]]
+    ) -> "TerritoryMap": ...
+    def forge_scenario(self, brief: str, steer: str = "") -> str: ...
+    def fit_check(self, scenario: str, requirements: str) -> "FitCheck": ...
+    def concierge_sitting_close(
+        self, situation: str, segments: list[list[tuple[str, str]]], voice: str = ""
+    ) -> str: ...
 
 
 class FakeModel:
@@ -170,6 +180,22 @@ class FakeModel:
     def concierge_land(self, problem, recent, stop_reason, *, steer="", voice=""):
         return f"[land:{stop_reason}]"
 
+    # Living-sitting constants (scripted-pop pattern untouched — review M12); leak/reject test
+    # fakes subclass-override these per the _ConciergeFidelityModel convention.
+    def map_territories(self, situation, territories):
+        return TerritoryMap(
+            ranked=[eid for eid, _ in territories], confidence="high", reflection="[reflect]"
+        )
+
+    def forge_scenario(self, brief, steer=""):
+        return "[forged scenario]"
+
+    def fit_check(self, scenario, requirements):
+        return FitCheck(fits=True, reason="")
+
+    def concierge_sitting_close(self, situation, segments, voice=""):
+        return "[sitting close]"
+
     def check_injection_expressed(self, injection: str, framed_output: str) -> InjectionExpressed:
         # Safe by default; voice tests that need a leak use FakeLeakModel (Task 2).
         return InjectionExpressed(expressed=False, evidence="(fake: no leak)")
@@ -226,6 +252,12 @@ _CLASSIFY_MAX_TOKENS = 4096
 # it needs), so cost does not rise unless the screen genuinely thinks more. (L-17: budget a shared
 # helper for its hardest caller; surfaced @live by the comprehension gear's longer turns.)
 _SCREEN_MAX_TOKENS = 4096
+
+# Forge-surface headroom (living sitting L1): the forged scenario (the opening say, multi-paragraph)
+# and the whole-sitting close are the two long-form authored surfaces — 4096 pinned by the plan so
+# adaptive thinking plus the authored text never trips truncation (L-17: an explicit budget per
+# caller; _ECHO_MAX_TOKENS was tuned for one-or-two-sentence turns and does not fit these).
+_FORGE_MAX_TOKENS = 4096
 
 
 class _FrameStateItem(BaseModel):
@@ -652,3 +684,113 @@ class AnthropicModel:
         if getattr(resp, "stop_reason", None) == "max_tokens":
             raise ModelError("screen_moves truncated at max_tokens — egress screen unreliable")
         return _require(resp)
+
+    def map_territories(self, situation: str, territories: list[tuple[str, str]]) -> TerritoryMap:
+        # The front-door mapper (living sitting §2a): ONE batched parse over every territory
+        # candidate (L-20 — never one call per candidate), in screen_moves' shape. Server-side —
+        # the reflection is learner-facing only AFTER the caller screens it (§2a's gated
+        # reflection). The curated content is the territory DESCRIPTIONS (content/territories/,
+        # L-1); this system text is structural task instruction only.
+        numbered = "\n".join(
+            f"{i + 1}. [{eid}] {desc}" for i, (eid, desc) in enumerate(territories)
+        )
+        system = (
+            "You map a person's real situation onto the numbered territories below — each names "
+            "a kind of decision. Return: `ranked` — every territory id, best fit first, ids "
+            'exactly as given in brackets; `confidence` — "high" if the best territory\'s kind '
+            'of decision is plainly the kind she is facing, else "low"; `reflection` — ONE '
+            "line reflecting the decision she is facing, in her own words wherever possible. "
+            "The reflection describes her situation only: never advice, never analysis "
+            "vocabulary, never the territory text."
+        )
+        user = f"Her situation:\n{situation}\n\nTerritories:\n{numbered}"
+        resp = self._get_client().messages.parse(
+            model=self._model,
+            max_tokens=_CLASSIFY_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            output_format=TerritoryMap,
+            **_MED_PARAMS,
+        )
+        return _require(resp)  # fails LOUD on truncation (L-17) and refusal
+
+    def forge_scenario(self, brief: str, steer: str = "") -> str:
+        # Authors the scenario IN OPENING VOICE — it IS the opening say (§2b/M6: one generation,
+        # one screen; no separate concierge_open pass on generated content). Doctrine lives in
+        # content/prompts/forge_scenario.md (L-1); the brief arrives frame-blind and Vera-free
+        # from the forge. `steer` is the one-shot regen reason (precondition / situation-structure
+        # language only).
+        system = load_prompt("forge_scenario")
+        user = brief
+        if steer:
+            user += f"\n\nSteer (fix exactly this): {steer}"
+        resp = self._get_client().messages.create(
+            model=self._model,
+            max_tokens=_FORGE_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            **_PARAMS,
+        )
+        if getattr(resp, "stop_reason", None) == "refusal":
+            return ""  # the forge's gates treat an empty scenario as a failed generation
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        return ""
+
+    def fit_check(self, scenario: str, requirements: str) -> FitCheck:
+        # The forge's reject-only fit gate (living sitting §2b): does the scenario give natural
+        # occasion for the preconditions the rubric's meaning presumes? `requirements` is
+        # precondition text assembled by the forge (frame-aware, SERVER-side — never learner-
+        # facing). The reason must speak precondition/situation-structure language only — the
+        # stimulus, never the move — because it becomes the regen steer.
+        system = (
+            "You check whether a scenario gives natural occasion for the requirements below — "
+            "each names a precondition the situation itself must establish. Return `fits`, and "
+            "when it does not fit, a `reason` naming which precondition the scenario fails to "
+            "establish, in situation-structure language only (what the scenario lacks: a "
+            "deadline, an undemonstrated capability, a live decision). Never describe how a "
+            "person should respond; describe only what the situation must contain."
+        )
+        user = f"Scenario:\n{scenario}\n\nRequirements:\n{requirements}"
+        resp = self._get_client().messages.parse(
+            model=self._model,
+            max_tokens=_CLASSIFY_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            output_format=FitCheck,
+            **_MED_PARAMS,
+        )
+        return _require(resp)  # fails LOUD on truncation (L-17) and refusal
+
+    def concierge_sitting_close(
+        self, situation: str, segments: list[list[tuple[str, str]]], voice: str = ""
+    ) -> str:
+        # The whole-sitting close (§2f): tells the world's story over every segment —
+        # retrospective, no verdicts (L-4: correctness is deliberately NOT supplied). The caller
+        # kind-filters the turns per segment and egress-screens the result against the union of
+        # the sitting's territories' moves (static fallback on failure; the union scale is
+        # measured per L-17/L-20 before trusting).
+        system = (voice + "\n\n" if voice else "") + load_prompt("concierge_sitting_close")
+        blocks = []
+        for i, seg in enumerate(segments):
+            lines = "\n".join(f"{role}: {text}" for role, text in seg)
+            blocks.append(f"Segment {i + 1}:\n{lines}")
+        user = (
+            f"Her situation:\n{situation}\n\n"
+            + "\n\n".join(blocks)
+            + "\n\nTell the sitting's story."
+        )
+        resp = self._get_client().messages.create(
+            model=self._model,
+            max_tokens=_FORGE_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            **_PARAMS,
+        )
+        if getattr(resp, "stop_reason", None) == "refusal":
+            return ""
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        return ""

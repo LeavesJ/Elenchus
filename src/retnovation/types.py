@@ -344,6 +344,22 @@ class EgressScreen(BaseModel):
     evidence: str
 
 
+class TerritoryMap(BaseModel):
+    # The front-door mapper's wire shape (living sitting §2a). Server-side output: the
+    # reflection is learner-facing ONLY after the caller egress-screens it (gated reflection).
+    ranked: list[str]  # experience_ids, best first
+    confidence: str  # "high" | "low"
+    reflection: str  # one line, HER words where possible
+
+
+class FitCheck(BaseModel):
+    # The forge's reject-only fit gate (living sitting §2b): does the scenario establish the
+    # preconditions the rubric's meaning presumes? The reason speaks precondition /
+    # situation-structure language ONLY — the stimulus, never the move.
+    fits: bool
+    reason: str
+
+
 class ScenarioVerdict(BaseModel):
     scenario_id: str
     injection_expressed: bool  # the ONLY stored bool that gates aggregation
