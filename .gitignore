@@ -1,37 +1,31 @@
-# === Confidential design + doctrine docs — NEVER track (leak prevention) ===
-# Source design and the personal operating guidebook stay local only.
+# Local notes and documents (root-level markdown and PDFs are never tracked)
+/*.md
 *.pdf
-Berkeley_Operating_Guidebook*.md
-Retnovation_Blueprint*.md
-Retnovation_Build_Brief*.md
-Retnovation_Complete_Picture*.md
-Retnovation_interest_tree.*
-Retnovation_FounderCEO_Design*.md
-Retnovation_JudgmentLoop*.md
-Retnovation_LiftTest*.md
-Retnovation_Loop*.md
-Retnovation_MVP_Scope*.md
 
-# Private cross-session baton (local-only; overwritten each handoff).
-docs/SESSION_HANDOFF.md
+# Internal process docs and tooling config — never tracked
+/docs/
+.claude/
+.superpowers/
+.claude-flow/
+.worktrees/
 
-# === Runtime state (confidential: owned problems + learner state) ===
+# Runtime state
 /data/
 *.db
 *.sqlite
 *.sqlite3
 
-# === Lift-test scenario bank (Veldra-derived generations stay local) ===
+# Real content banks stay local; the tracked *.example.yaml stubs are the public shape
 /content/lift/scenarios.yaml
 /content/lift/candidates.yaml
 
-# === Secrets ===
+# Secrets
 .env
 .env.*
 !.env.example
 *.key
 
-# === Python ===
+# Python
 __pycache__/
 *.py[cod]
 .venv/
@@ -43,12 +37,5 @@ venv/
 dist/
 build/
 
-# === Worktrees (isolated execution workspaces) ===
-.worktrees/
-
-# === Tooling scratch — never commit ===
-.superpowers/
-.claude-flow/
-
-# === OS ===
+# OS
 .DS_Store
