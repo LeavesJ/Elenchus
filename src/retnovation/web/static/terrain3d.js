@@ -1,7 +1,9 @@
 /* The Kindled Valley — 3D reward terrain renderer.
  * Terrain3D.render(container, payload) builds a WebGL valley from the L-13 wire payload:
  *   each rendered region -> a village (elevation bucket -> terraces, vitality bucket -> brightness);
- *   each seed region     -> a dark ember waiting to be kindled.
+ *   each seed region     -> a dark ember waiting to be kindled;
+ *   each converged HOUSE -> a lit house on a deterministic ring inside its region's cluster
+ *   (living sitting §2f: one house per convergence, ordinal-only wire, +N many-cue past 9).
  * Village POSITIONS are a function of the public ordinal ONLY (never frame identity). Requires the
  * vendored global THREE (+ optional EffectComposer/UnrealBloomPass for bloom); degrades to a note if absent.
  * Served ONLY at the close (two-phase L-13 timing). No frame_code / veldra: ref is ever consumed.
@@ -15,7 +17,10 @@ window.Terrain3D = (function () {
   function normalize(payload) {
     var regions = Array.isArray(payload) ? payload : (payload && payload.regions) || [];
     var transfer = (payload && payload.transfer) || []; // reserved for the connection layer; unused in V1
-    return { regions: regions, transfer: transfer };
+    // Houses are converged segments (living sitting §2f): ordinal-only rows — region index,
+    // coarse public bucket, arrival order. Nothing else ever rides in (L-13).
+    var houses = (payload && payload.houses) || [];
+    return { regions: regions, transfer: transfer, houses: houses };
   }
 
   // Positional layout: a deterministic phyllotaxis spiral keyed by the PUBLIC ordinal only (L-13).
@@ -200,6 +205,32 @@ window.Terrain3D = (function () {
       var reg = data.regions[rgi], pp = pos(rgi);
       if (reg && reg.render === "rendered") buildVillage(pp.x, pp.z, reg.elevation || 1, reg.vitality || 1);
       else buildEmber(pp.x, pp.z);
+    }
+
+    // Converged houses (living sitting §2f): one LIT house per convergence, clustered inside its
+    // region's area — the region's ordinal position anchors the cluster; houses take deterministic
+    // ordinal ring slots (arrival order fixes the angle: no jitter, no data beyond order). Capped
+    // at HOUSE_CAP per region with a many-cue: one brighter, larger beacon over the cluster.
+    var HOUSE_CAP = 9, HOUSE_RING_R = 13.4;
+    var grouped = [];
+    for (var hi = 0; hi < data.houses.length; hi++) {
+      var hrow = data.houses[hi], hr = hrow && hrow.region;
+      if (typeof hr !== "number" || hr < 0 || hr >= data.regions.length) continue; // never invent an anchor
+      (grouped[hr] = grouped[hr] || []).push(hrow);
+    }
+    for (var gi = 0; gi < data.regions.length; gi++) {
+      var hs = grouped[gi]; if (!hs) continue;
+      var anchor = pos(gi), shown = Math.min(hs.length, HOUSE_CAP);
+      for (var hk = 0; hk < shown; hk++) {
+        var ha = -Math.PI / 2 + hk * (2 * Math.PI / HOUSE_CAP);
+        var hx = anchor.x + Math.cos(ha) * HOUSE_RING_R, hz = anchor.z + Math.sin(ha) * HOUSE_RING_R;
+        house(hx, wh(hx, hz), hz, 1.12, true, Math.max(1, hs[hk].bucket || 1) / 3);
+      }
+      if (hs.length > HOUSE_CAP) {
+        var my = wh(anchor.x, anchor.z);
+        sprite(coreTex, 5, anchor.x, my + 6.5, anchor.z, 0.9);
+        var ml = new THREE.PointLight(0xffc470, 1.6, 30); ml.position.set(anchor.x, my + 6.5, anchor.z); world.add(ml);
+      }
     }
 
     // forest + rocks on the slopes (avoid the placed sites + the basin centre)

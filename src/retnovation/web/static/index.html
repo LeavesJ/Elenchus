@@ -182,9 +182,9 @@ function advance(r){
   muted('error: '+(r.message||'')); showComposer(true);
 }
 function renderClose(r){ if(contBox){ contBox.remove(); contBox=null; }
-  if(r.close) bubble('vera', r.close); renderTerrain(r.terrain||[]); showComposer(false); }
-function renderTerrain(regions){
-  regions = regions || [];
+  if(r.close) bubble('vera', r.close); renderTerrain(r.terrain||[], r.houses||[]); showComposer(false); }
+function renderTerrain(regions, houses){
+  regions = regions || []; houses = houses || [];
   const rendered = regions.filter(x=>x.render==='rendered').length;
   const host=document.createElement('div'); host.className='terrain3d';
   // flex:none is LOAD-BEARING: #thread is a fixed-height column flex; overflow:hidden zeroes this
@@ -193,9 +193,20 @@ function renderTerrain(regions){
   host.style.cssText='align-self:stretch;flex:none;width:100%;height:460px;border-radius:16px;'
     +'overflow:hidden;margin:10px 0 2px;background:#04060c;position:relative';
   thread.appendChild(host);
-  muted(rendered ? (rendered+' area'+(rendered===1?'':'s')+(rendered===1?' has':' have')+' taken shape.')
-                 : 'A seed was planted — your world begins.');
-  try { if(window.Terrain3D) Terrain3D.render(host, regions); } catch(_) { /* text note stands as fallback */ }
+  // The close copy counts HOUSES (living sitting §2f review P12): every convergence is a house —
+  // two convergences in one region must SAY two houses (the founder's dogfood regression).
+  const word = n => ['zero','one','two','three','four','five','six','seven','eight','nine'][n]||String(n);
+  if(houses.length){
+    const hw = word(houses.length);
+    muted(hw[0].toUpperCase()+hw.slice(1)+(houses.length===1?' house raised':' houses raised')+' — '
+      +(rendered ? word(rendered)+(rendered===1?' region has':' regions have')+' taken shape.'
+                 : 'your world begins.'));
+  } else {
+    // zero houses (nothing converged, or a pre-houses record): the existing seed line stands
+    muted(rendered ? (rendered+' area'+(rendered===1?'':'s')+(rendered===1?' has':' have')+' taken shape.')
+                   : 'A seed was planted — your world begins.');
+  }
+  try { if(window.Terrain3D) Terrain3D.render(host, {regions: regions, houses: houses}); } catch(_) { /* text note stands as fallback */ }
   thread.scrollTop=thread.scrollHeight;
 }
 composer.addEventListener('submit', async e=>{

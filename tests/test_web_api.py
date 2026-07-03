@@ -586,6 +586,170 @@ def test_front_door_free_text_flow_over_http(tmp_path, make_fake):
     assert "gen:" not in _json.dumps(blobs)  # L-13: the instance/world grain stays server-side
 
 
+def test_close_payload_counts_two_houses_for_two_convergences(tmp_path, make_fake):
+    """The founder regression (spec §0 defect 2, review P12): two convergences in one sitting →
+    the close payload carries TWO houses — never collapsed into one region node. Each house is
+    ordinal-only ({region, bucket}); no gen: ref, no frame code anywhere in the payload."""
+    import json as _json
+
+    app = create_app(db_path=str(tmp_path / "h2.db"), model_factory=_world_factory(make_fake))
+    client = TestClient(app)
+    assert client.post("/api/session").json()["kind"] == "frontdoor"
+    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r["kind"] == "say" and r["text"] == _SCENARIO
+    _drive_to_done(client)
+    r2 = client.post("/api/session/s/continue", json={}).json()
+    assert r2["kind"] == "say"
+    _drive_to_done(client)  # second convergence, different territory, same sitting
+
+    cl = client.post("/api/session/s/close").json()
+    assert cl["kind"] == "close"
+    houses = cl["houses"]
+    assert len(houses) == 2  # geometry: two houses raised (the copy is pinned in the shell test)
+    for h in houses:
+        assert set(h) == {"region", "bucket"}  # ordinal-only wire (L-13)
+        assert isinstance(h["region"], int) and 0 <= h["region"] < len(cl["terrain"])
+        assert h["bucket"] in (None, 1, 2, 3)
+    blob = _json.dumps(cl)
+    assert "gen:" not in blob and "veldra:" not in blob
+    assert "embed_credentials_as_a_list" not in blob
+
+
+def test_plateau_adds_no_house(tmp_path, make_fake):
+    """A plateaued segment was not built into a house: converge once, plateau the next segment —
+    the close still shows exactly ONE house."""
+    calls = {"n": 0}
+
+    def factory():
+        m = _world_factory(make_fake)()
+        calls["n"] += 1
+        if calls["n"] > 1:  # the second segment's worker: never closes -> plateau/budget stop
+            m.classify_response = lambda exp, kind, code, push, response, stress=False: (
+                ResponseClassification(
+                    outcome="unchanged", mechanism_supplied=False, hard_wrong=False
+                )
+            )
+        return m
+
+    app = create_app(db_path=str(tmp_path / "hp.db"), model_factory=factory)
+    client = TestClient(app)
+    assert client.post("/api/session").json()["kind"] == "frontdoor"
+    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r["kind"] == "say"
+    _drive_to_done(client)  # converged: house one
+    r2 = client.post("/api/session/s/continue", json={}).json()
+    assert r2["kind"] == "say"
+    _drive_to_done(client)  # plateaued: no house
+
+    cl = client.post("/api/session/s/close").json()
+    assert cl["kind"] == "close"
+    assert len(cl["houses"]) == 1
+
+
+def test_same_territory_reserve_convergence_adds_another_house(tmp_path, make_fake):
+    """An informed re-serve (work_anyway) convergence on an ALREADY-worked territory adds a NEW
+    house — houses are per-convergence, never per-territory-deduped."""
+    from datetime import datetime, timedelta, timezone
+
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "hr.db")
+    store = SittingStore(db)
+    wall = datetime.now(timezone.utc)
+    for i, eid in enumerate(
+        [
+            "irreversible_anchor",
+            "license_continuity",
+            "proof_before_promise",
+            "decision_under_stakes",
+        ]
+    ):
+        store.log_converged("prior", f"gen:prior:{i}", wall - timedelta(hours=4 - i), eid)
+
+    app = create_app(db_path=db, model_factory=_world_factory(make_fake))
+    client = TestClient(app)
+    assert client.post("/api/session").json()["kind"] == "frontdoor"
+    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r["kind"] == "say"
+    _drive_to_done(client)  # the fifth territory converges: 4 prior rows + 1 = 5 houses so far
+    rv = client.post("/api/session/s/continue", json={}).json()
+    assert rv["kind"] == "reserve"
+    r2 = client.post("/api/session/s/continue", json={"work_anyway": True}).json()
+    assert r2["kind"] == "say"
+    _drive_to_done(client)  # re-serve convergence: SAME territory as a prior row -> a 6th house
+
+    cl = client.post("/api/session/s/close").json()
+    assert cl["kind"] == "close"
+    assert len(cl["houses"]) == 6
+
+
+def test_house_order_is_stable_across_a_restart(tmp_path, make_fake):
+    """Ordering by converged_at is append-stable: a new registry over the same db serves the
+    SAME houses in the SAME order the first process froze at the landing."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "hs.db")
+    app1 = create_app(db_path=db, model_factory=_world_factory(make_fake))
+    c1 = TestClient(app1)
+    assert c1.post("/api/session").json()["kind"] == "frontdoor"
+    r = c1.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r["kind"] == "say"
+    _drive_to_done(c1)
+    r2 = c1.post("/api/session/s/continue", json={}).json()
+    assert r2["kind"] == "say"
+    _drive_to_done(c1)
+
+    store = SittingStore(db)
+    frozen = store.read_state(store.live_sitting()["id"])["record"]["houses"]
+    assert len(frozen) == 2
+
+    app2 = create_app(db_path=db, model_factory=_world_factory(make_fake))  # the restart
+    c2 = TestClient(app2)
+    assert c2.post("/api/session").json()["kind"] == "resume"
+    cl = c2.post("/api/session/s/close").json()
+    assert cl["kind"] == "close"
+    assert cl["houses"] == frozen  # same houses, same order
+
+
+def test_preexisting_curated_rows_do_not_crash_the_house_composition(tmp_path, make_fake):
+    """Rows logged before the living sitting carry experience_id='' — they compose via the
+    ref/region-0 fallback (one house each), never a crash."""
+    from datetime import datetime, timedelta, timezone
+
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "hc.db")
+    store = SittingStore(db)
+    wall = datetime.now(timezone.utc)
+    store.log_converged("old", "veldra:embedded_anchor_lock_in", wall - timedelta(hours=2), "")
+
+    app = create_app(db_path=db, model_factory=_world_factory(make_fake))
+    client = TestClient(app)
+    assert client.post("/api/session").json()["kind"] == "frontdoor"
+    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r["kind"] == "say"
+    _drive_to_done(client)
+
+    cl = client.post("/api/session/s/close").json()
+    assert cl["kind"] == "close"
+    assert len(cl["houses"]) == 2  # the old curated row + the new convergence
+    for h in cl["houses"]:
+        assert set(h) == {"region", "bucket"}
+
+
+def test_shell_close_copy_counts_houses():
+    """Review P12's copy half: the close copy counts HOUSES ('Two houses raised — one region has
+    taken shape.'), pluralized; the zero-house case keeps the existing seed line; the renderer
+    receives the houses beside the terrain."""
+    client = TestClient(create_app(db_path=":memory:", model_factory=None))
+    html = client.get("/").text
+    assert "' house raised'" in html and "' houses raised'" in html  # pluralized house count
+    assert "' region has'" in html and "' regions have'" in html  # pluralized region clause
+    assert "A seed was planted" in html  # the zero-house seed line survives
+    assert "r.houses" in html  # the close payload's houses reach the shell
+    assert "houses: houses" in html  # ...and ride into the 3D renderer beside the regions
+
+
 def test_informed_reserve_over_http(tmp_path, make_fake):
     """§2c P3 at the HTTP layer: all territories windowed → kind 'reserve' with the pinned copy
     and both choices; work_anyway forges a real segment."""

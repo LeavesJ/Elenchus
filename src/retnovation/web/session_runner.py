@@ -14,7 +14,7 @@ from ..content_loader import load_library, load_progression, load_territory_text
 from ..forge import _FALLBACK_BRIDGE, LEVELS, forge_experience
 from ..orchestration import run_session
 from ..scheduler import propose_open_ended
-from ..terrain import project_terrain
+from ..terrain import compose_houses, project_terrain
 from ..types import EntryClass, Outcome, Regime, Selection, Work
 from . import voice
 from .sitting_store import SittingStore
@@ -112,6 +112,7 @@ def _serialize_record(rec: dict) -> dict | None:
         "recent": [list(t) for t in rec.get("recent", [])],
         "stop_reason": rec.get("stop_reason", "converged"),
         "terrain": rec.get("terrain", []),
+        "houses": rec.get("houses", []),
     }
 
 
@@ -718,6 +719,9 @@ class SessionRegistry:
                 "recent": [tuple(t) for t in ser.get("recent", [])],
                 "stop_reason": ser.get("stop_reason", "converged"),
                 "terrain": ser.get("terrain", []),
+                # Frozen beside the terrain at the landing (L5); pre-L5 records rebuild with
+                # no houses — the shell's zero-house copy owns that state honestly.
+                "houses": ser.get("houses", []),
             }
             self._last_record[session_id] = rec
             return rec
@@ -824,6 +828,18 @@ class SessionRegistry:
                 self._sitting_done.setdefault(session_id, set()).add(rec_ref)
                 if sit is not None:
                     self._store.log_converged(sit, rec_ref, now, ch.record["exp"].experience_id)
+            # Houses are converged segments (living sitting §2f, L5): compose the cumulative
+            # village HERE — beside the frozen terrain, from the SAME post-session state — so
+            # the close payload's terrain and houses can never disagree (the log is read AFTER
+            # the just-converged row lands; a plateau recomposes over an unchanged log and adds
+            # none). Frozen into the record, so a restarted registry serves the same houses in
+            # the same order. A drift emission without a state (the defensive _drain path)
+            # leaves the record's houses alone — never a degraded recompose over nothing.
+            state = data.get("state")
+            if state is not None:
+                ch.record["houses"] = self._compose_houses(state, now)
+            else:
+                ch.record.setdefault("houses", [])
             if sit is not None:
                 # The landed record + cleared inflight marker, one honest boundary (spec §2b).
                 self._store.write_state(sit, record=_serialize_record(ch.record), inflight=None)
@@ -1139,18 +1155,21 @@ class SessionRegistry:
                 return ("nudge", {"message": _STALE_NUDGE})  # a previous process's tab
             return ("error", {"message": "session has not converged"})
         ch = self._ch.get(session_id)
+        # The village payload (living sitting §2f, L5): the frozen terrain + its houses — both
+        # composed at the SAME landing (_on_done), so they can never disagree at the close.
+        village = {"terrain": rec["terrain"], "houses": rec.get("houses", [])}
         if ch is not None and not ch.terminal and ch.record is None:
             # An in-flight segment past the last convergence: the static sign-off (MF-5). The
             # worker reap itself happens in _end_sitting (guarded against in-flight requests).
-            result = ("close", {"close": _STATIC_SITTING_CLOSE, "terrain": rec["terrain"]})
+            result = ("close", {"close": _STATIC_SITTING_CLOSE, **village})
         elif self._lost_context(session_id) is not None:
             # MF-5 across restart AND same-process errored tails (batch-review C3): the
             # interrupted tail is persisted state, not channel state — a mirrored close would
             # reflect the previous problem beneath the interrupted problem's visible turns.
-            result = ("close", {"close": _STATIC_RESTART_CLOSE, "terrain": rec["terrain"]})
+            result = ("close", {"close": _STATIC_RESTART_CLOSE, **village})
         elif rec.get("exp") is None:
             # Degraded rebuild: static close + the persisted village — never an unscreened author.
-            result = ("close", {"close": _STATIC_SITTING_CLOSE, "terrain": rec["terrain"]})
+            result = ("close", {"close": _STATIC_SITTING_CLOSE, **village})
         else:
             sit = self._sitting_id.get(session_id)
             world = self._store.read_world(sit) if sit is not None else None
@@ -1166,11 +1185,34 @@ class SessionRegistry:
                 )
             else:
                 close_text = voice.close(rec["model"], rec["exp"], rec["recent"], rec["posture"])
-            result = ("close", {"close": close_text, "terrain": rec["terrain"]})
+            result = ("close", {"close": close_text, **village})
         self._end_sitting(session_id)
         return result
 
     # ---- Living-sitting helpers (spec §2c/§2e/§2f): durable-history readers ------------------
+
+    def _compose_houses(self, state, now: datetime) -> list[dict]:
+        """The cumulative village (§2f, L5): one house per converged row — every sitting's, the
+        village is as cumulative as the terrain's own engine state — with region membership
+        computed against the SAME projection that freezes the record's terrain, so house region
+        ordinals and the terrain wire can never disagree. Territory membership comes from the
+        L-1 content library (experience_id -> rubric frame codes + decision_frame); an unreadable
+        library degrades to compose_houses' ref/region-0 fallbacks, never a die. Inert stores
+        have an empty log -> no houses (the `:memory:` shell tests stay untouched)."""
+        try:
+            frames_of = {
+                e.experience_id: (
+                    [f.frame_code for f in e.rubric.frames],
+                    e.rubric.decision_frame,
+                )
+                for e in load_library()
+                if e.rubric is not None
+            }
+        except Exception:
+            frames_of = {}
+        return compose_houses(
+            project_terrain(state, now).regions, self._store.converged_log(), frames_of
+        )
 
     def _positions(self, sit: str | None) -> list[str]:
         """Her committed positions for the forge brief (§2b review D3): the final substantive

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from .types import LearnerState, Region, RegionRender, Strength, TerrainView
+from .types import LearnerState, Region, RegionRender, Strength, TerrainView, _vitality_bucket
 
 _VITALITY = {Strength.weak: 0.2, Strength.forming: 0.6, Strength.strong: 1.0}
 
@@ -69,6 +69,62 @@ def project_terrain(
             )
         )
     return regions_to_view(regions)
+
+
+def compose_houses(
+    regions: list[Region],
+    rows: list[dict],
+    territory_frames: dict[str, tuple[list[str], str | None]],
+) -> list[dict]:
+    """Houses are converged segments (living sitting §2f/M7/D2): one house per `web_converged`
+    row, cumulative across sittings (the village accumulates exactly as the terrain's own engine
+    state does), in the rows' converged_at order — a public time signal; ORDER carries time, no
+    timestamps ride the wire.
+
+    Wire shape per house: ``{"region": <ordinal into the ORDERED regions — the same positional
+    ids the learner_view wire assigns>, "bucket": <that region's existing public vitality
+    bucket>}`` — no refs, no codes (L-13: houses are positional).
+
+    Region membership: the row's territory (`experience_id`) -> its rubric's frame codes (from
+    `territory_frames`) -> the region containing them. A territory whose frames span regions
+    resolves to the region holding its decision_frame; absent a DF among the holders, the lowest
+    ordinal wins (deterministic). Rows without a territory (pre-living-sitting curated
+    convergences, experience_id='') fall back to the region whose `problems` hold the row's ref;
+    a row nothing matches lands in region 0 — never dropped, never a crash.
+
+    Honest residual (review D11): per-region converged COUNTS and problem-to-region grouping
+    become public — justified as user-known (she lived each convergence; the close narrates
+    them) and as the intended reward. Codes stay protected: membership is computed from frame
+    SETS, so a consistent content rename leaves the payload byte-identical; tied-region order
+    remains the accepted coarse-shape residual (§6)."""
+    houses: list[dict] = []
+    for row in rows:
+        idx = _house_region(regions, row, territory_frames)
+        bucket = _vitality_bucket(regions[idx].vitality) if regions else None
+        houses.append({"region": idx, "bucket": bucket})
+    return houses
+
+
+def _house_region(
+    regions: list[Region], row: dict, territory_frames: dict[str, tuple[list[str], str | None]]
+) -> int:
+    eid = row.get("experience_id", "")
+    if eid and eid in territory_frames:
+        codes, df = territory_frames[eid]
+        wanted = set(codes)
+        holders = [i for i, r in enumerate(regions) if wanted & set(r.frame_codes)]
+        if holders:
+            if df is not None:
+                for i in holders:
+                    if df in regions[i].frame_codes:
+                        return i
+            return holders[0]
+    ref = row.get("ref", "")
+    if ref:
+        for i, r in enumerate(regions):
+            if ref in r.problems:
+                return i
+    return 0
 
 
 def regions_to_view(regions: list[Region]) -> TerrainView:

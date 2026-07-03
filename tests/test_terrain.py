@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from retnovation.terrain import project_terrain, region_clears_guard
+from retnovation.terrain import compose_houses, project_terrain, region_clears_guard
 from retnovation.types import FrameStrength, LearnerState, RegionRender, Strength, TerrainView
 
 NOW = datetime(2026, 6, 29, tzinfo=timezone.utc)
@@ -177,6 +177,142 @@ def test_elevation_is_independent_of_vitality_two_axis():
     short_bright, tall_dim = rows[0], rows[1]
     assert (short_bright["vitality"], short_bright["elevation"]) == (3, 1)
     assert (tall_dim["vitality"], tall_dim["elevation"]) == (1, 3)
+
+
+# ---- Houses are converged segments (living sitting §2f/M7, plan L5) --------------------------
+
+
+def _row(eid, ref="P1", at="t"):
+    return {"sitting_id": "s", "ref": ref, "converged_at": at, "experience_id": eid}
+
+
+def _two_region_view():
+    # Two disjoint regions of distinct PUBLIC vitality: r0 = bright (strong), r1 = dim (weak).
+    state = LearnerState(
+        frames={
+            "z_strong_a": _fs(Strength.strong, ["P1", "P2"]),
+            "z_strong_b": _fs(Strength.strong, ["P1", "P2"]),
+            "a_weak_a": _fs(Strength.weak, ["P8", "P9"]),
+            "a_weak_b": _fs(Strength.weak, ["P8", "P9"]),
+        }
+    )
+    return project_terrain(state, NOW)
+
+
+def test_houses_founder_regression_two_convergences_one_region():
+    # The 2026-07-02 dogfood (§0 defect 2): two problems sharing frames -> ONE region — the
+    # region view collapsed two convergences into one felt reward. Houses mend it: one house
+    # PER converged row, both bucketed to the same region.
+    state = LearnerState(
+        frames={
+            "embed": _fs(Strength.strong, ["P1", "P2"]),
+            "choose_failure": _fs(Strength.forming, ["P1", "P2"]),
+        }
+    )
+    view = project_terrain(state, NOW)
+    membership = {
+        "anchor": (["embed", "choose_failure"], "choose_failure"),
+        "stakes": (["choose_failure"], "choose_failure"),
+    }
+    rows = [_row("anchor", ref="P1", at="t1"), _row("stakes", ref="P2", at="t2")]
+    houses = compose_houses(view.regions, rows, membership)
+    assert len(houses) == 2  # every convergence is a house
+    assert houses[0]["region"] == houses[1]["region"] == 0
+    # the house carries the region's EXISTING public bucket — nothing new to decode
+    assert houses[0]["bucket"] == view.learner_view()[0]["vitality"]
+
+
+def test_house_order_follows_converged_rows_not_region_order():
+    # Arrival order carries time (no timestamps on the wire): a house in the DIMMER region (r1)
+    # that converged first stays first.
+    view = _two_region_view()
+    membership = {"dim_t": (["a_weak_a"], None), "bright_t": (["z_strong_a"], None)}
+    rows = [_row("dim_t", ref="P8", at="t1"), _row("bright_t", ref="P1", at="t2")]
+    houses = compose_houses(view.regions, rows, membership)
+    assert [h["region"] for h in houses] == [1, 0]
+    assert houses[0]["bucket"] == 1 and houses[1]["bucket"] == 3
+
+
+def test_spanning_territory_resolves_to_its_decision_frame_region():
+    # A territory whose frames span regions maps to the region holding its DF frame
+    # (deterministic); with no DF among the holders, the lowest ordinal wins.
+    view = _two_region_view()
+    rows = [_row("span_t")]
+    spanning = (["z_strong_a", "a_weak_a"], "a_weak_a")  # DF lives in the dim region (r1)
+    assert compose_houses(view.regions, rows, {"span_t": spanning})[0]["region"] == 1
+    no_df = (["z_strong_a", "a_weak_a"], None)
+    assert compose_houses(view.regions, rows, {"span_t": no_df})[0]["region"] == 0
+
+
+def test_curated_and_unknown_rows_fall_back_to_ref_then_region_zero():
+    # Pre-living-sitting rows (experience_id='') match their REF against Region.problems; an
+    # unmatched ref (or an eid the library no longer knows) lands in region 0 — never dropped,
+    # never a crash.
+    view = _two_region_view()
+    rows = [
+        _row("", ref="P8", at="t1"),  # curated row: ref matches the dim region's problems
+        _row("", ref="GONE", at="t2"),  # unmatched ref -> region 0
+        _row("unknown_t", ref="P9", at="t3"),  # unknown eid -> ref matching -> dim region
+    ]
+    assert [h["region"] for h in compose_houses(view.regions, rows, {})] == [1, 0, 1]
+
+
+def test_first_convergence_house_sits_in_a_seed_region_with_no_bucket():
+    # One forged convergence: the world grain gives every banked frame the SAME single problem,
+    # so the region is still a seed — the house renders anyway (the reward is the house, not
+    # the region's ignition), carrying the seed's public bucket: None.
+    state = LearnerState(
+        frames={
+            "embed": _fs(Strength.forming, ["G1"]),
+            "choose_failure": _fs(Strength.forming, ["G1"]),
+        }
+    )
+    view = project_terrain(state, NOW)
+    assert view.regions[0].render is RegionRender.seed
+    rows = [_row("anchor", ref="G1")]
+    houses = compose_houses(view.regions, rows, {"anchor": (["embed", "choose_failure"], None)})
+    assert houses == [{"region": 0, "bucket": None}]
+
+
+def test_houses_with_no_regions_default_safely():
+    # A converged row over an empty projection (e.g. rows imported from another engine db):
+    # region 0, bucket None — the composition never crashes.
+    assert compose_houses([], [_row("", ref="veldra:x")], {}) == [{"region": 0, "bucket": None}]
+
+
+def test_houses_payload_is_rename_invariant():
+    # Extends the rename-invariance guard (mirrors test_learner_view_is_non_invertible_under_
+    # frame_rename) to the houses payload: renaming a frame consistently across the state AND
+    # the territory membership leaves the houses byte-identical — the wire carries region
+    # ordinals + public buckets only, never frame identity.
+    state = LearnerState(
+        frames={
+            "embed": _fs(Strength.strong, ["P1", "P2"]),
+            "choose_failure": _fs(Strength.forming, ["P1"]),
+        }
+    )
+    renamed = LearnerState(
+        frames={
+            "zzz_other": _fs(Strength.strong, ["P1", "P2"]),
+            "aaa_renamed": _fs(Strength.forming, ["P1"]),
+        }
+    )
+    rows = [_row("anchor", ref="P1", at="t1"), _row("anchor", ref="P2", at="t2")]
+    h1 = compose_houses(
+        project_terrain(state, NOW).regions,
+        rows,
+        {"anchor": (["embed", "choose_failure"], "choose_failure")},
+    )
+    h2 = compose_houses(
+        project_terrain(renamed, NOW).regions,
+        rows,
+        {"anchor": (["zzz_other", "aaa_renamed"], "aaa_renamed")},
+    )
+    assert h1 == h2  # rename invariant -> non-invertible wire
+    for h in h1:
+        assert set(h) == {"region", "bucket"}  # exactly the L-13-safe keys
+        assert isinstance(h["region"], int)
+        assert h["bucket"] in (None, 1, 2, 3)  # the region's coarse public bucket, nothing finer
 
 
 def test_elevation_is_rename_invariant():

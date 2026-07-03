@@ -110,8 +110,14 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
             "landing": data.get("landing", ""),
             "next_title": data.get("next_title", ""),
         }
-    if tag == "close":  # user-driven end: the honest close + the frozen-at-convergence terrain
-        return {"kind": "close", "close": data.get("close", ""), "terrain": data.get("terrain", [])}
+    if tag == "close":  # user-driven end: the honest close + the frozen-at-convergence village —
+        # terrain regions plus one house per convergence (living sitting §2f; ordinal-only, L-13)
+        return {
+            "kind": "close",
+            "close": data.get("close", ""),
+            "terrain": data.get("terrain", []),
+            "houses": data.get("houses", []),
+        }
     return {"kind": "error", "message": data.get("message", "")}
 
 
