@@ -24,6 +24,3 @@ traps:
     trap_detail: Took the minimal single-value option and assumed the generalization could be added later, when the shipped choice admits no later change.
   - trap_code: assumed_the_happy_path
     trap_detail: Failure direction left unstated, or defaulted to whatever was cheapest.
-# NOT embed (§2d): continuity_lock_in's DF is forced to embed, so THIS home keeps the spine
-# frame's unprompted channel (the 13/13-confirmed elicitation target stays readable here).
-decision_frame: choose_the_failure_default_deliberately

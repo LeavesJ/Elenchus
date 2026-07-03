@@ -170,6 +170,13 @@ def load_role_text(name: str, root: Path | None = None) -> str:
     return (_root(root) / "voice" / f"role_{name}.md").read_text()
 
 
+def load_territory_text(experience_id: str, root: Path | None = None) -> str:
+    """The learner-facing territory description (living sitting §2a): STIMULUS-level by rule —
+    the kind of decision, never the response shape. Guarded by three teeth (code checks + egress
+    shape in tests/test_forge.py; the behavioral intake-shift probe is @live)."""
+    return (_root(root) / "territories" / f"{experience_id}.md").read_text()
+
+
 def load_theme(subdir: str, name: str, root: Path | None = None) -> dict:
     p = _root(root) / subdir / f"{name}.theme.yaml"
     return yaml.safe_load(p.read_text()) if p.exists() else {}

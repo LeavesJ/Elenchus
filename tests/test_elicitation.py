@@ -11,6 +11,7 @@ from retnovation.elicitation import (
     run_elicitation_probe,
 )
 from retnovation.model import IntakeClassification
+from retnovation.run_elicitation import load_probe_experience
 from retnovation.types import (
     Frame,
     FrameState,
@@ -66,9 +67,37 @@ def _rubric(*, decision_frame=None, binding_constraint=None, frames=(TARGET,)):
     )
 
 
-def test_guard_passes_the_two_real_rubrics():
+def test_guard_passes_the_two_harness_variants():
+    # The production rubrics now carry decision_frames (the living-sitting arc floor, §2d), so the
+    # intake-only equivalence instrument runs on the DF-free variants in content/elicitation/ —
+    # the guard itself is unweakened (see the refusal test below).
     for eid in ("irreversible_anchor", "continuity_lock_in"):
-        assert_intake_equivalence(load_experience(eid).rubric, DEFAULT_TARGET)  # no raise
+        assert_intake_equivalence(load_probe_experience(eid).rubric, DEFAULT_TARGET)  # no raise
+
+
+def test_guard_refuses_the_production_rubrics_now_that_df_landed():
+    # The refusal IS the instrument's teeth: production continuity_lock_in force-probes embed
+    # (§2d's accepted cost), so intake-only equivalence no longer holds THERE — and the guard says so.
+    with pytest.raises(ValueError, match="decision_frame"):
+        assert_intake_equivalence(load_experience("continuity_lock_in").rubric, DEFAULT_TARGET)
+
+
+def test_variants_differ_from_canonical_only_by_the_dropped_decision_frame():
+    # The variants are the curated rubrics MINUS decision_frame — nothing else may drift, or the
+    # instrument silently stops measuring the shipped content (§2d).
+    import yaml
+
+    from retnovation.content_loader import CONTENT_ROOT
+    from retnovation.run_elicitation import ELICITATION_CONTENT_ROOT
+
+    variants = sorted((ELICITATION_CONTENT_ROOT / "rubrics").glob("*.yaml"))
+    assert [p.stem for p in variants] == ["continuity_lock_in", "irreversible_anchor"]
+    for p in variants:
+        variant = yaml.safe_load(p.read_text())
+        canonical = yaml.safe_load((CONTENT_ROOT / "rubrics" / p.name).read_text())
+        assert "decision_frame" not in variant
+        canonical.pop("decision_frame")
+        assert variant == canonical, f"{p.stem}: variant drifted from the canonical rubric"
 
 
 def test_guard_refuses_decision_frame():
@@ -128,7 +157,7 @@ def _intake(target_state, traps):
 
 
 def test_probe_records_states_and_verbatim_per_run():
-    exp = load_experience("continuity_lock_in")
+    exp = load_probe_experience("continuity_lock_in")  # DF-free variant (§2d)
     model = _FakeProbeModel(
         outputs=[GeneratedOutput(text="op-0"), GeneratedOutput(text="op-1")],
         intake_by_text={
@@ -146,7 +175,7 @@ def test_probe_records_states_and_verbatim_per_run():
 
 
 def test_probe_records_refusal_and_skips_intake():
-    exp = load_experience("continuity_lock_in")
+    exp = load_probe_experience("continuity_lock_in")  # DF-free variant (§2d)
     model = _FakeProbeModel(
         outputs=[GeneratedOutput(text="", refused=True)],
         intake_by_text={},  # classify_intake would KeyError if called — proves it is skipped
@@ -165,7 +194,7 @@ def test_probe_uses_learner_max_tokens_budget():
     assert (
         LEARNER_MAX_TOKENS > 1024
     )  # must exceed the lift default, else the 1024-cap bug silently returns
-    exp = load_experience("continuity_lock_in")
+    exp = load_probe_experience("continuity_lock_in")  # DF-free variant (§2d)
     seen: list[int] = []
 
     class _RecordingModel:

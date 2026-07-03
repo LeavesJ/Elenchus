@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from retnovation.content_loader import load_experience
 from retnovation.elicitation import DEFAULT_TARGET, run_elicitation_probe
+from retnovation.run_elicitation import load_probe_experience
 from retnovation.types import FrameState, ProbeResult
 
 _HAS_KEY = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"))
@@ -16,7 +16,7 @@ def test_live_elicitation_smoke():
     classified. NO assertion on the substantive verdict — that is the human's (SP1/L-15)."""
     from retnovation.model import AnthropicModel
 
-    exp = load_experience("continuity_lock_in")
+    exp = load_probe_experience("continuity_lock_in")  # DF-free variant (§2d)
     result = run_elicitation_probe([exp], AnthropicModel(), runs_by_id={"continuity_lock_in": 1})
     assert isinstance(result, ProbeResult) and len(result.runs) == 1
     run = result.runs[0]

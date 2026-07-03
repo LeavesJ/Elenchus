@@ -24,3 +24,4 @@ traps:
     trap_detail: Special-casing one account in a way that weakens the core promise.
   - trap_code: assumed_the_happy_path
     trap_detail: Failure direction left unstated, or defaulted to whatever was cheapest.
+decision_frame: protect_the_core_lane

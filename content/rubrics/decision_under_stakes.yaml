@@ -22,3 +22,4 @@ traps:
     trap_detail: Failure direction left unstated, or defaulted to whatever was cheapest.
   - trap_code: scope_creep_to_please
     trap_detail: Bending the offer to avoid saying no.
+decision_frame: choose_the_failure_default_deliberately

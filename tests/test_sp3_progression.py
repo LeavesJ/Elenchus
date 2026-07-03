@@ -9,6 +9,7 @@ from retnovation.model import FakeModel, IntakeClassification, ResponseClassific
 from retnovation.orchestration import run_session
 from retnovation.persistence import Store
 from retnovation.policy import select_next
+from retnovation.run_elicitation import load_probe_experience
 from retnovation.state import derive_due
 from retnovation.surface import format_problem_menu
 from retnovation.types import (
@@ -27,6 +28,9 @@ from retnovation.types import (
 EMBED = "embed_credentials_as_a_list"
 P1 = "veldra:embedded_anchor_lock_in"
 P2 = "veldra:license_fork_risk"
+LEAD = "lead_with_what_you_refuse_to_do"
+R1 = "veldra:license_fork_risk"
+R2 = "veldra:concentrated_market_pricing_power"
 NOW1 = datetime(2026, 6, 26, tzinfo=timezone.utc)
 
 
@@ -81,7 +85,9 @@ def test_continuity_lock_in_clears_the_gate():
 def test_session1_credits_embed_unprompted_through_the_real_loop():
     # embed present_reasoned at intake; choose_failure absent (so the loop WILL probe it). If embed were
     # ever probed, it would not be in reasoned_unprompted. This proves the unprompted credit is earned by
-    # the real not-probed path, not injected (irreversible_anchor has no decision_frame -> no stress-probe).
+    # the real not-probed path, not injected. irreversible_anchor's decision_frame is pinned to
+    # choose_the_failure_default_deliberately (living sitting §2d) precisely so the DF probe targets
+    # choose_failure and embed KEEPS its unprompted channel here — this test is that channel's teeth.
     exp = load_experience("irreversible_anchor")
     intake = IntakeClassification(
         frame_states={
@@ -106,16 +112,23 @@ def test_session1_credits_embed_unprompted_through_the_real_loop():
 
 
 def test_two_session_run_reaches_strong_through_the_real_path(tmp_path):
+    # The DF matrix (living sitting §2d) closed embed's SECOND unprompted home — production
+    # continuity_lock_in force-probes embed (the named, accepted cost), so embed can no longer
+    # mint strong through two unprompted contexts. The strong arc is therefore pinned on
+    # lead_with_what_you_refuse_to_do: the one frame with two non-DF homes on distinct refs
+    # (license_continuity -> R1, decision_under_stakes -> R2). Same engine path as before:
+    # unprompted at intake on two distinct refs -> strong -> the 30-day savings effect.
     db = tmp_path / "sp3.db"
     store = build_store(db)
     core = derive_core(aim())
     lib, cfg = load_library(), load_progression()
 
-    # --- session 1: irreversible_anchor. embed present_reasoned (unprompted); choose_failure absent (probed, closed).
+    # --- session 1: license_continuity. lead present_reasoned (unprompted); the DF
+    # (commit_under_the_deadline) and protect_the_core_lane absent (probed, closed).
     s1_model = _model_for(
-        frames_present=[EMBED],
-        traps=["deferred_the_one_time_choice", "assumed_the_happy_path"],
-        probed_responses={"choose_the_failure_default_deliberately"},
+        frames_present=[LEAD],
+        traps=["scope_creep_to_please", "erode_core_for_one_customer", "commit_without_a_tripwire"],
+        probed_responses={"commit_under_the_deadline", "protect_the_core_lane"},
     )
     state1, _ = run_session(
         store,
@@ -124,39 +137,36 @@ def test_two_session_run_reaches_strong_through_the_real_path(tmp_path):
         NOW1,
         regime=Regime.open_ended,
         present=_present,
-        decide=_steer("irreversible_anchor"),
+        decide=_steer("license_continuity"),
         decide_core=lambda c: [],
     )
-    assert state1.frames[EMBED].strength is Strength.forming
-    assert state1.frames[EMBED].breadth == {P1}
-    assert state1.frames[EMBED].unprompted_breadth == {P1}
+    assert state1.frames[LEAD].strength is Strength.forming
+    assert state1.frames[LEAD].breadth == {R1}
+    assert state1.frames[LEAD].unprompted_breadth == {R1}
     # session-1 learner surface withholds the frame (both sessions credit an unprompted read)
-    assert EMBED not in format_problem_menu(
-        Proposal(candidates=select_next(state1, lib, cfg, NOW1))
-    )
+    assert LEAD not in format_problem_menu(Proposal(candidates=select_next(state1, lib, cfg, NOW1)))
 
     # --- ordering pin at the worst-case forming edge (+7d), derived from the REAL post-S1 state ---
     now2 = NOW1 + timedelta(days=7)
     ranked = select_next(state1, lib, cfg, now2)
     top_spec, top_rcpt = ranked[0]
-    assert top_spec.experience_id == "continuity_lock_in"
-    assert top_rcpt.frame == EMBED and top_rcpt.drive == "deploy"
-    # the REAL ordering risk is a same-drive competing transfer (choose_failure, forming after S1); assert
-    # the direct rank-1-vs-rank-2 gap (~0.08), NOT the receipt margin (cross-drive only — policy.py:99).
-    assert ranked[0][1].scores["V"] - ranked[1][1].scores["V"] > 0
-    assert EMBED not in format_problem_menu(
+    assert top_spec.experience_id == "decision_under_stakes"
+    assert top_rcpt.frame == LEAD and top_rcpt.drive == "deploy"
+    # S1 banks three forming frames the same day, so the two deploy candidates (lead ->
+    # decision_under_stakes, protect -> proof_before_promise) TIE on V (1.83) and the policy's
+    # deterministic order puts the LEAD deployment first; deploy dominates diagnose at rank 2.
+    assert ranked[0][1].scores["V"] == ranked[1][1].scores["V"]
+    assert ranked[0][1].scores["V"] > ranked[2][1].scores["V"]
+    assert LEAD not in format_problem_menu(
         Proposal(candidates=ranked)
     )  # session-2 surface withholds too
 
-    # --- session 2 at +7d; embed present_reasoned (unprompted) -> strong ---
+    # --- session 2 at +7d on decision_under_stakes; lead present_reasoned (unprompted) -> strong;
+    # the DF (choose_the_failure_default_deliberately) absent (probed, closed).
     s2_model = _model_for(
-        frames_present=[EMBED],
-        traps=[
-            "shipped_the_one_shot_term",
-            "over_built_the_escape_hatch",
-            "treated_the_shipped_choice_as_amendable",
-        ],
-        probed_responses={},
+        frames_present=[LEAD],
+        traps=["assumed_the_happy_path", "scope_creep_to_please"],
+        probed_responses={"choose_the_failure_default_deliberately"},
     )
     state2, _ = run_session(
         store,
@@ -165,13 +175,13 @@ def test_two_session_run_reaches_strong_through_the_real_path(tmp_path):
         now2,
         regime=Regime.open_ended,
         present=_present,
-        decide=_steer("continuity_lock_in"),
+        decide=_steer("decision_under_stakes"),
         decide_core=lambda c: [],
     )
-    assert state2.frames[EMBED].strength is Strength.strong
-    assert state2.frames[EMBED].unprompted_breadth == {P1, P2}
+    assert state2.frames[LEAD].strength is Strength.strong
+    assert state2.frames[LEAD].unprompted_breadth == {R1, R2}
     # post-strong savings effect: due interval jumps to 30 days
-    fs = Store(db).load_state(now2).frames[EMBED]
+    fs = Store(db).load_state(now2).frames[LEAD]
     assert derive_due(
         fs.evidence_count, fs.unprompted_breadth, fs.last_seen
     ) == fs.last_seen + timedelta(days=30)
@@ -223,8 +233,10 @@ def test_loop_guardian_embed_unprompted_on_continuity_lock_in():
     # intake on the isolate; one trap tripped so the loop ACTUALLY runs a probe on another target;
     # embed must still land in reasoned_unprompted and never be probed. A judgment-loop edit that
     # lets a present-at-intake frame be probed/lowered turns this red — the enforcement the
-    # rubric-shaped guard (assert_intake_equivalence) structurally cannot provide.
-    exp = load_experience("continuity_lock_in")
+    # rubric-shaped guard (assert_intake_equivalence) structurally cannot provide. Runs on the
+    # DF-free variant (living sitting §2d): production continuity_lock_in force-probes embed by
+    # design now, and the equivalence instrument lives on content/elicitation/'s variants.
+    exp = load_probe_experience("continuity_lock_in")
     intake = IntakeClassification(
         frame_states={"embed_credentials_as_a_list": FrameState.present_reasoned},
         trap_states={
