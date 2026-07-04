@@ -401,3 +401,13 @@ def test_core_candidate_and_verdict_roundtrip():
     )
     v = CoreVerdict(candidate=c, outcome="rejected")
     assert v.candidate.kind is CoreKind.demote and v.outcome == "rejected"
+
+
+def test_territory_map_defaults_are_decision_and_empty_conversion():
+    """Additive wire fields (front-door conversion spec §2a): every existing fake and caller
+    stays valid — verdict defaults to decision, conversion to empty."""
+    from retnovation.types import TerritoryMap
+
+    tm = TerritoryMap(ranked=["a"], confidence="high", reflection="r")
+    assert tm.verdict == "decision"
+    assert tm.conversion == ""

@@ -708,10 +708,17 @@ class AnthropicModel:
             "You map a person's real situation onto the numbered territories below — each names "
             "a kind of decision. Return: `ranked` — every territory id, best fit first, ids "
             'exactly as given in brackets; `confidence` — "high" if the best territory\'s kind '
-            'of decision is plainly the kind she is facing, else "low"; `reflection` — ONE '
-            "line reflecting the decision she is facing, in her own words wherever possible. "
-            "The reflection describes her situation only: never advice, never analysis "
-            "vocabulary, never the territory text."
+            'of decision is plainly the kind she is facing, else "low"; `verdict` — "decision" '
+            "if she describes a decision, a dilemma, or a situation she must act in; "
+            '"topic" if she instead asks a question, seeks advice, or names a subject of '
+            "curiosity; `reflection` — ONE line reflecting what she is facing, in her own words "
+            'wherever possible (on "topic", reflect the subject she raised). The reflection '
+            "describes her situation only: never advice, never analysis vocabulary, never the "
+            'territory text. `conversion` — empty unless verdict is "topic"; then ONE sentence '
+            "that engages her subject in her own words, plus ONE question asking for the "
+            "concrete call she faces inside that subject. The conversion never answers her "
+            "question, never recommends, never names a territory, never judges the question, "
+            "and never declares anything out of scope."
         )
         user = f"Her situation:\n{situation}\n\nTerritories:\n{numbered}"
         resp = self._parse_required(

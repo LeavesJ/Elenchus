@@ -358,11 +358,14 @@ class EgressScreen(BaseModel):
 
 
 class TerritoryMap(BaseModel):
-    # The front-door mapper's wire shape (living sitting §2a). Server-side output: the
-    # reflection is learner-facing ONLY after the caller egress-screens it (gated reflection).
-    ranked: list[str]  # experience_ids, best first
+    # The front-door mapper's wire shape (living sitting §2a + front-door conversion spec).
+    # Server-side output: reflection/conversion are learner-facing ONLY after the caller
+    # egress-screens them (gated reflection precedent).
+    ranked: list[str]  # experience_ids, best first (returned on "topic" too — best stretch)
     confidence: str  # "high" | "low"
     reflection: str  # one line, HER words where possible
+    verdict: Literal["decision", "topic"] = "decision"  # topic = question/curiosity/advice-ask
+    conversion: str = ""  # on "topic": engage her subject + ask for the call inside it
 
 
 class FitCheck(BaseModel):

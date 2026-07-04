@@ -377,3 +377,19 @@ def test_classify_response_without_stress_is_byte_stable():
     sys = _system_text(client.messages.parse_calls[0])
     assert "deepening mechanism" not in sys  # no stress doctrine when stress=False
     assert "case instructor" in sys  # the base response doctrine is still present (no drop)
+
+
+def test_map_territories_instruction_carries_the_conversion_doctrine():
+    """Spec §2a: the mapper authors the conversion — the instruction must define the topic
+    verdict and the conversion craft (engage her subject, one question, never answer, never
+    name a territory, never out-of-scope)."""
+    from retnovation.types import TerritoryMap
+
+    wire = TerritoryMap(ranked=["e1"], confidence="high", reflection="r")
+    client = _Client(parse_result=_Resp(parsed_output=wire))
+    AnthropicModel(client=client).map_territories("her situation", [("e1", "desc one")])
+    sys = _system_text(client.messages.parse_calls[0])
+    assert "`verdict`" in sys and '"topic"' in sys
+    assert "`conversion`" in sys
+    assert "never answers her question" in sys
+    assert "out of scope" in sys  # the instruction FORBIDS it by naming it
