@@ -1049,6 +1049,104 @@ def _open_world(reg, sid="s1", situation=_SITUATION, now=NOW):
     return data
 
 
+def _mapper_factory(make_fake, script):
+    """World factory whose map_territories pops one update-dict per call from `script`
+    (merged over the base fake's TerritoryMap); an empty/exhausted script = base output."""
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+
+        def mapper(situation, territories):
+            out = orig(situation, territories)
+            return out.model_copy(update=script.pop(0)) if script else out
+
+        m.map_territories = mapper
+        return m
+
+    return factory
+
+
+def test_topic_intake_gets_the_conversion_beat_then_a_decision_proceeds(tmp_path, make_fake):
+    """Spec §2a: a question is answered with a CONVERSION (their subject + the call inside
+    it), and the reply is a fresh intake — a decision reply proceeds to the forge. The world
+    row follows the latest fed text; the wire stays kind+text."""
+    script = [
+        {
+            "verdict": "topic",
+            "conversion": "You're asking about onboarding — inside that build, what's the next call you have to make?",
+        },
+        {},  # the reply re-maps as a decision (base defaults: decision / high)
+    ]
+    db = str(tmp_path / "conv.db")
+    reg = SessionRegistry(db, model_factory=_mapper_factory(make_fake, script))
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", "what should optimal onboarding look like?")
+    assert tag == "say"
+    assert "what's the next call" in data["text"]  # the authored conversion served
+    tag, data = reg.step("s1", "I must decide whether to gate signup behind SSO by Friday")
+    assert tag == "say" and data["text"] == _SCENARIO  # re-mapped as decision -> forged
+    store = SittingStore(db)
+    assert store.read_world(store.live_sitting()["id"]).startswith("I must decide")
+    _, rdata = reg.resume_or_start("s1")
+    assert all(set(t) == {"kind", "text"} for t in rdata["turns"])  # wire purity
+
+
+def test_second_topic_falls_through_to_the_honest_fit_beat(tmp_path, make_fake):
+    """Spec §2a: exactly ONE conversion per pass — a second topic reply takes the honest-fit
+    beat on the re-map's best stretch (doors escape lives there); consent semantics then
+    proceed as today."""
+    script = [
+        {"verdict": "topic", "conversion": "First conversion question?"},
+        {"verdict": "topic", "conversion": "Second conversion would be an interrogation"},
+    ]
+    reg = SessionRegistry(
+        str(tmp_path / "conv2.db"), model_factory=_mapper_factory(make_fake, script)
+    )
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", "a question about strategy")
+    assert data["text"] == "First conversion question?"
+    tag, data = reg.step("s1", "another question, still not a decision")
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    assert data["text"] == _HONEST_FIT.format(desc=desc)  # fit beat, NOT a second conversion
+    tag, data = reg.step("s1", "fine, start there")
+    assert tag == "say" and data["text"] == _SCENARIO  # consent proceeds as today
+
+
+def test_conversion_screen_failure_serves_the_static_and_never_deflects(tmp_path, make_fake):
+    """Spec §2a: an empty/refused/leaky authored conversion takes _STATIC_CONVERSION — which
+    itself converts; the words 'out of scope' can never serve (founder constraint)."""
+    from retnovation.web.session_runner import _STATIC_CONVERSION
+
+    script = [{"verdict": "topic", "conversion": ""}, {}]
+    reg = SessionRegistry(
+        str(tmp_path / "conv3.db"), model_factory=_mapper_factory(make_fake, script)
+    )
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", "a question")
+    assert data["text"] == _STATIC_CONVERSION
+    assert "out of scope" not in _STATIC_CONVERSION.lower()
+    tag, data = reg.step("s1", "the call I face is X vs Y")
+    assert data["text"] == _SCENARIO  # the beat converted; the reply proceeded
+
+
+def test_resume_parked_at_conversion_reserves_the_conversion_question(tmp_path, make_fake):
+    """Spec §2a: frontdoor_pending carries the conversion — a reload re-serves the question
+    actually pending (the 2026-07-03 resume-fidelity fix extends to the new park)."""
+    script = [{"verdict": "topic", "conversion": "The conversion question?"}]
+    reg = SessionRegistry(
+        str(tmp_path / "conv4.db"), model_factory=_mapper_factory(make_fake, script)
+    )
+    tag, data = reg.start("s1", now=NOW)
+    nonce = data["menu"].get("nonce", 0)
+    reg.step("s1", "a question")
+    tag, rdata = reg.resume_or_start("s1")
+    assert tag == "resume"
+    assert rdata["frontdoor"]["text"] == "The conversion question?"
+    assert rdata["frontdoor"]["menu"]["nonce"] == nonce
+    assert not (rdata["turns"] and rdata["turns"][-1]["text"] == "The conversion question?")
+
+
 def test_front_door_free_text_forges_the_world_end_to_end(tmp_path, make_fake):
     """The battery's spine (spec §2a/§2g): static ask + small doors → free text → heard-you
     bridge riding the forged opening (the scenario IS the opening) → engine grades → landing.

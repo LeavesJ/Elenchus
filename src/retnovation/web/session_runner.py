@@ -89,6 +89,14 @@ _HONEST_FIT = (
 # The static heard-you bridge when the mapper's reflection fails its egress screen (D9).
 _STATIC_BRIDGE = "Understood — stand in it:"
 
+# The conversion beat's static fallback (front-door conversion spec §2a): served only when
+# the authored conversion is empty/refused/leaky. It must CONVERT, never deflect — the words
+# "out of scope" are forbidden output (founder constraint, 2026-07-04).
+_STATIC_CONVERSION = (
+    "I don't hand out answers on a topic — I press decisions. Somewhere in what you just "
+    "described there's a call you have to make. What is it?"
+)
+
 # The informed re-serve (§2c review P3, copy pinned): all territories windowed is a DEFINED
 # state — a question, never a refusal, never a false fresh-situation door.
 _RESERVE_COPY = (
@@ -345,21 +353,60 @@ class SessionRegistry:
                     if sit is not None:
                         # BEFORE forging (P1/§2g): the world persists even if the forge falls
                         # back or the process dies mid-map — mid-front-door is a durable state.
+                        # A topic-world is accepted (spec §2a): the forge instantiates
+                        # territories ON her material; topics forge well (dogfood-proven).
                         self._store.write_world(sit, situation, now)
                     territories = [
                         (e.experience_id, load_territory_text(e.experience_id)) for e in open_exps
                     ]
                     known = {eid for eid, _ in territories}
-                    tmap = model.map_territories(situation, territories)
-                    ranked = [eid for eid in tmap.ranked if eid in known]
-                    if not ranked:  # a hallucinated ranking cannot pick the door (voice parity)
-                        ranked = [eid for eid, _ in territories]
-                    eid = ranked[0]
-                    ch.mapped_rank = ranked  # banked registry-side at the next dequeue (§2c)
+                    force_fit = False
+                    converted = False
+                    while True:
+                        tmap = model.map_territories(situation, territories)
+                        ranked = [eid for eid in tmap.ranked if eid in known]
+                        if not ranked:  # a hallucinated ranking cannot pick the door
+                            ranked = [eid for eid, _ in territories]
+                        eid = ranked[0]
+                        ch.mapped_rank = ranked  # banked registry-side at the next dequeue
+                        if tmap.verdict != "topic":
+                            break
+                        if converted:
+                            # ONE conversion per pass (spec §2a): a second topic falls through
+                            # to the honest-fit beat on THIS map's best stretch — pressing the
+                            # conversion twice is an interrogation, and the fit beat carries
+                            # the doors escape. The composer never dead-ends.
+                            force_fit = True
+                            break
+                        converted = True
+                        # The conversion beat: engage THEIR subject, ask for the decision
+                        # inside it — authored by the mapper, screened like the reflection
+                        # (§2a gated precedent); the static fallback converts too. Never
+                        # "out of scope" (founder constraint, 2026-07-04). Verdict trumps
+                        # confidence: a topic is not a decision however cleanly it maps.
+                        base0 = next(e for e in open_exps if e.experience_id == eid)
+                        text = tmap.conversion.strip()
+                        served = (
+                            text
+                            if text and voice.egress_safe_reply(model, base0, text)
+                            else _STATIC_CONVERSION
+                        )
+                        ch.frontdoor_pending = served  # before the put (resume re-serves it)
+                        ch.from_worker.put(("say", {"text": served}))
+                        value = ch.to_worker.get()
+                        ch.frontdoor_pending = None  # consumed
+                        if value is _ABANDON:
+                            raise _Abandoned()
+                        if isinstance(value, int):
+                            return menu_selection(value)
+                        situation = value  # a fresh intake, NOT consent — re-map it
+                        if sit is not None:
+                            self._store.write_world(sit, situation, now)
                     # Conservative read (batch-review fold): anything a live model returns that
                     # is not clearly "high" takes the honest-fit beat — silent stretching costs
-                    # signal; the extra beat costs one collect.
-                    if tmap.confidence.strip().lower() != "high":
+                    # signal; the extra beat costs one collect. force_fit (a second topic)
+                    # takes it regardless of confidence.
+                    if force_fit or tmap.confidence.strip().lower() != "high":
                         # Honest fit (§2a): her situation stays the world; no silent stretching.
                         desc = " ".join(load_territory_text(eid).split()).rstrip(".")
                         ch.frontdoor_pending = _HONEST_FIT.format(desc=desc)  # before the put
