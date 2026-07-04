@@ -408,7 +408,13 @@ class SessionRegistry:
                         text = tmap.conversion.strip()
                         served = (
                             text
-                            if text and voice.egress_safe_reply(model, base0, text)
+                            if text
+                            # The founder's forbidden phrase is unservable STRUCTURALLY
+                            # (review fold 2026-07-04): the move screen is blind to
+                            # deflection language, and instruction compliance alone is
+                            # not trusted anywhere else on this path either.
+                            and "out of scope" not in text.lower()
+                            and voice.egress_safe_reply(model, base0, text)
                             else _STATIC_CONVERSION
                         )
                         ch.frontdoor_pending = served  # before the put (resume re-serves it)
@@ -1106,6 +1112,17 @@ class SessionRegistry:
         if not pending:
             return ("nudge", {"message": _STALE_NUDGE})
         if nonce is not None and nonce != self._menu_nonce.get(session_id):
+            return (
+                "menu",
+                {
+                    "problems": list(ch.last_menu),
+                    "nonce": self._menu_nonce.get(session_id, 0),
+                },
+            )
+        if not (0 <= idx < len(ch.last_menu)):
+            # A crafted index must never reach the worker (review fold 2026-07-04, probe: -1
+            # silently forged the LAST door via negative indexing; 99 IndexError'd the
+            # segment). Re-serve the pending menu; the nonce is not burned by a bad click.
             return (
                 "menu",
                 {

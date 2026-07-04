@@ -1130,6 +1130,110 @@ def test_conversion_screen_failure_serves_the_static_and_never_deflects(tmp_path
     assert data["text"] == _SCENARIO  # the beat converted; the reply proceeded
 
 
+def test_scope_phrase_conversion_is_structurally_unservable(tmp_path, make_fake):
+    """Review fold 2026-07-04 (probe-confirmed): the founder's forbidden phrase must be
+    unservable STRUCTURALLY — the move screen is blind to deflection language, so a
+    disobedient authored conversion containing 'out of scope' must fall to the static."""
+    from retnovation.web.session_runner import _STATIC_CONVERSION
+
+    script = [
+        {
+            "verdict": "topic",
+            "conversion": "That's a bit out of scope for me — but what's the call you face?",
+        },
+        {},
+    ]
+    reg = SessionRegistry(
+        str(tmp_path / "scope.db"), model_factory=_mapper_factory(make_fake, script)
+    )
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", "a question")
+    assert data["text"] == _STATIC_CONVERSION  # the phrase never serves
+
+
+def test_leaky_conversion_serves_the_static(tmp_path, make_fake):
+    """Review fold 2026-07-04 (mutation survived): the conversion egress screen needs teeth —
+    a conversion that PERFORMS a hidden move of the rank-head territory must fall to the
+    static, never serve (the L-13 gate on the new learner-facing surface)."""
+    from retnovation.model import EgressScreen
+    from retnovation.web.session_runner import _STATIC_CONVERSION
+
+    leaky = "Just list every credential you need and embed them — now, what call do you face?"
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig_map = m.map_territories
+        script = [{"verdict": "topic", "conversion": leaky}]
+        m.map_territories = lambda s, t: (
+            orig_map(s, t).model_copy(update=script.pop(0)) if script else orig_map(s, t)
+        )
+        orig_screen = m.screen_moves
+        m.screen_moves = lambda moves, text: (
+            EgressScreen(performed=[1], evidence="performs move 1")
+            if text == leaky
+            else orig_screen(moves, text)
+        )
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "leak-conv.db"), model_factory=factory)
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", "a question")
+    assert data["text"] == _STATIC_CONVERSION  # the leaky authored text never serves
+
+
+def test_out_of_range_click_reserves_the_menu_instead_of_reaching_the_worker(tmp_path, make_fake):
+    """Review fold 2026-07-04 (probe-confirmed): a crafted index must not reach the worker —
+    -1 silently forged the LAST door (Python negative indexing), 99 IndexError'd the segment.
+    choose() bounds-checks at the boundary and re-serves the pending menu, nonce unburned."""
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+        m.map_territories = lambda s, t: orig(s, t).model_copy(update={"confidence": "low"})
+        return m
+
+    db = str(tmp_path / "bounds.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    tag, data = reg.start("s1", now=NOW)
+    nonce = data["menu"].get("nonce", 0)
+    reg.step("s1", _SITUATION)  # parked at the fit beat
+    for bad in (-1, 99):
+        tag, data = reg.choose("s1", bad, nonce)
+        assert tag == "menu"  # re-served, never forwarded
+        assert data["nonce"] == nonce  # the nonce was not burned by an invalid click
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    assert store.read_generated_problem(f"gen:{sit}:1") is None  # nothing forged
+
+
+def test_clicked_forge_on_the_top_door_logs_accepted(tmp_path, make_fake):
+    """Review fold 2026-07-04 (spec §4 test 9's other half): clicking the policy-top door at
+    a fit park logs Outcome.accepted — pins the object-identity contract (spec_src is
+    top_spec) a Proposal refactor could silently break."""
+    import sqlite3 as _sq
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+        m.map_territories = lambda s, t: orig(s, t).model_copy(update={"confidence": "low"})
+        return m
+
+    db = str(tmp_path / "click-top.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)
+    tag, data = reg.step("s1", 0)  # the policy top (menu order is the proposal order)
+    assert tag == "say" and data["text"] == _SCENARIO
+    tag, _ = _drive(reg, "s1", opening="a position on the top door")
+    assert tag == "done"
+    con = _sq.connect(db)
+    outcome = con.execute(
+        "SELECT outcome FROM selection_log ORDER BY rowid DESC LIMIT 1"
+    ).fetchone()[0]
+    con.close()
+    assert outcome == "accepted"
+
+
 def test_resume_parked_at_conversion_reserves_the_conversion_question(tmp_path, make_fake):
     """Spec §2a: frontdoor_pending carries the conversion — a reload re-serves the question
     actually pending (the 2026-07-03 resume-fidelity fix extends to the new park)."""
