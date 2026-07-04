@@ -1271,7 +1271,9 @@ def test_resume_parked_at_honest_fit_reserves_the_honest_fit_question(tmp_path, 
 
 
 def test_front_door_low_confidence_int_takes_a_door(tmp_path, make_fake):
-    """The honest-fit round-trip's other exit: an int goes to today's menu path."""
+    """The honest-fit round-trip's other exit: an int with fed material this pass FORGES the
+    clicked territory around it (front-door conversion spec §2b — dogfood 2026-07-04: the
+    naked curated prompt served against a typed situation felt deaf)."""
 
     def factory():
         m = _world_factory(make_fake)()
@@ -1284,7 +1286,100 @@ def test_front_door_low_confidence_int_takes_a_door(tmp_path, make_fake):
     tag, data = reg.step("s1", _SITUATION)
     assert tag == "say" and "other doors" in data["text"]
     tag, data = reg.step("s1", reg.menu_index("s1", _ANCHOR))
-    assert tag == "say" and data["text"] == "[open]"  # curated door, no forge
+    assert tag == "say" and data["text"] == _SCENARIO  # forged around her material (§2b)
+
+
+def test_click_at_the_fit_park_forges_the_clicked_territory(tmp_path, make_fake):
+    """Spec §2b: a door click after fed-in material this pass forges the CLICKED territory
+    around it — never the naked curated prompt (dogfood 2026-07-04: firmware served against
+    an onboarding situation)."""
+    briefs = []
+
+    def factory():
+        m = _world_factory(make_fake, briefs=briefs)()
+        orig = m.map_territories
+        m.map_territories = lambda s, t: orig(s, t).model_copy(update={"confidence": "low"})
+        return m
+
+    db = str(tmp_path / "click-forge.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", _SITUATION)
+    assert "other doors first?" in data["text"]  # parked at the fit beat
+    idx = reg._ch["s1"].last_menu_eids.index(_T3)
+    tag, data = reg.step("s1", idx)  # the click
+    assert tag == "say" and data["text"] == _SCENARIO  # forged, not curated
+    assert _SITUATION in briefs[-1][0]  # the brief carries her fed material
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    row = store.read_generated_problem(f"gen:{sit}:1")
+    assert row is not None and row["experience_id"] == _T3  # the CLICKED territory
+
+
+def test_click_at_the_conversion_park_forges_around_the_topic(tmp_path, make_fake):
+    """Spec §2a/§2b: at the conversion park a click means 'give me the pressure on my
+    material' — the topic text is the forge brief's situation."""
+    briefs = []
+
+    def factory():
+        m = _world_factory(make_fake, briefs=briefs)()
+        orig = m.map_territories
+        script = [{"verdict": "topic", "conversion": "What call do you face in that?"}]
+        m.map_territories = lambda s, t: (
+            orig(s, t).model_copy(update=script.pop(0)) if script else orig(s, t)
+        )
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "click-conv.db"), model_factory=factory)
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", "a topic, not a decision")
+    assert data["text"] == "What call do you face in that?"
+    idx = reg._ch["s1"].last_menu_eids.index(_T2)
+    tag, data = reg.step("s1", idx)
+    assert tag == "say" and data["text"] == _SCENARIO
+    assert "a topic, not a decision" in briefs[-1][0]
+
+
+def test_cold_click_stays_curated(tmp_path, make_fake):
+    """Spec §2b: a click at the initial ask (nothing typed this pass) is byte-identical to
+    today — curated prompt, no forge, no instance row."""
+    db = str(tmp_path / "cold-click.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    assert tag == "say" and data["text"] != _SCENARIO  # curated opening, not a forge
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    assert store.read_generated_problem(f"gen:{sit}:1") is None
+
+
+def test_clicked_forge_logs_menu_outcome_semantics(tmp_path, make_fake):
+    """Spec §2b: clicked forges log accepted-if-top else redirected — selection telemetry
+    stays honest about who chose the door."""
+    import sqlite3 as _sq
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+        m.map_territories = lambda s, t: orig(s, t).model_copy(update={"confidence": "low"})
+        return m
+
+    db = str(tmp_path / "click-outcome.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)
+    eids = reg._ch["s1"].last_menu_eids
+    non_top = next(i for i, e in enumerate(eids) if e != eids[0])
+    tag, data = reg.step("s1", non_top)
+    assert tag == "say" and data["text"] == _SCENARIO
+    tag, _ = _drive(reg, "s1", opening="a position on the clicked door")
+    assert tag == "done"  # log_decision writes at the segment's end, not at the opening
+    con = _sq.connect(db)
+    outcome = con.execute(
+        "SELECT outcome FROM selection_log ORDER BY rowid DESC LIMIT 1"
+    ).fetchone()[0]
+    con.close()
+    assert outcome == "redirected"
 
 
 def test_leaking_reflection_serves_the_static_bridge(tmp_path, make_fake):

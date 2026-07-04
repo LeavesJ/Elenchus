@@ -278,7 +278,7 @@ class SessionRegistry:
                             outcome=Outcome.accepted if spec is top_spec else Outcome.redirected,
                         )
 
-                    def forge_selection(eid, situation):
+                    def forge_selection(eid, situation, clicked=False):
                         # Forge a generated problem over the curated base (spec §2b). Brief
                         # inputs come from the DURABLE sitting: her final substantive `you`
                         # turns per landed segment, the frames engaged this sitting, the
@@ -318,7 +318,14 @@ class SessionRegistry:
                             proposed_receipt=top_rcpt,
                             chosen_spec=spec,
                             chosen_receipt=receipt,
-                            outcome=Outcome.accepted,  # she authored the ask
+                            outcome=(
+                                # Free text: she authored the ask. A CLICK keeps menu
+                                # semantics — accepted only when it is the policy top
+                                # (spec §2b: selection telemetry stays honest).
+                                Outcome.accepted
+                                if not clicked or spec_src is top_spec
+                                else Outcome.redirected
+                            ),
                         )
 
                     # Same-world Continue (§2c): a queued target territory + a persisted world
@@ -398,7 +405,10 @@ class SessionRegistry:
                         if value is _ABANDON:
                             raise _Abandoned()
                         if isinstance(value, int):
-                            return menu_selection(value)
+                            # A click with fed material this pass forges the CLICKED
+                            # territory around it (spec §2b); cold clicks at the initial
+                            # ask stay curated.
+                            return forge_selection(eids[value], situation, clicked=True)
                         situation = value  # a fresh intake, NOT consent — re-map it
                         if sit is not None:
                             self._store.write_world(sit, situation, now)
@@ -416,7 +426,7 @@ class SessionRegistry:
                         if value is _ABANDON:
                             raise _Abandoned()
                         if isinstance(value, int):
-                            return menu_selection(value)
+                            return forge_selection(eids[value], situation, clicked=True)
                         # any text proceeds with the MAPPED territory (branch kept simple)
                     base = next(e for e in open_exps if e.experience_id == eid)
                     sel = forge_selection(eid, situation)
