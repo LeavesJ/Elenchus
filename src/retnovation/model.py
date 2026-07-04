@@ -350,16 +350,22 @@ class AnthropicModel:
         return self._client
 
     def _parse_required(self, *, max_tokens: int, **kwargs):
-        """One structured parse, output REQUIRED — with a single budget-doubled retry on
-        truncation. L-17 keeps failing loud as the backstop, but one adaptive-thinking excursion
-        past the base budget must cost a RETRY, not the segment (founder live dogfood 2026-07-02:
-        a truncated structured call mid-press killed the worker — 'session already ended' — on a
-        door he was working well). Cost rises only when the model genuinely thought past base."""
+        """One structured parse, output REQUIRED — with a SINGLE retry: budget-doubled on
+        truncation, plain on refusal/empty parse. L-17 keeps failing loud as the backstop, but
+        one adaptive-thinking excursion past the base budget must cost a RETRY, not the segment
+        (founder live dogfood 2026-07-02: a truncated structured call mid-press killed the
+        worker on a door he was working well). A STOCHASTIC refusal costs a retry for the same
+        reason (founder live dogfood 2026-07-03: classify_response refused mid-press on an
+        ethically pointed reply — 'I'll read high … nobody can pinpoint it to me' — and killed
+        the door; the instrumented live replay named the class: same dialogue, 2 clean runs,
+        1 refusal). A deterministic refusal still fails loud on the second strike."""
         client = self._get_client()
         resp = client.messages.parse(model=self._model, max_tokens=max_tokens, **kwargs)
         if getattr(resp, "stop_reason", None) == "max_tokens":
             resp = client.messages.parse(model=self._model, max_tokens=max_tokens * 2, **kwargs)
-        return _require(resp)  # the doubled retry is spent; truncation now fails LOUD (L-17)
+        elif getattr(resp, "stop_reason", None) == "refusal" or resp.parsed_output is None:
+            resp = client.messages.parse(model=self._model, max_tokens=max_tokens, **kwargs)
+        return _require(resp)  # the single retry is spent; both classes now fail LOUD
 
     def classify_intake(self, exp: Experience, opening: str) -> IntakeClassification:
         system = load_prompt("intake") + _situation_block(exp) + "\n\n" + _render_rubric(exp.rubric)

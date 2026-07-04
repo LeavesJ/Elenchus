@@ -83,6 +83,8 @@ class _Messages:
 
     def parse(self, **kwargs):
         self.parse_calls.append(kwargs)
+        if isinstance(self._parse_result, list):  # sequenced: one response per call, in order
+            return self._parse_result.pop(0)
         return self._parse_result
 
     def create(self, **kwargs):
@@ -155,6 +157,54 @@ def test_refusal_raises_model_error():
     client = _Client(parse_result=_Resp(parsed_output=None, stop_reason="refusal"))
     with pytest.raises(ModelError):
         AnthropicModel(client=client).classify_intake(_exp(), "opening")
+
+
+def test_stochastic_refusal_costs_one_plain_retry_not_the_segment():
+    """Founder live dogfood 2026-07-03: classify_response refused mid-press on an ethically
+    pointed reply and killed the door; the instrumented replay proved the class stochastic
+    (same dialogue: 2 clean runs, 1 refusal). One plain retry recovers it."""
+    wire = _Wire(
+        frames=[_Item("protect_the_core_lane", FrameState.present_reasoned)],
+        traps=[_Item("erode_core_for_one_customer", TrapState.not_tripped)],
+    )
+    client = _Client(
+        parse_result=[
+            _Resp(parsed_output=None, stop_reason="refusal"),
+            _Resp(parsed_output=wire),
+        ]
+    )
+    out = AnthropicModel(client=client).classify_intake(_exp(), "opening")
+    # the retry's output is the call's output
+    assert out.frame_states["protect_the_core_lane"] is FrameState.present_reasoned
+    calls = client.messages.parse_calls
+    assert len(calls) == 2
+    assert calls[0]["max_tokens"] == calls[1]["max_tokens"]  # plain retry — not budget-doubled
+
+
+def test_persistent_refusal_fails_loud_after_exactly_one_retry():
+    client = _Client(
+        parse_result=[
+            _Resp(parsed_output=None, stop_reason="refusal"),
+            _Resp(parsed_output=None, stop_reason="refusal"),
+        ]
+    )
+    with pytest.raises(ModelError):
+        AnthropicModel(client=client).classify_intake(_exp(), "opening")
+    assert len(client.messages.parse_calls) == 2  # bounded: the single retry, then loud
+
+
+def test_truncation_then_refusal_stays_bounded_at_two_calls():
+    """The retry budget is ONE, whichever class strikes first — a truncated call whose doubled
+    retry then refuses must fail loud, never spend a third call."""
+    wire_unused = _Resp(parsed_output=None, stop_reason="refusal")
+    client = _Client(
+        parse_result=[_Resp(parsed_output=None, stop_reason="max_tokens"), wire_unused]
+    )
+    with pytest.raises(ModelError):
+        AnthropicModel(client=client).classify_intake(_exp(), "opening")
+    calls = client.messages.parse_calls
+    assert len(calls) == 2
+    assert calls[1]["max_tokens"] == calls[0]["max_tokens"] * 2  # the one retry was the doubled one
 
 
 def test_grade_answer_parses_correctness_against_criteria():
