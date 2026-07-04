@@ -26,6 +26,32 @@ def test_start_emits_error_on_worker_failure(tmp_path, make_fake):
     assert tag == "error" and "message" in data
 
 
+def test_worker_failure_logs_the_traceback_and_keeps_the_wire_generic(tmp_path, make_fake, caplog):
+    """Founder live dogfood 2026-07-03: the wire's repr(e) was the failure's ONLY copy, and the
+    refresh the recovery path itself recommends destroyed it — the error class was unrecoverable.
+    The traceback must land in the SERVER log; the wire carries only the generic nudge (exception
+    text can name frames/refs — the L-14 class applies to the transient wire too)."""
+
+    def factory():
+        m = make_fake()
+
+        def boom(exp, opening):
+            raise RuntimeError("frame-naming-detail")
+
+        m.classify_intake = boom
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "log.db"), model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    tag, data = reg.step("s1", "a real position")
+    assert tag == "error"
+    assert "frame-naming-detail" not in data["message"]  # the wire never carries the exception
+    assert "refresh" in data["message"]  # actionable copy, same as the dead-channel nudge
+    rec = next(r for r in caplog.records if "segment worker died" in r.getMessage())
+    assert rec.exc_info is not None and rec.exc_info[0] is RuntimeError
+
+
 def test_menu_titles_are_clean_and_never_leak_the_veldra_ref(tmp_path, make_fake):
     """The doors must show human display titles, never the ledger_ref (veldra: slug)."""
     reg = SessionRegistry(str(tmp_path / "m.db"), model_factory=make_fake)

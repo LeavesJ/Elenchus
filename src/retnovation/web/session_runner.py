@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 from collections.abc import Callable
@@ -64,6 +65,12 @@ _STALE_NUDGE = "This room went stale — refresh to pick up where you left off."
 # An errored segment's dead channel: every reply must point at the honest way forward (refresh →
 # durable-sitting resume: transcript + honesty line + working doors), never a bare dead end.
 _DOOR_FAILED_NUDGE = "That door hit an error — refresh to pick up where you left off."
+
+# Worker failures log the traceback SERVER-side (the only durable copy — founder dogfood
+# 2026-07-03: the wire's repr(e) rendered as one transient muted line and the refresh the
+# recovery path itself recommends destroyed it; the failure's class was unrecoverable). The
+# wire carries only the generic nudge: exception text can name frames/refs (the L-14 class).
+_log = logging.getLogger(__name__)
 
 # A live sitting idle past this is abandoned: an evening, not an undying thread (spec §2c).
 _SITTING_MAX_IDLE = timedelta(hours=18)
@@ -493,8 +500,9 @@ class SessionRegistry:
                 )
             except _Abandoned:
                 pass  # orphaned segment (user continued/closed past it); store closes in finally
-            except Exception as e:  # surface, never hang the client
-                ch.from_worker.put(("error", {"message": repr(e)}))
+            except Exception:  # surface, never hang the client
+                _log.exception("segment worker died (session %s)", session_id)
+                ch.from_worker.put(("error", {"message": _DOOR_FAILED_NUDGE}))
             finally:
                 if store is not None:
                     store.close()
