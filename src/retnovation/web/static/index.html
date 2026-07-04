@@ -177,8 +177,13 @@ function renderReserve(r){
   box.append(w,l); thread.appendChild(box); thread.scrollTop=thread.scrollHeight;
 }
 async function choose(i, menuEl){
+  const label = menuEl.children[i] ? menuEl.children[i].textContent : '';
   menuEl.remove();
   const t=thinking(); const r=await post('/api/session/single/choose',{index:i, nonce:menuNonce}); t.remove();
+  // Mirror the durable transcript (front-door conversion spec §2c): a CONSUMED click renders
+  // exactly what a reload replays — the muted marker + the you bubble. A stale-nonce menu
+  // re-serve or a stale-tab nudge consumed nothing, so nothing renders.
+  if(label && r.kind!=='menu' && r.kind!=='nudge'){ muted('door chosen'); bubble('you', label); }
   advance(r);
 }
 // Durable sittings: re-enter the SAME room — replay the persisted transcript in one fragment
