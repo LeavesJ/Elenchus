@@ -175,6 +175,19 @@ class Experience(BaseModel):
         return self
 
 
+def hidden_move_details(exp: "Experience") -> list[str]:
+    """Every hidden 'move' a learner-facing surface must not perform (L-5: never name the move):
+    the rubric's frame details AND trap details — naming a trap hands reasoning just as naming a
+    frame does. (The unprompted-read signal is frames-only, so trap coverage hardens the doctrine
+    backstop without affecting the signal.) Order is load-bearing: frames then traps, rubric
+    order — the live echo-gate's move indices map onto it. Single source of truth; web.voice and
+    forge delegate here (they duplicated it byte-for-byte until the 2026-07-03 triage fold —
+    silent drift would have screened generated scenarios against a stale move list)."""
+    if not exp.rubric:
+        return []
+    return [f.frame_detail for f in exp.rubric.frames] + [t.trap_detail for t in exp.rubric.traps]
+
+
 class GateResult(BaseModel):
     passed: bool
     rejects: list[GateCode]

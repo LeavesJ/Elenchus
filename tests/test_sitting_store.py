@@ -77,7 +77,13 @@ def test_state_partial_updates(tmp_path):
     st = _store(tmp_path)
     sid = st.create_sitting(NOW)
     empty = st.read_state(sid)
-    assert empty == {"record": None, "next_pick": None, "inflight": None, "theme": None}
+    assert empty == {
+        "record": None,
+        "next_pick": None,
+        "inflight": None,
+        "theme": None,
+        "territory_rank": None,
+    }
     record = {
         "experience_id": "decision_under_stakes",
         "posture": "operator",
@@ -95,6 +101,10 @@ def test_state_partial_updates(tmp_path):
     got = st.read_state(sid)
     assert got["inflight"] is None and got["record"] == record
     assert got["theme"] == {"accent": "slate"}
+    st.write_state(sid, territory_rank=["decision_under_stakes", "continuity_lock_in"])
+    got = st.read_state(sid)
+    assert got["territory_rank"] == ["decision_under_stakes", "continuity_lock_in"]
+    assert got["record"] == record  # survives the rank-only update
 
 
 def test_converged_window_rolls_24h_across_utc_midnight(tmp_path):
@@ -193,6 +203,27 @@ def test_existing_db_gains_the_experience_id_column(tmp_path):
     st.log_converged("s1", "gen:s1:1", NOW, experience_id="license_continuity")
     assert st.converged_within(NOW) == {"veldra:pricing", "gen:s1:1"}  # old rows survive
     assert st.territories_within(NOW) == {"license_continuity"}  # old rows: no territory
+
+
+def test_existing_db_gains_the_territory_rank_column(tmp_path):
+    # A db created BEFORE the rank persisted (triage fold 2026-07-03) has web_sitting_state
+    # without territory_rank_json; the defensive ALTER must migrate it in place.
+    path = tmp_path / "old-rank.db"
+    c = sqlite3.connect(str(path))
+    c.execute(
+        "CREATE TABLE web_sitting_state "
+        "(sitting_id TEXT PRIMARY KEY, record_json TEXT, next_pick_ref TEXT, "
+        "next_pick_title TEXT, inflight_json TEXT, theme_json TEXT)"
+    )
+    c.execute("INSERT INTO web_sitting_state (sitting_id, theme_json) VALUES ('s0', '{}')")
+    c.commit()
+    c.close()
+    st = SittingStore(str(path))
+    assert not st.inert
+    assert st.read_state("s0")["territory_rank"] is None  # old row readable, key present
+    st.write_state("s0", territory_rank=["irreversible_anchor"])
+    assert st.read_state("s0")["territory_rank"] == ["irreversible_anchor"]
+    assert st.read_state("s0")["theme"] == {}  # old columns survive
 
 
 def test_l3_surfaces_are_inert_on_memory():

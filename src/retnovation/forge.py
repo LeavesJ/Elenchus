@@ -25,7 +25,7 @@ from .content_loader import load_denylist, load_library, load_territory_text
 from .generator import GateError, validate_scene
 from .model import Model
 from .persistence import Store
-from .types import Experience, LedgerEntry, Rubric, Scene
+from .types import Experience, LedgerEntry, Rubric, Scene, hidden_move_details
 
 # The bounded coarse difficulty enum (spec §2e): never a prose delta; one step per move.
 LEVELS = ("base", "firm", "tight")
@@ -141,12 +141,9 @@ def _fit_requirements(rubric: Rubric) -> str:
 
 
 def _moves(exp: Experience) -> list[str]:
-    """Every hidden move a learner-facing surface must not perform: frame details + trap
-    details. Local copy of web.voice._moves (the source of truth for the L-5 move list) — kept
-    here so the content-layer forge does not import the web layer."""
-    if not exp.rubric:
-        return []
-    return [f.frame_detail for f in exp.rubric.frames] + [t.trap_detail for t in exp.rubric.traps]
+    """The L-5 hidden-move list — delegates to the single source of truth in types (which the
+    content-layer forge may import; the web layer it must not). Name kept for its call sites."""
+    return hidden_move_details(exp)
 
 
 def _union_moves(base: Experience, engaged_frames: list[str]) -> list[str]:

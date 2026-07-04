@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS web_sitting_turn (
   sitting_id TEXT NOT NULL, seq INTEGER NOT NULL, kind TEXT NOT NULL, payload_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS web_sitting_state (
   sitting_id TEXT PRIMARY KEY, record_json TEXT, next_pick_ref TEXT, next_pick_title TEXT,
-  inflight_json TEXT, theme_json TEXT);
+  inflight_json TEXT, theme_json TEXT, territory_rank_json TEXT);
 CREATE TABLE IF NOT EXISTS web_converged (
   sitting_id TEXT NOT NULL, ref TEXT NOT NULL, converged_at TEXT NOT NULL,
   experience_id TEXT NOT NULL DEFAULT '');
@@ -58,6 +58,12 @@ class SittingStore:
                         "ALTER TABLE web_converged "
                         "ADD COLUMN experience_id TEXT NOT NULL DEFAULT ''"
                     )
+                except sqlite3.OperationalError:
+                    pass
+                # Same pattern: dbs created before the mapper rank persisted (triage fold,
+                # 2026-07-03) lack the column.
+                try:
+                    c.execute("ALTER TABLE web_sitting_state ADD COLUMN territory_rank_json TEXT")
                 except sqlite3.OperationalError:
                     pass
         except sqlite3.OperationalError:
@@ -149,6 +155,7 @@ class SittingStore:
         next_pick: tuple[str, str] | None = _UNSET,  # type: ignore[assignment]
         inflight: dict | None = _UNSET,  # type: ignore[assignment]
         theme: dict | None = _UNSET,  # type: ignore[assignment]
+        territory_rank: list[str] | None = _UNSET,  # type: ignore[assignment]
     ) -> None:
         """Sentinel-partial update: only the keyword arguments actually passed are written."""
         if self._inert:
@@ -179,24 +186,37 @@ class SittingStore:
                     "UPDATE web_sitting_state SET theme_json=? WHERE sitting_id=?",
                     (None if theme is None else json.dumps(theme), sitting_id),
                 )
+            if territory_rank is not _UNSET:
+                c.execute(
+                    "UPDATE web_sitting_state SET territory_rank_json=? WHERE sitting_id=?",
+                    (None if territory_rank is None else json.dumps(territory_rank), sitting_id),
+                )
 
     def read_state(self, sitting_id: str) -> dict:
+        empty = {
+            "record": None,
+            "next_pick": None,
+            "inflight": None,
+            "theme": None,
+            "territory_rank": None,
+        }
         if self._inert:
-            return {"record": None, "next_pick": None, "inflight": None, "theme": None}
+            return empty
         with self._conn() as c:
             row = c.execute(
-                "SELECT record_json, next_pick_ref, next_pick_title, inflight_json, theme_json "
-                "FROM web_sitting_state WHERE sitting_id=?",
+                "SELECT record_json, next_pick_ref, next_pick_title, inflight_json, theme_json, "
+                "territory_rank_json FROM web_sitting_state WHERE sitting_id=?",
                 (sitting_id,),
             ).fetchone()
         if row is None:
-            return {"record": None, "next_pick": None, "inflight": None, "theme": None}
-        record_j, pick_ref, pick_title, inflight_j, theme_j = row
+            return empty
+        record_j, pick_ref, pick_title, inflight_j, theme_j, rank_j = row
         return {
             "record": None if record_j is None else json.loads(record_j),
             "next_pick": None if pick_ref is None else (pick_ref, pick_title),
             "inflight": None if inflight_j is None else json.loads(inflight_j),
             "theme": None if theme_j is None else json.loads(theme_j),
+            "territory_rank": None if rank_j is None else json.loads(rank_j),
         }
 
     # -- the world (living sitting §2f: one generated world per sitting) ----------------------

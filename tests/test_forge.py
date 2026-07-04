@@ -407,6 +407,23 @@ def test_union_screen_covers_base_moves_and_engaged_frames(tmp_path):
     assert lib_details and lib_details <= set(m.moves)  # D1: the cross-segment echo is screened
 
 
+def test_forge_and_voice_moves_share_one_source_of_truth():
+    """Triage fold 2026-07-03: forge._moves was an untested byte-copy of voice._moves — silent
+    drift would have screened generated scenarios against a stale L-5 move list (the scenario
+    then enters the registry with no other screen against the missing category). Both now
+    delegate to types.hidden_move_details; this pins the delegation AND behavioral equality
+    (order included — the live echo-gate's move indices map onto it)."""
+    from retnovation.types import hidden_move_details
+
+    for e in load_library():
+        assert forge._moves(e) == voice._moves(e) == hidden_move_details(e)
+    no_rubric = load_experience("license_continuity").model_copy(update={"rubric": None})
+    assert forge._moves(no_rubric) == voice._moves(no_rubric) == []
+    # the delegation itself, so a re-fork can't reintroduce the drift silently
+    assert "hidden_move_details" in inspect.getsource(forge._moves)
+    assert "hidden_move_details" in inspect.getsource(voice._moves)
+
+
 def test_ledger_seeded_once_per_world(tmp_path):
     store = _engine_store(tmp_path)
     _forge(_ForgeFake(), store, n=1)

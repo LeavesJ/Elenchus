@@ -158,6 +158,11 @@ class _Channel:
         # — a second proactive emission would break the one-put-per-get handshake)
         self.mapped_rank: list[str] | None = None  # the mapper's territory ranking, banked
         # registry-side for Continue targeting (§2c)
+        self.frontdoor_pending: str | None = None  # the exact front-door question the worker
+        # is parked on (plain ask vs honest-fit — worker-set BEFORE the put, cleared on
+        # consume): a state-3 resume must re-serve the question actually pending, or the
+        # user's answer to "what are you facing?" is consumed as consent to the OLD mapping
+        # (triage fold, 2026-07-03)
 
 
 class SessionRegistry:
@@ -318,6 +323,7 @@ class SessionRegistry:
                         return forge_selection(target, world)
 
                     # THE FRONT DOOR (§2a/§2g): the static ask + the small doors, one say.
+                    ch.frontdoor_pending = _FRONTDOOR_ASK  # set BEFORE the put (queue orders it)
                     ch.from_worker.put(
                         (
                             "say",
@@ -330,6 +336,7 @@ class SessionRegistry:
                         )
                     )
                     value = ch.to_worker.get()
+                    ch.frontdoor_pending = None  # consumed — the worker is no longer parked here
                     if value is _ABANDON:
                         raise _Abandoned()
                     if isinstance(value, int):
@@ -355,8 +362,10 @@ class SessionRegistry:
                     if tmap.confidence.strip().lower() != "high":
                         # Honest fit (§2a): her situation stays the world; no silent stretching.
                         desc = " ".join(load_territory_text(eid).split()).rstrip(".")
-                        ch.from_worker.put(("say", {"text": _HONEST_FIT.format(desc=desc)}))
+                        ch.frontdoor_pending = _HONEST_FIT.format(desc=desc)  # before the put
+                        ch.from_worker.put(("say", {"text": ch.frontdoor_pending}))
                         value = ch.to_worker.get()
+                        ch.frontdoor_pending = None  # consumed
                         if value is _ABANDON:
                             raise _Abandoned()
                         if isinstance(value, int):
@@ -645,13 +654,23 @@ class SessionRegistry:
             if ch.inflight_exp is None and ch.record is None and ch.last_menu:
                 # State 3: parked at the front door (the loop that holds the doors) —
                 # re-derive from the live channel (same nonce: it is the same pending menu;
-                # the reloaded tab must be able to answer it). The static ask re-serves over
-                # her visible turns (§2g's mid-front-door state, same-process face).
+                # the reloaded tab must be able to answer it). The question re-serves over her
+                # visible turns (§2g's mid-front-door state, same-process face) — the question
+                # ACTUALLY pending: at the honest-fit beat the plain ask would invite a fresh
+                # situation that the parked worker then consumes as consent to the OLD mapping
+                # (triage fold, 2026-07-03). Accepted residual (review-confirmed by executed
+                # repro): while the MAPPING call itself is in flight — a full model call,
+                # seconds wide, not the instruction-scale inflight_exp class — pending is None
+                # and the plain ask re-serves over the same consent hazard; the deferred
+                # mid-flight ticket owns that class.
                 menu_block = {
                     "problems": list(ch.last_menu),
                     "nonce": self._menu_nonce.get(session_id, 0),
                 }
-                frontdoor_block = {"text": _FRONTDOOR_ASK, "menu": menu_block}
+                frontdoor_block = {
+                    "text": ch.frontdoor_pending or _FRONTDOOR_ASK,
+                    "menu": menu_block,
+                }
                 mode = "engine"
         else:
             # States 4–8: terminal channel (done/error) or a different process entirely.
@@ -815,9 +834,15 @@ class SessionRegistry:
             return
         if tag == "say":
             if ch.mapped_rank is not None:
+                rank = list(ch.mapped_rank)
                 with self._lock:
-                    self._territory_rank[session_id] = list(ch.mapped_rank)
+                    self._territory_rank[session_id] = rank
                 ch.mapped_rank = None
+                # Restart-durable (triage fold, 2026-07-03): without the row, a mid-world
+                # restart's Continue targeting silently fell back to library order. State
+                # table, not turns — the inflight_json precedent (L-14 untouched); the write
+                # stays at this dequeue layer (queue handshake preserved).
+                self._store.write_state(sit, territory_rank=rank)
             seam = self._seam_pending.pop(session_id, None)
             if seam:
                 self._store.append_turn(sit, "seam", {"text": seam}, now)
@@ -935,7 +960,13 @@ class SessionRegistry:
         self._lost_ref.pop(session_id, None)
         self._lost_exp_id.pop(session_id, None)
         if sit is not None and data.get("landing"):
-            self._store.append_turn(sit, "landing", {"text": data["landing"]}, now)
+            # stop_reason rides the landing payload SERVER-side only (the resume projection
+            # whitelists kind+text): _positions must tell a committed landing from an honest
+            # non-converged one (triage fold, 2026-07-03).
+            reason = (ch.record or {}).get("stop_reason", "")
+            self._store.append_turn(
+                sit, "landing", {"text": data["landing"], "stop_reason": reason}, now
+            )
 
     def step(self, session_id: str, value) -> tuple[str, dict]:
         ch = self._ch.get(session_id)
@@ -1131,6 +1162,11 @@ class SessionRegistry:
             # sees the ask, so it must not persist (a swallowed ask in the transcript would be
             # a fabricated turn) and the seam must survive to the opening say.
             self._frontdoor_swallow.add(session_id)
+        elif sit is not None:
+            # A RENDERED-front-door continue (the picker, or a dropped pick): its ask persists,
+            # so mark the boundary — otherwise _sitting_segments sweeps the ask into the
+            # previous segment's wind-down tail (triage fold, 2026-07-03).
+            self._store.append_turn(sit, "muted", {"text": "Continue"}, now)
         # The whole boot window counts as in-flight (batch-review C4): a concurrent close must not
         # pill the NEW channel in the gap between start()'s dequeue and the auto-pick step — the
         # pill would be consumed as the decide input and the step would block forever.
@@ -1302,8 +1338,13 @@ class SessionRegistry:
 
     def _positions(self, sit: str | None) -> list[str]:
         """Her committed positions for the forge brief (§2b review D3): the final substantive
-        STUDENT turn per landed segment — the last `you` turn before each landing; never any
-        Vera-authored text. Empty by construction at a sitting's first door."""
+        STUDENT turn per CONVERGED segment — never any Vera-authored text. Post-Earned-Landing
+        every stop lands, so a landing alone is not commitment: an honest non-converged landing
+        (plateau/budget) closes over a hedge, and shipping that hedge as "her committed
+        position" would misbrief the forge (triage fold, 2026-07-03). Landing rows persisted
+        before stop_reason existed read as converged (they predate honest non-converged
+        landings' positions reaching the brief). Empty by construction at a sitting's first
+        door."""
         if sit is None:
             return []
         out: list[str] = []
@@ -1311,8 +1352,11 @@ class SessionRegistry:
         for t in self._store.turns(sit):
             if t["kind"] == "you":
                 last_you = t["payload"].get("text", "")
-            elif t["kind"] == "landing" and last_you:
-                out.append(last_you)
+            elif t["kind"] == "landing":
+                # a landing always consumes the pending turn — a hedge must not carry over
+                # and surface at a LATER converged landing either
+                if last_you and t["payload"].get("stop_reason", "converged") == "converged":
+                    out.append(last_you)
                 last_you = None
         return out
 
@@ -1379,11 +1423,23 @@ class SessionRegistry:
 
     def _territory_order(self, session_id: str) -> list[str]:
         """Continue targeting order (§2c review M10, rank-based): the mapper's ranking where we
-        have it, else the policy's post-session proposal order (next_menu), completed by the
-        library order so every territory is always reachable."""
+        have it — restored from the durable state row on an in-memory miss (restart; triage
+        fold, 2026-07-03) — else the policy's post-session proposal order (next_menu),
+        completed by the library order so every territory is always reachable."""
         with self._lock:
             rank = list(self._territory_rank.get(session_id, ()))
         open_exps = [e for e in load_library() if e.regime is Regime.open_ended]
+        if not rank:
+            sit = self._sitting_id.get(session_id)
+            if sit is not None:
+                stored = self._store.read_state(sit)["territory_rank"] or []
+                known_eids = {e.experience_id for e in open_exps}
+                # parity with the mapper's hallucination filter: a library-removed eid must
+                # never become a forge target through the durable row
+                rank = [eid for eid in stored if eid in known_eids]
+                if rank:
+                    with self._lock:
+                        self._territory_rank[session_id] = rank
         if not rank:
             ch = self._ch.get(session_id)
             if ch is not None and ch.next_menu:
@@ -1417,21 +1473,33 @@ class SessionRegistry:
         return min(known, key=lambda eid: last[eid])
 
     def _sitting_segments(self, sit: str | None) -> list[list[tuple[str, str]]]:
-        """The sitting-close author's input (§2f): kind-filtered you/vera turns per segment,
-        split on landing turns; a non-empty tail (post-landing converse) rides as a final
-        segment — it is part of the story."""
+        """The sitting-close author's input (§2f): you/vera turns per segment, split on landing
+        turns and relabeled to the author-facing student/Vera convention every other brief uses
+        (the store's wire kinds stay you/vera — the relabel lives at this read boundary only).
+        Post-landing converse attaches to the segment it is ABOUT — the one that just landed —
+        until a boundary marker (muted/seam/bridge: the Continue click, the next door's seam)
+        ends the wind-down tail; splitting on landings alone wove the previous problem's
+        wind-down into the NEXT problem's chapter of the story (triage fold, 2026-07-03)."""
         if sit is None:
             return []
         segments: list[list[tuple[str, str]]] = []
         current: list[tuple[str, str]] = []
+        tail = False
         for t in self._store.turns(sit):
             kind = t["kind"]
             if kind in ("you", "vera"):
-                current.append((kind, t["payload"].get("text", "")))
+                turn = ("student" if kind == "you" else "Vera", t["payload"].get("text", ""))
+                if tail and segments:
+                    segments[-1].append(turn)
+                else:
+                    current.append(turn)
             elif kind == "landing":
                 if current:
                     segments.append(current)
                     current = []
+                tail = True
+            else:  # muted/seam/bridge — a segment boundary marker; the wind-down tail ends here
+                tail = False
         if current:
             segments.append(current)
         return segments

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..model import Model
-from ..types import EntryClass, Experience
+from ..types import EntryClass, Experience, hidden_move_details
 
 SAFE_CONTRACT = (
     "I won't explain the move or hand you the answer — that's the point. "
@@ -12,13 +12,9 @@ _INVITE = "The call's yours. Take a position and reason it out — I'll push, I 
 
 
 def _moves(exp: Experience) -> list[str]:
-    """Every hidden 'move' a learner-facing surface must not perform (L-5: never name the move):
-    the rubric's frame details AND trap details — naming a trap hands reasoning just as naming a
-    frame does. (The unprompted-read signal is frames-only, so trap coverage hardens the doctrine
-    backstop without affecting the signal.)"""
-    if not exp.rubric:
-        return []
-    return [f.frame_detail for f in exp.rubric.frames] + [t.trap_detail for t in exp.rubric.traps]
+    """The L-5 hidden-move list — delegates to the single source of truth in types (the
+    doctrine docstring lives there); the name stays for its many call/test sites."""
+    return hidden_move_details(exp)
 
 
 def _performed(model: Model, exp: Experience, text: str) -> set[int]:

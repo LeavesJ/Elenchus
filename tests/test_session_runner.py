@@ -1135,6 +1135,43 @@ def test_front_door_low_confidence_honest_fit_then_text_proceeds(tmp_path, make_
     assert store.read_world(store.live_sitting()["id"]) == _SITUATION  # her ORIGINAL situation
 
 
+def test_resume_parked_at_honest_fit_reserves_the_honest_fit_question(tmp_path, make_fake):
+    """Triage fold 2026-07-03: a same-process reload parked at the honest-fit beat re-served the
+    PLAIN ask — inviting a fresh situation the parked worker then consumed as consent to the OLD
+    mapping (half-losing whatever she typed). The resume must re-serve the question actually
+    pending; the consent semantics themselves stay byte-identical (pinned by the
+    low_confidence_honest_fit test above)."""
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+
+        def low(situation, territories):
+            return orig(situation, territories).model_copy(update={"confidence": "low"})
+
+        m.map_territories = low
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "fd-fit-resume.db"), model_factory=factory)
+    tag, data = reg.start("s1", now=NOW)
+    nonce = data["menu"].get("nonce", 0)
+    tag, data = reg.step("s1", _SITUATION)
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    fit = _HONEST_FIT.format(desc=desc)
+    assert data["text"] == fit  # parked at the honest-fit beat
+
+    tag, rdata = reg.resume_or_start("s1")
+    assert tag == "resume"
+    assert rdata["frontdoor"]["text"] == fit  # the question actually pending, not the plain ask
+    assert rdata["frontdoor"]["menu"]["nonce"] == nonce  # same pending menu — doors still answer
+    assert not (
+        rdata["turns"] and rdata["turns"][-1]["text"] == fit
+    )  # the block owns the question; the trailing transcript turn deduped
+
+    tag, data = reg.step("s1", "yes — start there")  # consent semantics unchanged
+    assert tag == "say" and data["text"] == _SCENARIO
+
+
 def test_front_door_low_confidence_int_takes_a_door(tmp_path, make_fake):
     """The honest-fit round-trip's other exit: an int goes to today's menu path."""
 
@@ -1486,6 +1523,163 @@ def test_return_visit_line_rides_the_cold_front_door(tmp_path, make_fake):
     assert data["returning"].startswith("Your world so far: 2 houses")  # plural branch
 
 
+def test_forge_brief_positions_exclude_non_converged_landings(tmp_path, make_fake):
+    """Triage fold 2026-07-03: post-Earned-Landing every stop lands, so a landing alone is not
+    commitment — a plateaued segment's final hedge must not ship in the forge brief as 'her
+    committed position'. stop_reason rides the landing payload server-side; the resume wire
+    stays kind+text only."""
+    briefs = []
+    outcome = {"v": "closed"}
+    reg = SessionRegistry(
+        str(tmp_path / "fd-pos.db"),
+        model_factory=_world_factory(make_fake, briefs=briefs, outcome=outcome),
+    )
+    _open_world(reg, "s1")
+    tag, data = reg.step("s1", "the committed call")
+    while tag == "say":
+        tag, data = reg.step("s1", "landed-reply")
+    assert tag == "done"  # converged landing
+    outcome["v"] = "unchanged"
+    assert reg.continue_session("s1")[0] == "say"
+    tag, data = reg.step("s1", "a hedge not a commitment")
+    while tag == "say":
+        tag, data = reg.step("s1", "hedge-reply")
+    assert tag == "done"  # honest NON-converged landing (plateau)
+    outcome["v"] = "closed"
+    assert reg.continue_session("s1")[0] == "say"  # third forge: its brief reads _positions
+    brief = briefs[-1][0]
+    assert "landed-reply" in brief  # the converged segment's final turn IS a position
+    assert "hedge-reply" not in brief  # the plateaued segment's hedge is NOT
+    # server-side only: the persisted landing rows carry stop_reason, the resume wire does not
+    sit = reg._sitting_id["s1"]
+    reasons = [t["payload"]["stop_reason"] for t in reg._store.turns(sit) if t["kind"] == "landing"]
+    assert reasons[:2] == ["converged", "plateau"]
+    _, rdata = reg.resume_or_start("s1")
+    assert all(set(t) == {"kind", "text"} for t in rdata["turns"])
+
+
+def test_post_landing_converse_attaches_to_the_segment_it_is_about(tmp_path, make_fake):
+    """Triage fold 2026-07-03: converse turns typed between a landing and the Continue press are
+    ABOUT the just-landed problem — the close author must receive them in that segment's block,
+    never woven into the next problem's chapter (splitting on landings alone did exactly that)."""
+    closes = []
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.concierge_sitting_close
+
+        def rec(situation, segments, voice=""):
+            closes.append(segments)
+            return orig(situation, segments, voice)
+
+        m.concierge_sitting_close = rec
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "fd-tail.db"), model_factory=factory)
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="position one")
+    tag, _ = reg.converse("s1", "one more thought about that call")  # the wind-down
+    assert tag == "say"
+    assert reg.continue_session("s1")[0] == "say"
+    _drive(reg, "s1", opening="position two")
+    reg.close("s1")
+    segments = closes[0]
+    assert len(segments) == 2
+    seg1_texts = [t for _, t in segments[0]]
+    seg2_texts = [t for _, t in segments[1]]
+    assert "one more thought about that call" in seg1_texts  # attached to the landed segment
+    assert "one more thought about that call" not in seg2_texts
+    assert any("position two" == t for t in seg2_texts)  # the next chapter starts clean
+
+
+def test_positions_includes_legacy_landing_rows_without_stop_reason(tmp_path, make_fake):
+    """Review fold 2026-07-03 (mutation survived): the founder's real dbs hold landing rows
+    persisted BEFORE stop_reason existed — they must keep reading as converged, or every
+    pre-batch committed position silently vanishes from future forge briefs."""
+    db = str(tmp_path / "legacy.db")
+    st = SittingStore(db)
+    sid = st.create_sitting(NOW)
+    st.append_turn(sid, "you", {"text": "the old committed call"}, NOW)
+    st.append_turn(sid, "landing", {"text": "you owned it"}, NOW)  # legacy: no stop_reason key
+    reg = SessionRegistry(db, model_factory=make_fake)
+    assert reg._positions(sid) == ["the old committed call"]
+
+
+def test_rendered_front_door_continue_marks_the_segment_boundary(tmp_path, make_fake):
+    """Review fold 2026-07-03 (mutation survived): the picker's continue re-enters the RENDERED
+    front door, whose ask persists — without the muted boundary marker, the ask and her next
+    situation ride the previous segment's wind-down tail into the close author's first block."""
+    closes = []
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.concierge_sitting_close
+
+        def rec(situation, segments, voice=""):
+            closes.append(segments)
+            return orig(situation, segments, voice)
+
+        m.concierge_sitting_close = rec
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "fd-picker.db"), model_factory=factory)
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="position one")
+    assert reg.converse("s1", "picker wind-down thought")[0] == "say"
+    tag, data = reg.continue_session("s1", menu=True)  # other doors: the rendered front door
+    assert tag == "say" and data.get("frontdoor")
+    tag, data = reg.step("s1", "a second free-text situation")
+    assert tag == "say"
+    _drive(reg, "s1", opening="position two")
+    reg.close("s1")
+    segments = closes[0]
+    assert len(segments) == 2
+    seg1_texts = [t for _, t in segments[0]]
+    seg2_texts = [t for _, t in segments[1]]
+    assert "picker wind-down thought" in seg1_texts  # the tail still lands with its segment
+    assert "a second free-text situation" not in seg1_texts  # the boundary held
+    assert "a second free-text situation" in seg2_texts  # the new chapter owns its own turns
+
+
+def test_mapper_rank_survives_a_restart_for_continue_targeting(tmp_path, make_fake):
+    """Triage fold 2026-07-03: the mapper's territory ranking lived only in process memory, so a
+    mid-world restart's Continue targeting silently fell back to library order. The rank now
+    persists on the state row and restores lazily; a library-removed eid can never enter
+    through the durable row (hallucination-filter parity)."""
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+        # rank head _T2 (forged first), then _T3 — the LIBRARY order after _T2 would say _T1
+        m.map_territories = lambda s, t: orig(s, t).model_copy(update={"ranked": [_T2, _T3, _T1]})
+        return m
+
+    db = str(tmp_path / "fd-rank.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    _open_world(reg, "s1")  # forges over _T2 (the rank head)
+    tag, _ = _drive(reg, "s1", opening="p1")
+    assert tag == "done"  # converged: _T2 is inside the rolling window now
+
+    reg2 = SessionRegistry(db, model_factory=factory)  # the restart
+    tag, rdata = reg2.resume_or_start("s1")
+    assert tag == "resume"
+    now = datetime.now(timezone.utc)
+    assert reg2._next_territory("s1", now) == _T3  # the mapper's rank, not library order (_T1)
+
+    # Hallucination-filter parity on the durable row (review fold, mutation survived): a
+    # library-retired eid in the persisted rank must never become a forge target — decide()'s
+    # next(...) over open_exps would StopIteration and kill every Continue on the sitting.
+    sit = SittingStore(db).live_sitting()["id"]
+    SittingStore(db).write_state(sit, territory_rank=["retired_territory", _T3, _T2])
+    reg3 = SessionRegistry(db, model_factory=factory)
+    assert reg3.resume_or_start("s1")[0] == "resume"
+    assert reg3._next_territory("s1", now) == _T3  # filtered restore skips the retired eid
+    SittingStore(db).write_state(sit, territory_rank=["retired_territory"])
+    reg4 = SessionRegistry(db, model_factory=factory)
+    reg4.resume_or_start("s1")
+    assert reg4._next_territory("s1", now) == _T1  # all-stale rank falls through to library order
+
+
 def test_menu_marks_a_forge_converged_territory_as_just_worked(tmp_path, make_fake):
     """L4 review F1: a forged convergence logs a gen: ref that never matches a curated menu
     ref — the ' · just worked' marker keys on the TERRITORY too, so re-entering the doors
@@ -1543,9 +1737,11 @@ def test_sitting_close_receives_all_segments_and_screens_once(tmp_path, make_fak
     situation, segments = closes[0]
     assert situation == _SITUATION
     assert len(segments) == 2  # one per landed segment, split on landing turns
-    assert all(role in ("you", "vera") for seg in segments for role, _ in seg)
-    assert any(text == "position one" for role, text in segments[0] if role == "you")
-    assert any(text == "position two" for role, text in segments[1] if role == "you")
+    # author-facing labels match every other brief's student/Vera convention (triage fold);
+    # the store's wire kinds stay you/vera — the relabel lives at the brief-assembly boundary
+    assert all(role in ("student", "Vera") for seg in segments for role, _ in seg)
+    assert any(text == "position one" for role, text in segments[0] if role == "student")
+    assert any(text == "position two" for role, text in segments[1] if role == "student")
     assert len(screens) - n_before == 1  # ONE union screen call over the sitting's moves
     union = screens[-1]
     assert len(union) == len(set(union))  # deduped
