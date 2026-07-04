@@ -12,7 +12,7 @@ from ..assessment.judgment_loop import (
 )  # read-only: the arc hint's cap (engine untouched)
 from ..cli import build_store
 from ..content_loader import load_library, load_progression, load_territory_text
-from ..forge import _FALLBACK_BRIDGE, LEVELS, forge_experience
+from ..forge import _FALLBACK_BRIDGE, LEVELS, forge_experience, forge_registry
 from ..orchestration import run_session
 from ..scheduler import propose_open_ended
 from ..terrain import compose_houses, project_terrain
@@ -373,16 +373,25 @@ class SessionRegistry:
                         # any text proceeds with the MAPPED territory (branch kept simple)
                     base = next(e for e in open_exps if e.experience_id == eid)
                     sel = forge_selection(eid, situation)
-                    if ch.pending_bridge is None:
-                        # The heard-you beat (§2a, gated per D9): the mapper's reflection is
-                        # learner-facing text from a frame-aware call — screened before it
-                        # rides; the static bridge on refusal/empty/leak.
-                        reflection = tmap.reflection.strip()
-                        ch.pending_bridge = (
-                            reflection
-                            if reflection and voice.egress_safe_reply(model, base, reflection)
-                            else _STATIC_BRIDGE
-                        )
+                    try:
+                        if ch.pending_bridge is None:
+                            # The heard-you beat (§2a, gated per D9): the mapper's reflection is
+                            # learner-facing text from a frame-aware call — screened before it
+                            # rides; the static bridge on refusal/empty/leak.
+                            reflection = tmap.reflection.strip()
+                            ch.pending_bridge = (
+                                reflection
+                                if reflection and voice.egress_safe_reply(model, base, reflection)
+                                else _STATIC_BRIDGE
+                            )
+                    except Exception:
+                        # A post-forge failure (the heard-you screen is a live model call) must
+                        # not leak the registered entry for the process lifetime (triage fold,
+                        # 2026-07-03). decide()-local pop, NOT a worker-finally: on the
+                        # reseed-collision key a dying worker's finally could pop a FRESH entry
+                        # another worker just registered under the same ref.
+                        forge_registry.pop(captured.get("instance_ref") or "", None)
+                        raise
                     return sel
 
                 def present(exp):

@@ -1592,6 +1592,35 @@ def test_post_landing_converse_attaches_to_the_segment_it_is_about(tmp_path, mak
     assert any("position two" == t for t in seg2_texts)  # the next chapter starts clean
 
 
+def test_heard_you_screen_failure_does_not_leak_the_forge_registry_entry(tmp_path, make_fake):
+    """Triage fold 2026-07-03: the forge registers the entry BEFORE the heard-you screen runs —
+    a raise there killed the worker (honest) but left the entry in the module-global registry
+    for the process lifetime. The decide()-local cleanup pops exactly the ref it registered."""
+    from retnovation.forge import forge_registry
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.screen_moves
+        calls = {"n": 0}
+
+        def screen(moves, text):
+            calls["n"] += 1
+            if calls["n"] >= 2:  # call 1 = the forge's union gate; call 2 = the heard-you screen
+                raise RuntimeError("heard-you screen died")
+            return orig(moves, text)
+
+        m.screen_moves = screen
+        return m
+
+    forge_registry.clear()
+    reg = SessionRegistry(str(tmp_path / "fd-leak.db"), model_factory=factory)
+    tag, data = reg.start("s1", now=NOW)
+    assert tag == "say" and data.get("frontdoor")
+    tag, data = reg.step("s1", _SITUATION)
+    assert tag == "error"  # the worker died loudly (honest path, unchanged)
+    assert forge_registry == {}  # ...and took its registered entry with it
+
+
 def test_positions_includes_legacy_landing_rows_without_stop_reason(tmp_path, make_fake):
     """Review fold 2026-07-03 (mutation survived): the founder's real dbs hold landing rows
     persisted BEFORE stop_reason existed — they must keep reading as converged, or every
