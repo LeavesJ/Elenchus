@@ -86,6 +86,18 @@ _HONEST_FIT = (
     "{desc}. Start there — or look at the other doors first?"
 )
 
+# Variant rotation (front-door conversion spec §2d): the same contract three ways — honest
+# about the stretch, the territory description inlined, the doors escape. Variant 0 is the
+# original so a session's FIRST serve stays byte-identical (existing pins). Rotation is
+# per-session in-memory; a restart resets it (cosmetic).
+_HONEST_FIT_VARIANTS = (
+    _HONEST_FIT,
+    "I can't press all of that at once — but this edge of it takes real weight: {desc}. "
+    "Stand there — or look at the other doors first?",
+    "One piece of that is pressable today: {desc}. Want to start there — or scan the other "
+    "doors first?",
+)
+
 # The static heard-you bridge when the mapper's reflection fails its egress screen (D9).
 _STATIC_BRIDGE = "Understood — stand in it:"
 
@@ -212,6 +224,7 @@ class SessionRegistry:
         self._continue_target: dict[str, str] = {}
         self._level_idx: dict[str, int] = {}
         self._forge_n: dict[str, int] = {}
+        self._fit_variant_idx: dict[str, int] = {}  # honest-fit rotation (spec §2d)
         self._frontdoor_swallow: set[str] = set()
 
     def start(self, session_id: str, now: datetime | None = None) -> tuple[str, dict]:
@@ -419,7 +432,11 @@ class SessionRegistry:
                     if force_fit or tmap.confidence.strip().lower() != "high":
                         # Honest fit (§2a): her situation stays the world; no silent stretching.
                         desc = " ".join(load_territory_text(eid).split()).rstrip(".")
-                        ch.frontdoor_pending = _HONEST_FIT.format(desc=desc)  # before the put
+                        with self._lock:
+                            n = self._fit_variant_idx.get(session_id, 0)
+                            self._fit_variant_idx[session_id] = n + 1
+                        fit_copy = _HONEST_FIT_VARIANTS[n % len(_HONEST_FIT_VARIANTS)]
+                        ch.frontdoor_pending = fit_copy.format(desc=desc)  # before the put
                         ch.from_worker.put(("say", {"text": ch.frontdoor_pending}))
                         value = ch.to_worker.get()
                         ch.frontdoor_pending = None  # consumed
@@ -1611,6 +1628,7 @@ class SessionRegistry:
                 ch.terminal = True
         self._ch.pop(session_id, None)
         self._last_record.pop(session_id, None)
+        self._fit_variant_idx.pop(session_id, None)
         self._sitting_done.pop(session_id, None)
         self._next_pick.pop(session_id, None)
         self._next_pick_title.pop(session_id, None)

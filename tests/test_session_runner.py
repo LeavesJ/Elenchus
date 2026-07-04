@@ -1147,6 +1147,32 @@ def test_resume_parked_at_conversion_reserves_the_conversion_question(tmp_path, 
     assert not (rdata["turns"] and rdata["turns"][-1]["text"] == "The conversion question?")
 
 
+def test_honest_fit_copy_rotates_across_serves(tmp_path, make_fake):
+    """Spec §2d: the fit beat must not repeat verbatim within a session (dogfood 2026-07-04:
+    identical copy twice on one screen). Variant 0 is the original — first serves stay
+    deterministic for the existing pins."""
+    from retnovation.web.session_runner import _HONEST_FIT_VARIANTS
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+        m.map_territories = lambda s, t: orig(s, t).model_copy(update={"confidence": "low"})
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "fit-var.db"), model_factory=factory)
+    reg.start("s1", now=NOW)
+    tag, first = reg.step("s1", _SITUATION)
+    assert "doors first?" in first["text"]  # parked at the fit beat
+    tag, _ = _drive(reg, "s1", opening="consent, and then a position")
+    assert tag == "done"  # segment 1 converged
+    assert reg.continue_session("s1", menu=True)[0] == "say"  # back through the front door
+    tag, second = reg.step("s1", "a second situation this sitting")
+    prefixes = [v.split("{desc}")[0] for v in _HONEST_FIT_VARIANTS]
+    assert first["text"] != second["text"]  # no verbatim repeat
+    assert any(first["text"].startswith(p) for p in prefixes)
+    assert any(second["text"].startswith(p) for p in prefixes)
+
+
 def test_front_door_free_text_forges_the_world_end_to_end(tmp_path, make_fake):
     """The battery's spine (spec §2a/§2g): static ask + small doors → free text → heard-you
     bridge riding the forged opening (the scenario IS the opening) → engine grades → landing.
