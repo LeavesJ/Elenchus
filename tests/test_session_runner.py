@@ -1031,11 +1031,12 @@ _SCENARIO = (
 _T1, _T2, _T3 = "continuity_lock_in", "decision_under_stakes", "irreversible_anchor"
 
 
-def _world_factory(make_fake, briefs=None, outcome=None, screens=None):
+def _world_factory(make_fake, briefs=None, outcome=None, screens=None, maps=None):
     """Problem-agnostic fake whose forge_scenario clears the gates. `briefs` collects
     (brief, steer) across segments (the level spy reads the Level: line); `outcome` is a mutable
     {'v': ...} so a test can flip converge/plateau mid-sitting; `screens` counts screen_moves
-    calls (the ONE-union-call assertion)."""
+    calls (the ONE-union-call assertion); `maps` counts map_territories calls (the deterministic-
+    consume assertion — a steered Continue makes NO second map call)."""
     outcome = outcome if outcome is not None else {"v": "closed"}
 
     def factory():
@@ -1066,6 +1067,14 @@ def _world_factory(make_fake, briefs=None, outcome=None, screens=None):
                 return orig_screen(moves, text)
 
             m.screen_moves = counting
+        if maps is not None:
+            orig_map = m.map_territories
+
+            def counting_map(situation, territories):
+                maps.append(situation)
+                return orig_map(situation, territories)
+
+            m.map_territories = counting_map
         return m
 
     return factory
@@ -2683,3 +2692,102 @@ def test_end_sitting_clears_steer(tmp_path, make_fake):
     reg.close("s1")  # End -> _end_sitting
     assert "s1" not in reg._steer_pending
     assert "s1" not in reg._steer_consume
+
+
+# --- User-steered chapters: the deterministic consume (S-T5) ------------------------------------
+
+
+def _other_open_territory(reg, sid):
+    from retnovation.content_loader import load_library
+
+    worked = reg._last_record[sid]["exp"].experience_id
+    open_eids = [e.experience_id for e in load_library() if e.regime is Regime.open_ended]
+    return next(e for e in open_eids if e != worked)
+
+
+def test_continue_consumes_steer_forges_pre_mapped_with_focus_no_second_map(tmp_path, make_fake):
+    """§2d: a pending steer at Continue forges the PRE-MAPPED territory with focus= carrying the
+    pressure, and makes NO second map_territories call (deterministic consume)."""
+    from retnovation.content_loader import load_territory_text
+
+    briefs, maps = [], []
+    reg = SessionRegistry(
+        str(tmp_path / "consume.db"),
+        model_factory=_world_factory(make_fake, briefs=briefs, maps=maps),
+    )
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    target = _other_open_territory(reg, "s1")
+    # inject a servable pending steer directly (capture is covered in S-T4)
+    reg._steer_pending["s1"] = ("her raw words", "raise a bridge round now", target)
+    briefs.clear()
+    n_maps = len(maps)  # the open_world front-door map call
+    reg.continue_session("s1")
+    assert len(maps) == n_maps  # deterministic consume — no second map call
+    assert briefs, "no forge brief captured"
+    assert any("raise a bridge round now" in b[0] for b in briefs)  # focus threaded
+    assert any(load_territory_text(target) in b[0] for b in briefs)  # the PRE-MAPPED territory
+    assert "s1" not in reg._steer_pending  # consumed
+
+
+def test_steer_label_agrees_with_delivery(tmp_path, make_fake):
+    """§4 test 6: whenever the wind-down shows next_kind='steer', Continue delivers the SAME
+    territory the steer named — label == delivery by construction."""
+    from retnovation.content_loader import load_territory_text
+
+    briefs = []
+    reg = SessionRegistry(
+        str(tmp_path / "agree.db"), model_factory=_world_factory(make_fake, briefs=briefs)
+    )
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    target = _arm_steer(reg, "s1", next_pressure="a new call")
+    _, data = reg.converse("s1", "raw words")
+    assert data["next_kind"] == "steer"  # the label promises a steer...
+    assert reg._steer_pending["s1"][2] == target  # ...to `target`
+    briefs.clear()
+    reg.continue_session("s1")  # delivery
+    assert any(load_territory_text(target) in b[0] for b in briefs)  # forged the promised territory
+
+
+def test_window_stale_steer_falls_back_to_rotation(tmp_path, make_fake):
+    """§2d: a steer whose territory windows mid-converse falls back to rotation at consume (the
+    cheap window re-check) — no crash, steer cleared."""
+    reg = SessionRegistry(str(tmp_path / "stale.db"), model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    target = _arm_steer(reg, "s1", next_pressure="P")
+    reg.converse("s1", "raw")
+    assert reg._steer_pending["s1"][2] == target
+    reg._store.territories_within = lambda now: {target}  # the steer's territory now windows
+    tag, _ = reg.continue_session("s1")
+    assert tag in ("say", "reserve")  # rotation (or reserve if all windowed) — never a crash
+    assert "s1" not in reg._steer_pending  # popped either way
+
+
+def test_picker_clears_steer(tmp_path, make_fake):
+    """§2d picker interaction: choosing 'other doors' (menu=True) supersedes a pending steer."""
+    reg = SessionRegistry(str(tmp_path / "picker.db"), model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    _arm_steer(reg, "s1", next_pressure="P1")
+    reg.converse("s1", "raw one")
+    assert "s1" in reg._steer_pending
+    reg.continue_session("s1", menu=True)  # other doors
+    assert "s1" not in reg._steer_pending
+    assert "s1" not in reg._steer_consume
+
+
+def test_no_steer_continue_carries_no_focus(tmp_path, make_fake):
+    """§4 test 9 regression pin: with NO steer pending, a world Continue is the rotation path —
+    the forge brief carries no focus block."""
+    briefs = []
+    reg = SessionRegistry(
+        str(tmp_path / "rot.db"), model_factory=_world_factory(make_fake, briefs=briefs)
+    )
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    briefs.clear()
+    reg.continue_session("s1")  # rotation — no steer
+    assert briefs
+    assert all("The pressure she wants to press next" not in b[0] for b in briefs)

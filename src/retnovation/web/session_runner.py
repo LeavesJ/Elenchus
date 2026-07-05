@@ -310,7 +310,7 @@ class SessionRegistry:
                             outcome=Outcome.accepted if spec is top_spec else Outcome.redirected,
                         )
 
-                    def forge_selection(eid, situation, clicked=False):
+                    def forge_selection(eid, situation, clicked=False, focus=None):
                         # Forge a generated problem over the curated base (spec §2b). Brief
                         # inputs come from the DURABLE sitting: her final substantive `you`
                         # turns per landed segment, the frames engaged this sitting, the
@@ -330,6 +330,9 @@ class SessionRegistry:
                             # landed record is forged+converged (the ONE _story predicate — None
                             # on the first door and after a plateau/curated segment: a fresh forge).
                             story=self._story(sit),
+                            # A user-steered chapter (§2d): her distilled next pressure, posed IN
+                            # this world under the mapped rubric. None on a rotation continue.
+                            focus=focus,
                         )
                         if res.fallback:
                             # Honest fallback (P1): the curated base serves untouched; the
@@ -366,12 +369,14 @@ class SessionRegistry:
 
                     # Same-world Continue (§2c): a queued target territory + a persisted world
                     # skip the front door — straight to the forge; the opening say is the boot's
-                    # first emission.
+                    # first emission. A steered continue also popped a queued focus (§2d): her
+                    # distilled pressure threads into the forge; None on a rotation continue.
                     with self._lock:
                         target = self._continue_target.pop(session_id, None)
+                        focus = self._steer_consume.pop(session_id, None)
                     world = self._store.read_world(sit) if sit is not None else None
                     if target is not None and world is not None:
-                        return forge_selection(target, world)
+                        return forge_selection(target, world, focus=focus)
 
                     # THE FRONT DOOR (§2a/§2g): the static ask + the small doors, one say.
                     ch.frontdoor_pending = _FRONTDOOR_ASK  # set BEFORE the put (queue orders it)
@@ -1267,17 +1272,29 @@ class SessionRegistry:
         world = self._store.read_world(sit) if sit is not None else None
 
         if world is not None and not menu:
-            # The living sitting's forge path (§2c): target the next territory; the boot's
-            # first emission is the forged opening say (decide skips the front door).
-            target = self._next_territory(session_id, now)
-            if target is None and work_anyway:
-                target = self._least_recent_territory(session_id, now)
-            if target is None:
-                # Informed re-serve (P3): a QUESTION, not a segment — the continuation is not
-                # consumed, so both of its answers (work_anyway / tomorrow) stay available.
+            # The living sitting's forge path (§2c). A servable pending steer (captured at converse,
+            # §2b) consumes DETERMINISTICALLY here — no model call: re-check the window cheaply, then
+            # forge the pre-mapped territory with her distilled pressure as focus. Else rotation.
+            with self._lock:
+                steer = self._steer_pending.pop(session_id, None)
+                self._steer_consume.pop(session_id, None)  # stale guard
+            target = None
+            if steer is not None and steer[2] not in self._store.territories_within(now):
+                target = steer[2]  # the pre-mapped eid — label == delivery
                 with self._lock:
-                    rec.pop("continued", None)
-                return ("reserve", {"copy": _RESERVE_COPY, "choices": list(_RESERVE_CHOICES)})
+                    self._steer_consume[session_id] = steer[1]  # distilled pressure -> forge focus
+                _log.info("chapter: steered -> %s", target)
+            if target is None:
+                target = self._next_territory(session_id, now)
+                if target is None and work_anyway:
+                    target = self._least_recent_territory(session_id, now)
+                if target is None:
+                    # Informed re-serve (P3): a QUESTION, not a segment — the continuation is not
+                    # consumed, so both of its answers (work_anyway / tomorrow) stay available.
+                    with self._lock:
+                        rec.pop("continued", None)
+                    return ("reserve", {"copy": _RESERVE_COPY, "choices": list(_RESERVE_CHOICES)})
+                _log.info("chapter: rotation -> %s", target)
             # Reopen honesty keys on the TERRITORY (review M8): a forged lost segment's gen:
             # ref never equals a menu ref, but its experience_id names the same pressure.
             self._seam_pending[session_id] = (
@@ -1294,8 +1311,15 @@ class SessionRegistry:
                 return self.start(session_id)
             finally:
                 self._step_end(session_id)
-                with self._lock:  # decide pops it; belt-and-suspenders against an early error
+                with self._lock:  # decide pops both; belt-and-suspenders against an early error
                     self._continue_target.pop(session_id, None)
+                    self._steer_consume.pop(session_id, None)
+
+        # Any continue path that is NOT the world-forge steered consume (other doors, curated pick,
+        # menu re-entry) supersedes a pending steer (§2d picker interaction) — cleared, re-typable.
+        with self._lock:
+            self._steer_pending.pop(session_id, None)
+            self._steer_consume.pop(session_id, None)
 
         pick = self._next_pick.get(session_id)
         if pick is not None and (
