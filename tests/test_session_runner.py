@@ -1153,6 +1153,78 @@ def test_second_topic_falls_through_to_the_honest_fit_beat(tmp_path, make_fake):
     assert tag == "say" and data["text"] == _SCENARIO  # consent proceeds as today
 
 
+def test_honest_fit_reflects_her_words_when_the_mapper_authors_a_safe_fit(tmp_path, make_fake):
+    """Honest-fit reflection fix (2026-07-05 founder dogfood): the fit beat names the pressable
+    edge in HER words (mapper `fit`, screened like the conversion) — NOT the generic territory
+    description that "never adjusts"."""
+    her = "how you price your subscription tiers against a saturated competitor"
+    script = [
+        {"verdict": "topic", "conversion": "First conversion question?"},
+        {"verdict": "topic", "conversion": "second", "fit": her},
+    ]
+    reg = SessionRegistry(
+        str(tmp_path / "fit.db"), model_factory=_mapper_factory(make_fake, script)
+    )
+    reg.start("s1", now=NOW)
+    reg.step("s1", "a question about strategy")
+    tag, data = reg.step("s1", "what pricing strategy should we use?")
+    assert her in data["text"]  # HER words named as the pressable edge
+    generic = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    assert generic not in data["text"]  # the canned territory description is NOT recited
+
+
+def test_honest_fit_falls_back_to_generic_when_fit_is_empty(tmp_path, make_fake):
+    """An empty `fit` takes the generic territory description (the safe fallback, unchanged)."""
+    script = [
+        {"verdict": "topic", "conversion": "First?"},
+        {"verdict": "topic", "conversion": "second", "fit": ""},
+    ]
+    reg = SessionRegistry(
+        str(tmp_path / "fit2.db"), model_factory=_mapper_factory(make_fake, script)
+    )
+    reg.start("s1", now=NOW)
+    reg.step("s1", "q1")
+    tag, data = reg.step("s1", "q2")
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    assert data["text"] == _HONEST_FIT.format(
+        desc=desc
+    )  # generic fallback (variant 0, first serve)
+
+
+def test_honest_fit_leaky_fit_falls_back_to_generic(tmp_path, make_fake):
+    """A `fit` that PERFORMS a hidden move falls to the generic description (L-13 teeth on the
+    honest-fit surface, mirroring the conversion screen)."""
+    from retnovation.model import EgressScreen
+
+    leaky_fit = "just embed every credential you need as a list"
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig_map = m.map_territories
+        script = [
+            {"verdict": "topic", "conversion": "First?"},
+            {"verdict": "topic", "conversion": "second", "fit": leaky_fit},
+        ]
+        m.map_territories = lambda s, t: (
+            orig_map(s, t).model_copy(update=script.pop(0)) if script else orig_map(s, t)
+        )
+        orig_screen = m.screen_moves
+        m.screen_moves = lambda moves, text: (
+            EgressScreen(performed=[1], evidence="performs move 1")
+            if text == leaky_fit
+            else orig_screen(moves, text)
+        )
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "leak-fit.db"), model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", "q1")
+    tag, data = reg.step("s1", "q2")
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    assert data["text"] == _HONEST_FIT.format(desc=desc)  # leaky fit rejected -> generic
+    assert leaky_fit not in data["text"]
+
+
 def test_conversion_screen_failure_serves_the_static_and_never_deflects(tmp_path, make_fake):
     """Spec §2a: an empty/refused/leaky authored conversion takes _STATIC_CONVERSION — which
     itself converts; the words 'out of scope' can never serve (founder constraint)."""

@@ -366,6 +366,9 @@ class TerritoryMap(BaseModel):
     reflection: str  # one line, HER words where possible
     verdict: Literal["decision", "topic"] = "decision"  # topic = question/curiosity/advice-ask
     conversion: str = ""  # on "topic": engage her subject + ask for the call inside it
+    fit: str = ""  # the honest-fit beat's HER-words edge (a noun phrase naming the sharpest
+    # pressable decision inside her own situation) — server-side until the caller egress-screens it
+    # (gated like conversion/reflection); the generic territory description is the fallback
 
 
 class ConverseTurn(BaseModel):

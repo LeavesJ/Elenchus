@@ -463,9 +463,18 @@ class SessionRegistry:
                     # is not clearly "high" takes the honest-fit beat — silent stretching costs
                     # signal; the extra beat costs one collect. force_fit (a second topic)
                     # takes it regardless of confidence.
+                    base = next(e for e in open_exps if e.experience_id == eid)
                     if force_fit or tmap.confidence.strip().lower() != "high":
-                        # Honest fit (§2a): her situation stays the world; no silent stretching.
-                        desc = " ".join(load_territory_text(eid).split()).rstrip(".")
+                        # Honest fit (§2a): her situation stays the world; no silent stretching. The
+                        # edge is named in HER words when the mapper authored a safe `fit` (screened
+                        # like the conversion beat — L-13), else the generic territory description
+                        # (honest-fit reflection fix, 2026-07-05 founder dogfood: the generic recite
+                        # "never adjusts" to her material).
+                        fit_text = tmap.fit.strip()
+                        if fit_text and voice.egress_safe_reply(model, base, fit_text):
+                            desc = " ".join(fit_text.split()).rstrip(".")
+                        else:
+                            desc = " ".join(load_territory_text(eid).split()).rstrip(".")
                         with self._lock:
                             n = self._fit_variant_idx.get(session_id, 0)
                             self._fit_variant_idx[session_id] = n + 1
@@ -479,7 +488,6 @@ class SessionRegistry:
                         if isinstance(value, int):
                             return forge_selection(eids[value], situation, clicked=True)
                         # any text proceeds with the MAPPED territory (branch kept simple)
-                    base = next(e for e in open_exps if e.experience_id == eid)
                     sel = forge_selection(eid, situation)
                     try:
                         if ch.pending_bridge is None:

@@ -717,7 +717,13 @@ class AnthropicModel:
             "that engages her subject in her own words, plus ONE question asking for the "
             "concrete call she faces inside that subject. The conversion never answers her "
             "question, never recommends, never names a territory, never judges the question, "
-            "and never declares anything out of scope."
+            "and never declares anything out of scope. "
+            "`fit` — ALWAYS fill it: ONE noun phrase naming the sharpest decision the best-fit "
+            'territory can press INSIDE her own situation, in her own words (e.g. "how you set '
+            'your pricing tiers against a competitor already saturating your market"). It is the '
+            "EDGE of HER subject, phrased as the thing she must decide — never the generic kind of "
+            "decision, never the territory text, never advice, never analysis vocabulary, never a "
+            'question. It reads naturally after "the sharpest pressure I can put on it: ".'
         )
         user = f"Her situation:\n{situation}\n\nTerritories:\n{numbered}"
         resp = self._parse_required(
