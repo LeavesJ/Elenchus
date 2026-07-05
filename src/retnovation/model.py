@@ -4,8 +4,9 @@ from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
-from .content_loader import load_prompt
+from .content_loader import load_prompt, load_spike_prompt
 from .types import (
+    CandidateFrame,
     CheckableGrade,
     CheckableQuestion,
     ConverseTurn,
@@ -188,6 +189,12 @@ class FakeModel:
             ranked=[eid for eid, _ in territories], confidence="high", reflection="[reflect]"
         )
 
+    def generate_frames(self, problem, exemplars):
+        return getattr(self, "_frames", [])
+
+    def generate_scenarios(self, problem):
+        return getattr(self, "_scenarios", [])
+
     def forge_scenario(self, brief, steer=""):
         return "[forged scenario]"
 
@@ -276,6 +283,14 @@ class _IntakeWire(BaseModel):
 
     frames: list[_FrameStateItem]
     traps: list[_TrapStateItem]
+
+
+class _FramesWire(BaseModel):
+    frames: list[CandidateFrame]
+
+
+class _ScenariosWire(BaseModel):
+    scenarios: list[str]  # decision-scenario prompts (the harness wraps them in LiftScenario)
 
 
 def _situation_block(exp) -> str:
@@ -734,6 +749,19 @@ class AnthropicModel:
             **_MED_PARAMS,
         )
         return resp  # fails LOUD on truncation (L-17) and refusal
+
+    def generate_frames(self, problem: str, exemplars: str) -> list[CandidateFrame]:
+        # The frame-gen spike's one new call (L-1 doctrine in content/spike/frame_gen.md): candidate
+        # decision-frames for a novel problem, seeded with curated exemplars. Structured, L-17.
+        system = load_spike_prompt("frame_gen").replace("{exemplars}", exemplars)
+        resp = self._parse_required(
+            max_tokens=_CLASSIFY_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": f"The decision:\n{problem}"}],
+            output_format=_FramesWire,
+            **_PARAMS,
+        )
+        return list(resp.frames)
 
     def forge_scenario(self, brief: str, steer: str = "") -> str:
         # Authors the scenario IN OPENING VOICE — it IS the opening say (§2b/M6: one generation,
