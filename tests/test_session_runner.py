@@ -2395,3 +2395,57 @@ def test_multi_restart_interleaved_turns_never_stack_identical_asks(tmp_path, ma
     turns = [(t["kind"], t["payload"].get("text")) for t in store.turns(store.live_sitting()["id"])]
     for a, b in zip(turns, turns[1:]):
         assert not (a[0] == "vera" and b[0] == "vera" and a[1] == b[1])  # no stacked asks
+
+
+# ---- Stay-in-scenario (spec 2026-07-05): _story predicate, sequel wiring, honest wind-down ----
+
+
+def test_story_returns_the_prior_scenario_after_a_forged_converged_segment(tmp_path, make_fake):
+    """Spec §2b: _story reads the last landed record's gen: instance-row scenario, durably."""
+    db = str(tmp_path / "story.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    tag, _ = _drive(reg, "s1", opening="position one")
+    assert tag == "done"
+    sit = reg._sitting_id["s1"]
+    assert reg._story(sit) == _SCENARIO  # the forged chapter-one scenario
+
+
+def test_story_is_none_after_a_plateaued_segment_without_logging(tmp_path, make_fake, caplog):
+    """A non-converged last record is a CORRECT fresh forge — None, and NOT a fault (no error log)."""
+    outcome = {"v": "unchanged"}
+    reg = SessionRegistry(
+        str(tmp_path / "story2.db"), model_factory=_world_factory(make_fake, outcome=outcome)
+    )
+    _open_world(reg, "s1")
+    tag, _ = _drive(reg, "s1", opening="a hedge")
+    assert tag == "done"  # plateaued landing
+    sit = reg._sitting_id["s1"]
+    caplog.clear()
+    assert reg._story(sit) is None
+    assert not [r for r in caplog.records if r.levelno >= 40]  # no error/exception logged
+
+
+def test_story_missing_instance_row_on_converged_record_logs_loudly(tmp_path, make_fake, caplog):
+    """Review point 2: a forged+converged record whose instance row is GONE is a storage fault —
+    None (fresh forge, no crash) but logged loudly, so P1-by-storage-failure is visible."""
+    import sqlite3 as _sq
+
+    db = str(tmp_path / "story3.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="position one")
+    sit = reg._sitting_id["s1"]
+    con = _sq.connect(db)
+    con.execute("DELETE FROM web_generated_problem WHERE sitting_id=?", (sit,))
+    con.commit()
+    con.close()
+    caplog.clear()
+    assert reg._story(sit) is None
+    assert [r for r in caplog.records if r.levelno >= 40]  # the fault was logged
+
+
+def test_territory_title_is_the_short_display_title(tmp_path, make_fake):
+    reg = SessionRegistry(str(tmp_path / "tt.db"), model_factory=make_fake)
+    title = reg._territory_title(_T1)  # continuity_lock_in
+    assert title and "veldra:" not in title and len(title) < 60  # short, clean

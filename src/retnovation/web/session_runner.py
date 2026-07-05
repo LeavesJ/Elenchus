@@ -1590,6 +1590,41 @@ class SessionRegistry:
                             rank.append(eid)
         return rank + [e.experience_id for e in open_exps if e.experience_id not in rank]
 
+    def _story(self, sit: str | None) -> str | None:
+        """The prior chapter's scenario for a sequel forge (spec §2b) — the SINGLE predicate for
+        sequel-vs-fresh (the label kind and the wind-down copy read it too, never re-derive it).
+        None when the last landed record is not forged+converged (a correct fresh forge). A
+        forged+converged record whose instance row is MISSING is a storage FAULT (P1 in disguise,
+        cross-write review 2026-07-05 pt 2) — logged LOUDLY, then None (fresh forge, never a
+        crash). Durable read (read_state), restart-safe, no in-memory dependence."""
+        if sit is None:
+            return None
+        rec = self._store.read_state(sit)["record"]
+        if rec is None:
+            return None
+        ref = rec.get("ledger_ref", "") or ""
+        if not (ref.startswith("gen:") and rec.get("stop_reason") == "converged"):
+            return None  # nothing to continue — a correct fresh forge
+        row = self._store.read_generated_problem(ref)
+        if row is None:
+            _log.error(
+                "sequel story fault: forged+converged record %s has no instance row (sitting %s)"
+                " — falling back to a fresh forge",
+                ref,
+                sit,
+            )
+            return None
+        return row["scenario"]
+
+    def _territory_title(self, eid: str) -> str:
+        """The target territory's SHORT curated display title (the same label the door shows) —
+        for the readable Continue label (spec §2d). The veldra: ref never reaches the client."""
+        try:
+            exp = next(e for e in load_library() if e.experience_id == eid)
+            return voice.display_titles().get(exp.ledger_ref, eid.replace("_", " ").title())
+        except Exception:
+            return eid.replace("_", " ").title()
+
     def _next_territory(self, session_id: str, now: datetime) -> str | None:
         """The highest-ranked territory outside the rolling window (§2c review M3: within a
         sitting the policy clock is frozen — the window is the ONLY rotation). None when every
