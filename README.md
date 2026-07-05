@@ -1,7 +1,6 @@
 # Retnovation
 
-A retention-and-deployment engine — a thin doctrine layer over a rented model
-(Claude Opus 4.8). Not a tutor: it owns every encounter *after* you first meet the
+A retention-and-deployment engine. Not a tutor: it owns every encounter *after* you first meet the
 material and makes the knowledge stay, and stay usable. **Rent capability, gate doctrine.**
 
 The friction is the product. It never hands the answer, names the move, or grades the
