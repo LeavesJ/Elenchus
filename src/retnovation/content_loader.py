@@ -56,6 +56,13 @@ def load_prompt(name: str, root: Path | None = None) -> str:
     return (_root(root) / "prompts" / f"{name}.md").read_text()
 
 
+def load_steer_fixtures(root: Path | None = None) -> dict:
+    """The F1 regression baseline (user-steered chapters spec §4): labeled post-landing turns +
+    the recorded false-non-empty threshold. Loaded structurally offline (L-22); exercised by the
+    key-gated test_live_steer_f1."""
+    return yaml.safe_load((_root(root) / "steer" / "f1_fixtures.yaml").read_text())
+
+
 def load_min_angle_count(root: Path | None = None) -> int:
     data = yaml.safe_load((_root(root) / "gate" / "depth.yaml").read_text())
     return int(data["min_angle_count"])

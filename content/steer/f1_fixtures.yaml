@@ -1,0 +1,27 @@
+# The F1 regression baseline (user-steered chapters spec §4). Each turn is a post-landing student
+# message in the wind-down. `non_steers` must distill next_pressure == "" (re-litigations of the
+# landed call — including REWORDED ones that map to an adjacent type, the F4 laundering case — plus
+# comments, questions, thanks). `genuine` must distill a NON-EMPTY steer (a new decision-frame she
+# now faces). The key-gated test_live_steer_f1 asserts the false-non-empty rate over `non_steers`
+# stays at/under max_false_nonempty_rate. Re-run it (under threshold) on ANY change to
+# concierge_converse.md or the model id (documented gate, spec §4). Structure runs offline (L-22).
+# Generic startup scenarios only — no confidential material (L-2/L-26).
+max_false_nonempty_rate: 0.15
+context:
+  problem: >
+    You run a 14-person seed-stage company. Your one enterprise pilot wants a feature your roadmap
+    doesn't have, and building it eats the quarter you set aside for the self-serve launch. The
+    pilot could become a third of next year's revenue — or churn in six months. Decide.
+  landed_position: >
+    I'm going to hold the roadmap and tell the pilot no on the custom feature — the self-serve
+    launch is the bet the company is actually built on.
+non_steers:
+  - "Right, so really the whole thing came down to protecting the core bet, not chasing the logo."
+  - "Wait — didn't you push me the other way three turns ago?"
+  - "So to be clear, saying no here was about focus, not about the money."
+  - "Honestly that clarified a lot. Thanks."
+  - "I still think holding the roadmap is right, just wanted to say it out loud once more."
+genuine:
+  - "Okay, separate thing — now I have to decide whether to raise a bridge round before the launch or run lean into it."
+  - "Different call: my technical co-founder wants to hand pilot support to a junior eng and I'm not sure I trust that."
+  - "New problem — a bigger competitor just offered to acquire us and I have two weeks to answer."
