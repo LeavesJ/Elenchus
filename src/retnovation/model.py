@@ -763,6 +763,18 @@ class AnthropicModel:
         )
         return list(resp.frames)
 
+    def generate_scenarios(self, problem: str) -> list[str]:
+        # Decision-scenario variants for the lift test (frame-gen spike). Structured, L-17.
+        system = load_spike_prompt("frame_gen_scenarios")
+        resp = self._parse_required(
+            max_tokens=_CLASSIFY_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": f"The decision:\n{problem}"}],
+            output_format=_ScenariosWire,
+            **_PARAMS,
+        )
+        return list(resp.scenarios)
+
     def forge_scenario(self, brief: str, steer: str = "") -> str:
         # Authors the scenario IN OPENING VOICE — it IS the opening say (§2b/M6: one generation,
         # one screen; no separate concierge_open pass on generated content). Doctrine lives in

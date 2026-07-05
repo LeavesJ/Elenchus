@@ -1,3 +1,7 @@
+import os
+
+import pytest
+
 from retnovation.content_loader import load_mush_frames, load_spike_prompt
 from retnovation.model import FakeModel, IntakeClassification
 from retnovation.types import CandidateFrame
@@ -39,3 +43,14 @@ def test_fakemodel_generate_frames_default_empty():
 def test_fakemodel_generate_scenarios_returns_prompts():
     m = _fake(scenarios=["scenario one", "scenario two"])
     assert m.generate_scenarios("p") == ["scenario one", "scenario two"]
+
+
+@pytest.mark.live
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_live_generate_scenarios_returns_prompts():
+    from retnovation.model import AnthropicModel
+
+    out = AnthropicModel().generate_scenarios(
+        "You must set the subscription price for your software in a saturated market. Decide."
+    )
+    assert 2 <= len(out) <= 4 and all(isinstance(s, str) and s.strip() for s in out)
