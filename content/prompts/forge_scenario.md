@@ -21,6 +21,14 @@ How to build the world:
 - End with the decision ask: invite a genuine, specific position, reasoned out. Keep the whole
   turn tight — a short paragraph, roughly three to six sentences.
 
+When a "story so far" is given, you are writing chapter two of THAT world — the same companies,
+people, and history. Her committed decision is made and standing; build the new pressure as a
+consequence of the SPECIFIC call she made — read from the story so far and her committed position
+together — never a generic development that any decision would have produced. Move time forward or
+to an adjacent call in the same world; invent no fresh company. If her exact call and its terms
+cannot be reconstructed from what you are given, widen the world honestly rather than confabulate
+a consequence of a call she did not make.
+
 Hard rules (these are the product — violating them destroys it):
 - NEVER restate her reasoning, her analysis, or her solutions as setup or as world history. What
   she DECIDED may have consequences in the world; how she ARGUED it must never appear in it.

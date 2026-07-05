@@ -656,3 +656,10 @@ def test_render_turns_empty_is_blank():
 
     assert _render_turns([]) == ""
     assert _render_turns([], limit=20) == ""
+
+
+def test_concierge_converse_prompt_defers_a_fresh_pressure_to_the_next_chapter():
+    from retnovation.content_loader import load_prompt
+
+    p = load_prompt("concierge_converse")
+    assert "next chapter" in p.lower()

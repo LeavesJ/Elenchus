@@ -511,3 +511,11 @@ def test_parse_required_retries_once_on_truncation_then_fails_loud():
     with pytest.raises(ModelError, match="truncated"):
         m2._parse_required(max_tokens=100, system="s", messages=[])
     assert m2._client.messages.budgets == [100, 200]  # retry spent; loud, not looping
+
+
+def test_forge_scenario_prompt_carries_the_sequel_doctrine():
+    from retnovation.content_loader import load_prompt
+
+    p = load_prompt("forge_scenario")
+    assert "story so far" in p.lower()
+    assert "specific call she made" in p.lower()  # decision-informed (§2a bar)
