@@ -1,0 +1,27 @@
+# Arm 2 of the frame-gen spike: deliberately-shallow "frames" that MUST fail the lift gate. If these
+# pass at the same rate as generated frames, the gate has no teeth and the moat is fake (spec §3).
+frames:
+  - frame_code: know_your_customer
+    frame_detail: Understand who your customers are and what they want before deciding.
+    injection: When reasoning about this decision, make sure to consider your customers and what they want.
+  - frame_code: weigh_the_tradeoffs
+    frame_detail: Carefully weigh the pros and cons of each option.
+    injection: When reasoning about this decision, carefully weigh the pros and cons of each option.
+  - frame_code: use_value_based_pricing
+    frame_detail: This is a pricing decision, so price based on the value delivered to the customer.
+    injection: When reasoning about this decision, apply value-based pricing — price to the value delivered.
+  - frame_code: think_long_term
+    frame_detail: Consider the long-term consequences, not just the short term.
+    injection: When reasoning about this decision, take a long-term view rather than a short-term one.
+  - frame_code: data_driven_decision
+    frame_detail: Base the decision on data rather than intuition.
+    injection: When reasoning about this decision, ground it in data rather than gut feeling.
+  - frame_code: align_with_strategy
+    frame_detail: Make sure the decision aligns with the overall company strategy.
+    injection: When reasoning about this decision, check that it aligns with your overall strategy.
+  - frame_code: consider_stakeholders
+    frame_detail: Take all stakeholders into account when deciding.
+    injection: When reasoning about this decision, take all your stakeholders into account.
+  - frame_code: minimize_risk
+    frame_detail: Choose the option that minimizes risk.
+    injection: When reasoning about this decision, favor the option that minimizes risk.

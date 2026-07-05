@@ -56,6 +56,16 @@ def load_prompt(name: str, root: Path | None = None) -> str:
     return (_root(root) / "prompts" / f"{name}.md").read_text()
 
 
+def load_spike_prompt(name: str, root: Path | None = None) -> str:
+    """A spike-experiment doctrine prompt from content/spike/ (L-1)."""
+    return (_root(root) / "spike" / f"{name}.md").read_text()
+
+
+def load_mush_frames(root: Path | None = None) -> list[dict]:
+    """The Arm-2 control set (deliberately-shallow frames) for the frame-gen spike."""
+    return yaml.safe_load((_root(root) / "spike" / "mush_frames.yaml").read_text())["frames"]
+
+
 def load_steer_fixtures(root: Path | None = None) -> dict:
     """The F1 regression baseline (user-steered chapters spec §4): labeled post-landing turns +
     the recorded false-non-empty threshold. Loaded structurally offline (L-22); exercised by the
