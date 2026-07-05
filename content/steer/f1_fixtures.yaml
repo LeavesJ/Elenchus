@@ -7,10 +7,12 @@
 # concierge_converse.md or the model id (documented gate, spec §4). Structure runs offline (L-22).
 # Generic startup scenarios only — no confidential material (L-2/L-26).
 #
-# NOTE (calibration, adversarial-review fold): 0.15 is a PROVISIONAL a-priori bar, not yet an
-# empirically-recorded baseline. With 7 non_steers it tolerates floor(7*0.15)=1 slip (judge noise),
-# so it is no longer effectively zero-tolerance. On the first founder-run test_live_steer_f1, record
-# the OBSERVED false-non-empty rate here and confirm/replace 0.15 with the measured baseline.
+# RECORDED BASELINE (first founder-run @live, 2026-07-05, claude-opus-4-8): false_nonempty_rate =
+# 0.000 (7/7 non_steers correctly empty, incl. the "that's the crux, right?" reflection and the
+# "can you say more about why..." advice-ask) and 3/3 genuine frames distilled a clean frame-blind
+# steer. The 0.15 threshold is KEPT as a deliberate 1-slip stochasticity margin (floor(7*0.15)=1) —
+# a judge-noise slip on one borderline non_steer must not red the gate (L-15). Re-run and re-record
+# on ANY concierge_converse.md or model-id change (spec §4).
 max_false_nonempty_rate: 0.15
 context:
   problem: >
