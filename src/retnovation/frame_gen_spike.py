@@ -12,6 +12,23 @@ from .lift_test import run_lift_test
 from .types import CandidateFrame, LiftScenario, Regime
 
 
+class _SpikeModel:
+    """Wrap the real model so the lift test's `generate_output` gets a DECISION-sized token budget
+    (L-17: the lift helper's 1024 default was tuned for SP1's short pitch outputs; decision-reasoning
+    scenarios plus adaptive thinking overrun it and return no text block). Everything else delegates
+    to the wrapped model unchanged."""
+
+    def __init__(self, model, max_tokens: int = 4096):
+        self._m = model
+        self._max = max_tokens
+
+    def generate_output(self, prompt, injection, *, max_tokens=None):
+        return self._m.generate_output(prompt, injection, max_tokens=self._max)
+
+    def __getattr__(self, name):
+        return getattr(self._m, name)
+
+
 def curated_exemplars() -> str:
     """Render the 5 curated rubrics' frames as exemplar text for the generator (the STANDARD)."""
     lines: list[str] = []
@@ -62,6 +79,7 @@ def _lift_rows(prob_id, prob, frames, scenarios, model, config, out_dir):
 def run_arm(problems, model, config, *, out_dir):
     """Arm 1: per problem, generate frames + scenarios, lift-test each frame."""
     Path(out_dir).mkdir(parents=True, exist_ok=True)
+    model = _SpikeModel(model)  # decision-sized generate_output budget (L-17)
     exemplars = curated_exemplars()
     rows = []
     for i, prob in enumerate(problems):
@@ -78,6 +96,7 @@ def run_arm(problems, model, config, *, out_dir):
 def run_mush_arm(mush, scenarios_prompts, model, config, *, out_dir):
     """Arm 2: run each mush frame against a FIXED real problem's scenarios (teeth test)."""
     Path(out_dir).mkdir(parents=True, exist_ok=True)
+    model = _SpikeModel(model)  # decision-sized generate_output budget (L-17)
     frames = [CandidateFrame(**m) for m in mush]
     scenarios = [
         LiftScenario(scenario_id=f"mush_s{j}", prompt=p, posture="spike")

@@ -129,3 +129,23 @@ def test_spike_problem_set_is_wellformed():
 
     assert 4 <= len(PROBLEMS) <= 6
     assert all(isinstance(p, str) and len(p.strip()) > 40 for p in PROBLEMS)
+
+
+def test_spikemodel_wrapper_enlarges_budget_and_delegates():
+    """L-17: the wrapper hands generate_output a decision-sized budget; everything else delegates."""
+    from retnovation.frame_gen_spike import _SpikeModel
+
+    seen = {}
+
+    class M:
+        def generate_output(self, prompt, injection, *, max_tokens=1024):
+            seen["mt"] = max_tokens
+            return GeneratedOutput(text="x")
+
+        def other(self):
+            return "delegated"
+
+    w = _SpikeModel(M(), max_tokens=4096)
+    w.generate_output("p", "inj")
+    assert seen["mt"] == 4096  # enlarged budget passed through
+    assert w.other() == "delegated"  # everything else delegates
