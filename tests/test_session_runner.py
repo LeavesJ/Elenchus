@@ -1302,8 +1302,11 @@ def test_front_door_free_text_forges_the_world_end_to_end(tmp_path, make_fake):
 
     tag, data = _drive(reg, "s1", opening="my position on the penalty")
     assert tag == "done" and data["landing"]
-    # Continue is subtitled with the NEXT territory's description (P4), never the worked one
-    assert data["next_title"] == _territory_subtitle(_T2)
+    # Continue: the NEXT territory's SHORT title in next_title, its description in next_desc
+    # (spec §2d — the split; never the worked territory), and next_kind is "chapter" (this
+    # segment forged+converged, so a sequel exists).
+    assert data["next_desc"] == _territory_subtitle(_T2)
+    assert data["next_kind"] == "chapter"
     log = store.converged_log()
     assert [(r["ref"], r["experience_id"]) for r in log] == [(f"gen:{sit}:1", _T1)]
 
@@ -2449,3 +2452,59 @@ def test_territory_title_is_the_short_display_title(tmp_path, make_fake):
     reg = SessionRegistry(str(tmp_path / "tt.db"), model_factory=make_fake)
     title = reg._territory_title(_T1)  # continuity_lock_in
     assert title and "veldra:" not in title and len(title) < 60  # short, clean
+
+
+def test_continue_after_forged_converged_forges_a_sequel_with_the_prior_story(tmp_path, make_fake):
+    """Spec §2b: Continue after a forged+converged segment feeds the prior chapter's scenario to
+    the forge (story=), so chapter two continues the SAME world."""
+    briefs = []
+    reg = SessionRegistry(
+        str(tmp_path / "seq.db"), model_factory=_world_factory(make_fake, briefs=briefs)
+    )
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one position")  # forged+converged
+    assert reg.continue_session("s1")[0] == "say"  # boot chapter two
+    reg.step("s1", "chapter two position")
+    assert any(_SCENARIO in b[0] for b in briefs)  # the prior scenario rode the sequel brief
+
+
+def test_next_kind_is_chapter_after_forged_converged_else_pressure(tmp_path, make_fake):
+    """Spec §2d: next_kind derives from the ONE _story predicate; the payload sends a SHORT
+    title + a description, not the paragraph in the title."""
+    reg = SessionRegistry(str(tmp_path / "kind.db"), model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    tag, data = _drive(reg, "s1", opening="position one")
+    assert tag == "done"
+    assert data["next_kind"] == "chapter"  # a story exists to continue
+    assert data["next_title"] and len(data["next_title"]) < 60  # SHORT title
+    assert data.get("next_desc")  # the description rides separately (muted line)
+
+
+def test_next_kind_is_pressure_after_a_plateau(tmp_path, make_fake):
+    outcome = {"v": "unchanged"}
+    reg = SessionRegistry(
+        str(tmp_path / "kind2.db"), model_factory=_world_factory(make_fake, outcome=outcome)
+    )
+    _open_world(reg, "s1")
+    tag, data = _drive(reg, "s1", opening="a hedge")
+    assert tag == "done"
+    assert data["next_kind"] == "pressure"  # no sequel to continue
+
+
+def test_label_kind_and_forge_path_agree_on_the_same_record(tmp_path, make_fake):
+    """Review point 3: the label the user sees and the sequel the forge builds derive from the
+    SAME _story predicate — they can never disagree on one landed record."""
+    briefs = []
+    reg = SessionRegistry(
+        str(tmp_path / "agree.db"), model_factory=_world_factory(make_fake, briefs=briefs)
+    )
+    _open_world(reg, "s1")
+    tag, data = _drive(reg, "s1", opening="chapter one")
+    sit = reg._sitting_id["s1"]
+    is_chapter = data["next_kind"] == "chapter"
+    story_present = reg._story(sit) is not None
+    assert is_chapter == story_present  # agreement by construction
+    reg.continue_session("s1")
+    reg.step("s1", "chapter two")
+    forged_sequel = any(_SCENARIO in b[0] for b in briefs)
+    assert forged_sequel == is_chapter  # the forge did what the label promised

@@ -312,6 +312,10 @@ class SessionRegistry:
                             self._level(session_id),
                             model,
                             store,  # the worker's ENGINE store: ledger seeding, M9
+                            # A sequel (spec §2b): the prior chapter's scenario when the last
+                            # landed record is forged+converged (the ONE _story predicate — None
+                            # on the first door and after a plateau/curated segment: a fresh forge).
+                            story=self._story(sit),
                         )
                         if res.fallback:
                             # Honest fallback (P1): the curated base serves untouched; the
@@ -799,6 +803,8 @@ class SessionRegistry:
         rec = self._last_record.get(session_id)
         end_visible = rec is not None
         next_title = ""
+        next_desc = ""
+        next_kind = "pressure"
         pick = st["next_pick"]
         if pick is not None:
             ref, title = pick
@@ -814,13 +820,18 @@ class SessionRegistry:
             self._next_pick_title[session_id] = pick[1]
             next_title = pick[1]
         if rec is not None and self._store.read_world(sit) is not None:
-            # A world sitting's Continue is subtitled with the NEXT territory's description
-            # (§2c review P4) — recomputed here; the window may have moved while we were away.
+            # A world sitting's Continue: SHORT title + muted description + kind (§2d); recomputed
+            # here (the window may have moved). next_kind from the ONE _story predicate — a resumed
+            # Continue keeps the right label across a restart with no schema change (review pt 3).
             target = self._next_territory(session_id, now)
-            next_title = _territory_subtitle(target) if target else ""
+            next_title = self._territory_title(target) if target else ""
+            next_desc = _territory_subtitle(target) if target else ""
+            next_kind = "chapter" if self._story(sit) is not None else "pressure"
         payload = {
             "turns": turns,
             "next_title": next_title,
+            "next_desc": next_desc,
+            "next_kind": next_kind,
             "end_visible": end_visible,
             "mode": mode,
             "theme": st["theme"] or {},
@@ -1059,15 +1070,16 @@ class SessionRegistry:
                 )
             return
         if world is not None:
-            # The living sitting's Continue (§2c): the next TERRITORY, subtitled with its
-            # curated description (P4). No ref pick persists — the target is recomputed at
-            # continue time against the live window; all-windowed → empty title (the informed
-            # re-serve owns that state).
+            # The living sitting's Continue (§2c/§2d): the next TERRITORY, labeled with its SHORT
+            # title + a muted description; `next_kind` (chapter|pressure) from the ONE _story
+            # predicate so the label and the sequel forge can never disagree (review pt 3). No ref
+            # pick persists — the target is recomputed at continue time against the live window.
             target = self._next_territory(session_id, now)
-            subtitle = _territory_subtitle(target) if target else ""
+            data["next_title"] = self._territory_title(target) if target else ""
+            data["next_desc"] = _territory_subtitle(target) if target else ""
+            data["next_kind"] = "chapter" if self._story(sit) is not None else "pressure"
             self._next_pick[session_id] = None
-            self._next_pick_title[session_id] = subtitle
-            data["next_title"] = subtitle
+            self._next_pick_title[session_id] = data["next_title"]
             if sit is not None:
                 self._store.write_state(sit, next_pick=None)
         else:
