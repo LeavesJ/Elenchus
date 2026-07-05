@@ -176,10 +176,13 @@ window.Terrain3D = (function () {
       var vb = wh(cx, cz), bright = Math.max(1, vit) / 3, tiers = Math.max(1, Math.min(3, elev));
       var rTs = [11.6, 8.0, 4.9], rBs = [12.8, 9.0, 5.7], cy = [0.9, 2.75, 4.7], rots = [0, 0.52, 0.2];
       for (var k = 0; k < tiers; k++) gTier(cx, cz, vb, rTs[k], rBs[k], 1.85, cy[k], rots[k], bright);
-      // houses ring per built terrace, brightness by vitality
-      houseRing(cx, cz, vb, 6, 9.7, 2.15, 1.05, true, bright);
-      if (tiers >= 2) houseRing(cx, cz, vb, 4, 6.3, 4.0, 0.95, true, bright);
-      if (tiers >= 3) houseRing(cx, cz, vb, 2, 2.7, 6.0, 0.8, true, bright);
+      // Ambient structure rings are UNLIT (founder dogfood 2026-07-04: "described must match
+      // displayed" — a LIT house means exactly one convergence, everywhere; the dark shapes
+      // are the ember-vocabulary potential fabric). Village life reads through the terrace
+      // glow + beacon, whose brightness stays vitality-driven.
+      houseRing(cx, cz, vb, 6, 9.7, 2.15, 1.05, false, bright);
+      if (tiers >= 2) houseRing(cx, cz, vb, 4, 6.3, 4.0, 0.95, false, bright);
+      if (tiers >= 3) houseRing(cx, cz, vb, 2, 2.7, 6.0, 0.8, false, bright);
       houseRing(cx, cz, vb, 6, 15.6, 0.5, 1.0, false, bright);
       // beacon on the top built terrace
       var by = vb + (tiers >= 3 ? 6.0 : tiers === 2 ? 4.1 : 2.3);
@@ -211,7 +214,10 @@ window.Terrain3D = (function () {
     // region's area — the region's ordinal position anchors the cluster; houses take deterministic
     // ordinal ring slots (arrival order fixes the angle: no jitter, no data beyond order). Capped
     // at HOUSE_CAP per region with a many-cue: one brighter, larger beacon over the cluster.
-    var HOUSE_CAP = 9, HOUSE_RING_R = 13.4;
+    // Earned houses live ON the first terrace (r inside the tier-1 rim, elevated to its
+    // surface) — the old ground-level ring OUTSIDE the rim (r=13.4) hid them behind the
+    // mound's silhouette from most camera angles (founder dogfood 2026-07-04).
+    var HOUSE_CAP = 9, HOUSE_RING_R = 10.3, litHouses = 0;
     var grouped = [];
     for (var hi = 0; hi < data.houses.length; hi++) {
       var hrow = data.houses[hi], hr = hrow && hrow.region;
@@ -222,9 +228,21 @@ window.Terrain3D = (function () {
       var hs = grouped[gi]; if (!hs) continue;
       var anchor = pos(gi), shown = Math.min(hs.length, HOUSE_CAP);
       for (var hk = 0; hk < shown; hk++) {
-        var ha = -Math.PI / 2 + hk * (2 * Math.PI / HOUSE_CAP);
+        // Arc centred on the DEFAULT camera azimuth (az=0.9): the caption's count must be
+        // countable at the resting view, not after an orbit hunt. Deterministic — ordinal
+        // slots only, no data beyond arrival order.
+        var ha = 0.9 - ((shown - 1) / 2 - hk) * (2 * Math.PI / HOUSE_CAP);
         var hx = anchor.x + Math.cos(ha) * HOUSE_RING_R, hz = anchor.z + Math.sin(ha) * HOUSE_RING_R;
-        house(hx, wh(hx, hz), hz, 1.12, true, Math.max(1, hs[hk].bucket || 1) / 3);
+        var hb = Math.max(1, hs[hk].bucket || 1) / 3;
+        // The EARNED house (one per convergence): the only lit-window house in the valley,
+        // scaled past every ambient shape, with its own hearth glow — countable at a glance
+        // (founder dogfood 2026-07-04: the caption's number must be visible on screen).
+        var onTerrace = data.regions[gi] && data.regions[gi].render === "rendered";
+        var hy = wh(anchor.x, anchor.z) + (onTerrace ? 2.15 : 0);
+        house(hx, hy, hz, 1.45, true, hb);
+        var hearth = new THREE.PointLight(0xffb066, 0.55 + 0.5 * hb, 12, 2.0);
+        hearth.position.set(hx, hy + 2.2, hz); world.add(hearth);
+        litHouses++;
       }
       if (hs.length > HOUSE_CAP) {
         var my = wh(anchor.x, anchor.z);
@@ -331,6 +349,9 @@ window.Terrain3D = (function () {
       camera.lookAt(target);
       draw();
     })();
+    // The described==displayed contract (founder requirement 2026-07-04): the renderer reports
+    // how many EARNED lit houses it actually placed, so a harness can assert caption == scene.
+    return { litHouses: litHouses };
   }
 
   return { render: render, _pos: pos, _normalize: normalize };
