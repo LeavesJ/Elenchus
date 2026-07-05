@@ -66,7 +66,12 @@ class ForgeResult:
 
 
 def build_brief(
-    territory: str, situation: str, positions: list[str], role: str | None, level: str
+    territory: str,
+    situation: str,
+    positions: list[str],
+    role: str | None,
+    level: str,
+    story: str | None = None,
 ) -> str:
     """Assemble the forge brief — frame-blind and Vera-free (spec §2b / review D3).
 
@@ -77,6 +82,16 @@ def build_brief(
     if level not in LEVELS:
         raise ValueError(f"level must be one of {LEVELS}, got {level!r}")
     lines = [f"Territory: {territory.strip()}", "", f"Her situation: {situation.strip()}"]
+    if story:
+        # Sequel (spec §2b): the prior chapter's world to continue — decision-informed (the new
+        # pressure is a consequence of the SPECIFIC call she made, never a generic development).
+        lines += [
+            "",
+            "The story so far (the world to continue — her decision in it is made and standing; "
+            "build the new pressure as a consequence of the SPECIFIC call she made, not a "
+            "generic development):",
+            story.strip(),
+        ]
     if positions:
         lines += ["", "Her committed positions (her own words):"]
         lines += [f"- {p}" for p in positions]
@@ -173,6 +188,7 @@ def forge_experience(
     level: str,
     model: Model,
     store: Store,
+    story: str | None = None,
 ) -> ForgeResult:
     """Forge one generated problem over the curated base (spec §2b).
 
@@ -193,7 +209,7 @@ def forge_experience(
     world_ref = f"gen:{sitting_id}"
     instance_ref = f"gen:{sitting_id}:{n}"
     brief = build_brief(
-        load_territory_text(base.experience_id), situation, positions, base.role, level
+        load_territory_text(base.experience_id), situation, positions, base.role, level, story
     )
     requirements = _fit_requirements(base.rubric)
     union = _union_moves(base, engaged_frames)

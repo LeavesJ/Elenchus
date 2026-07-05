@@ -259,11 +259,45 @@ def _engine_store(tmp_path):
     return Store(tmp_path / "engine.db")
 
 
-def _forge(model, store, *, sid="s1", n=1, level="base", engaged=None, base=None):
+def _forge(model, store, *, sid="s1", n=1, level="base", engaged=None, base=None, story=None):
     base = base or load_experience("license_continuity")
     return forge.forge_experience(
-        base, sid, n, SITUATION, POSITIONS, engaged or [], level, model, store
+        base, sid, n, SITUATION, POSITIONS, engaged or [], level, model, store, story=story
     )
+
+
+def test_build_brief_prepends_the_story_block_when_given():
+    """Spec §2b: a sequel brief carries the prior chapter's scenario as the world to continue."""
+    b = forge.build_brief(
+        "Territory desc",
+        "Her situation",
+        ["her position"],
+        "ceo",
+        "base",
+        story="Halvmark Logistics circled the platform; Dana put $480K on the table.",
+    )
+    assert "The story so far" in b
+    assert "Halvmark Logistics circled the platform" in b
+    assert b.index("Halvmark Logistics") > b.index("Her situation")  # after her situation
+
+
+def test_build_brief_omits_the_story_block_when_none():
+    b = forge.build_brief("T", "S", [], None, "base")
+    assert "story so far" not in b.lower()
+
+
+def test_forge_experience_threads_story_into_the_brief(tmp_path):
+    """forge_experience passes story to build_brief (spy the generated brief)."""
+    briefs = []
+    m = _MovesSpyModel()
+
+    def fs(brief, steer=""):
+        briefs.append(brief)
+        return _SCENARIO
+
+    m.forge_scenario = fs
+    _forge(m, _engine_store(tmp_path), story="Chapter one's world: the Meridian pilot.")
+    assert briefs and "Chapter one's world: the Meridian pilot." in briefs[0]
 
 
 def test_forge_happy_path_world_grain_scene_none_rubric_byte_equal(tmp_path):
