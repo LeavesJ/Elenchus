@@ -87,7 +87,7 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
         if data.get("returning"):  # the return-visit muted line (§2f review P10)
             out["returning"] = data["returning"]
         return out
-    if tag == "say":  # every Concierge-authored visible turn (opening, re-invite, probe)
+    if tag == "say":  # every Concierge-authored visible turn (opening, re-invite, probe, wind-down)
         out = {"kind": "say", "text": data["text"]}
         if "theme" in data:  # the opening say carries the role atmosphere (two-phase)
             out["theme"] = data["theme"]
@@ -95,6 +95,12 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
             out["seam"] = data["seam"]
         if "bridge" in data:  # the heard-you / fallback bridge on a forged opening (§2a/§2b)
             out["bridge"] = data["bridge"]
+        # The wind-down Continue label (user-steered chapters §2c): a steered/rotation label rides
+        # the converse say. next_kind is a derived enum; next_desc is HER raw words or the territory
+        # description — the distilled pressure and refs never appear (L-13).
+        for k in ("next_title", "next_desc", "next_kind"):
+            if k in data:
+                out[k] = data[k]
         return out
     if tag == "reserve":  # every territory windowed: the informed re-serve question (§2c P3)
         return {

@@ -95,14 +95,18 @@ function renderContinue(title){
   if(contBox){ contBox.remove(); contBox=null; }
   contBox=document.createElement('div');
   contBox.style.cssText='align-self:center;display:flex;gap:12px;align-items:center;margin:6px 0';
-  if(title){
+  const isSteer = nextKind==='steer';
+  if(title || isSteer){
     const col=document.createElement('div');
     col.style.cssText='display:flex;flex-direction:column;align-items:center;gap:4px';
     const b=document.createElement('button'); b.type='button';
     b.style.cssText='background:#155e63;color:#eafffb;border:0;border-radius:11px;padding:9px 16px;font:inherit;cursor:pointer';
-    // SHORT title in the button, kind = chapter|pressure (\u00a72d): the description is demoted to a
-    // muted line beneath, never clipped inside the button (founder dogfood 2026-07-04).
-    b.textContent='Continue \u2014 next '+(nextKind==='chapter'?'chapter':'pressure')+': '+title;
+    // A user-steered chapter (\u00a72c): a fixed short lead (no clipping), HER raw words on the muted
+    // line beneath. Rotation-sequel: next chapter|pressure + the SHORT territory title, description
+    // demoted to the muted line (founder dogfood 2026-07-04).
+    b.textContent = isSteer
+      ? 'Continue \u2014 press what you raised'
+      : 'Continue \u2014 next '+(nextKind==='chapter'?'chapter':'pressure')+': '+title;
     b.onclick=()=>goContinue(b,{});
     col.append(b);
     if(nextDesc){ const s=document.createElement('div'); s.className='muted';
@@ -227,6 +231,9 @@ function advance(r){
   if(r.kind==='menu'){ applyTheme(r.theme); renderMenu(r.problems, r.nonce); return; }
   if(r.kind==='say'){ if(r.seam) muted(r.seam); if(r.bridge) muted(r.bridge);
     applyTheme(r.theme); bubble('vera', r.text); showComposer(true);
+    // the wind-down say carries a fresh Continue label (steer|chapter|pressure) — read it before
+    // re-rendering so a captured steer shows "press what you raised" (user-steered chapters §2c)
+    if('next_kind' in r){ nextTitle=r.next_title||''; nextDesc=r.next_desc||''; nextKind=r.next_kind||'pressure'; }
     if(mode==='converse') renderContinue(nextTitle); return; }
   if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); nextTitle=r.next_title||''; nextDesc=r.next_desc||''; nextKind=r.next_kind||'pressure'; renderContinue(nextTitle); return; }
   if(r.kind==='close'){ renderClose(r); return; }

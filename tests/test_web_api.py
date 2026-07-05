@@ -821,3 +821,30 @@ def test_shell_renders_the_front_door_and_living_sitting_affordances():
     )  # the readable-label fields ride the wire
     assert "r.frontdoor" in html  # resume of a sitting parked at the front door
     assert "veldra" not in html.lower()  # L-13 on the static shell, unchanged
+    # user-steered chapters (§2c): the steer label reads HER words, and the say handler reads the
+    # fresh label off the wind-down payload
+    assert "press what you raised" in html
+    assert "'next_kind' in r" in html
+
+
+def test_emit_say_projects_the_steer_label():
+    """User-steered chapters §2c: a converse say with a steer label projects next_kind/desc/title."""
+    from retnovation.web.app import _emit
+
+    out = _emit(
+        None,
+        "say",
+        {"text": "reply", "next_kind": "steer", "next_desc": "her raw words", "next_title": ""},
+    )
+    assert out["kind"] == "say"
+    assert out["next_kind"] == "steer"
+    assert out["next_desc"] == "her raw words"
+    assert out["next_title"] == ""
+
+
+def test_emit_say_without_a_label_is_unchanged():
+    """A plain say (opening/probe/re-invite) carries no label — the projection must not invent one."""
+    from retnovation.web.app import _emit
+
+    out = _emit(None, "say", {"text": "reply"})
+    assert out == {"kind": "say", "text": "reply"}

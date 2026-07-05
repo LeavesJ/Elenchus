@@ -126,6 +126,14 @@ def _territory_subtitle(experience_id: str) -> str:
     return desc if len(desc) <= 80 else desc[:79].rstrip() + "…"
 
 
+def _clip80(text: str) -> str:
+    """Her raw steer words for the muted label line (user-steered chapters §2c): whitespace-
+    collapsed, ~80 chars — echoed so she SEES the pressure was absorbed (F2: her words, never the
+    server-side distillation)."""
+    t = " ".join(text.split())
+    return t if len(t) <= 80 else t[:79].rstrip() + "…"
+
+
 def _serialize_record(rec: dict) -> dict | None:
     """The landed record, reduced to what a future process can rebuild from (spec §2a): the
     experience by id (never the object — the rubric reloads from the L-1 content library),
@@ -230,6 +238,12 @@ class SessionRegistry:
         self._forge_n: dict[str, int] = {}
         self._fit_variant_idx: dict[str, int] = {}  # honest-fit rotation (spec §2d)
         self._frontdoor_swallow: set[str] = set()
+        # User-steered chapters (spec 2026-07-05): the pending steer captured in converse (raw
+        # words + distilled pressure + pre-mapped territory eid) and, at Continue, the distilled
+        # pressure queued for decide()'s forge focus. In-memory ONLY — a steer lost to a restart is
+        # re-typed (no L-14 surface); cleared on consume / any non-steer continue / _end_sitting.
+        self._steer_pending: dict[str, tuple[str, str, str]] = {}
+        self._steer_consume: dict[str, str] = {}
 
     def start(self, session_id: str, now: datetime | None = None) -> tuple[str, dict]:
         now = now or datetime.now(timezone.utc)
@@ -1382,7 +1396,7 @@ class SessionRegistry:
             # Degraded rebuild (content drift): the honest static — never an unscreened author,
             # and never the SAFE_CONTRACT lie ("I'll push") on a dead engine (spec §2c).
             return ("say", {"text": voice._CONVERSE_DONE_FRESH})
-        reply, _next_pressure = voice.converse(
+        reply, next_pressure = voice.converse(
             rec["model"],
             rec["exp"],
             rec["recent"],
@@ -1409,17 +1423,22 @@ class SessionRegistry:
                 # performs no move), just not a lie. Fresh variant — an interrupted/lost state
                 # is not the place to promise a next chapter.
                 reply = voice._CONVERSE_DONE_FRESH
+        now = datetime.now(timezone.utc)
+        if next_pressure and sit is not None and self._store.read_world(sit) is not None:
+            # The mapper gate at CAPTURE (user-steered chapters §2b): a servable fresh pressure
+            # becomes the pending steer (raw words + distilled pressure + pre-mapped territory).
+            self._capture_steer(session_id, sit, value, next_pressure, now, rec["model"])
         rec["recent"].append(("student", value))
         rec["recent"].append(("Vera", reply))
-        sit = self._sitting_id.get(session_id)
         if sit is not None:
             # Persist the pair AND rewrite the record in the same short transaction window —
             # otherwise a second restart makes Vera forget conversation visible on screen (§2b).
-            now = datetime.now(timezone.utc)
             self._store.append_turn(sit, "you", {"text": value}, now)
             self._store.append_turn(sit, "vera", {"text": reply}, now)
             self._store.write_state(sit, record=_serialize_record(rec))
-        return ("say", {"text": reply})
+        data = {"text": reply}
+        self._attach_converse_label(session_id, sit, now, data)
+        return ("say", data)
 
     def close(self, session_id: str) -> tuple[str, dict]:
         """User-owned close: author the honest close from the SITTING's last converged record and
@@ -1651,6 +1670,58 @@ class SessionRegistry:
         windowed = self._store.territories_within(now)
         return next((eid for eid in self._territory_order(session_id) if eid not in windowed), None)
 
+    def _capture_steer(
+        self,
+        session_id: str,
+        sit: str,
+        raw_user_text: str,
+        next_pressure: str,
+        now: datetime,
+        model,
+    ) -> None:
+        """Map a non-empty next_pressure and bank a SERVABLE result as the pending steer (§2b):
+        verdict=decision AND confidence=high AND the territory NOT windowed. One map call per
+        genuine fresh pressure (chatter is next_pressure="" — no call, F1). last-SERVABLE-wins:
+        an unservable turn (topic / low-confidence / windowed / hallucinated) leaves any prior
+        steer untouched (returns without touching it)."""
+        open_exps = [e for e in load_library() if e.regime is Regime.open_ended]
+        territories = [(e.experience_id, load_territory_text(e.experience_id)) for e in open_exps]
+        known = {eid for eid, _ in territories}
+        tmap = model.map_territories(next_pressure, territories)
+        ranked = [eid for eid in tmap.ranked if eid in known]
+        if not ranked:
+            return  # a hallucinated ranking cannot pick a door — leave any prior steer
+        eid = ranked[0]
+        servable = (
+            tmap.verdict == "decision"
+            and tmap.confidence.strip().lower() == "high"
+            and eid not in self._store.territories_within(now)
+        )
+        if servable:
+            with self._lock:
+                self._steer_pending[session_id] = (raw_user_text, next_pressure, eid)
+
+    def _attach_converse_label(
+        self, session_id: str, sit: str | None, now: datetime, data: dict
+    ) -> None:
+        """The wind-down Continue label (§2c). A servable steer pending -> next_kind='steer', the
+        button a fixed short lead, next_desc = HER raw words (never the distillation, L-13/F2).
+        Else on a world sitting -> the recomputed rotation-sequel label (chapter|pressure), so the
+        label tracks the live window; on a curated sitting -> leave the prior label unchanged."""
+        with self._lock:
+            steer = self._steer_pending.get(session_id)
+        if steer is not None:
+            raw, _pressure, _eid = steer
+            data["next_kind"] = "steer"
+            data["next_title"] = ""
+            data["next_desc"] = _clip80(raw)
+            return
+        if sit is not None and self._store.read_world(sit) is not None:
+            target = self._next_territory(session_id, now)
+            data["next_title"] = self._territory_title(target) if target else ""
+            data["next_desc"] = _territory_subtitle(target) if target else ""
+            data["next_kind"] = "chapter" if self._story(sit) is not None else "pressure"
+
     def _least_recent_territory(self, session_id: str, now: datetime) -> str:
         """work-anyway's target (§2c review P3): the territory converged longest ago — the
         least echo. Falls back to the targeting order's head if the log carries no territories."""
@@ -1751,5 +1822,7 @@ class SessionRegistry:
         self._level_idx.pop(session_id, None)
         self._forge_n.pop(session_id, None)
         self._frontdoor_swallow.discard(session_id)
+        self._steer_pending.pop(session_id, None)
+        self._steer_consume.pop(session_id, None)
         with self._lock:
             self._continue_target.pop(session_id, None)

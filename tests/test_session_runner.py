@@ -10,6 +10,7 @@ from retnovation.types import (
     EntryClassification,
     FrameState,
     Regime,
+    TerritoryMap,
     TrapState,
     Work,
 )
@@ -391,6 +392,32 @@ def _drive(reg, sid, opening="an opening"):
     while tag == "say":
         tag, data = reg.step(sid, "again")
     return tag, data
+
+
+def _arm_steer(
+    reg, sid, *, next_pressure, ranked_first=None, confidence="high", verdict="decision"
+):
+    """Override the converged record's model so the NEXT converse raises `next_pressure` and the
+    capture mapper ranks `ranked_first` (default: a territory OTHER than the one just worked, so it
+    is non-windowed → servable) with the given verdict/confidence. Returns the target eid. Mirrors
+    how the record's own model authors the wind-down (converse uses rec['model'])."""
+    from retnovation.content_loader import load_library
+
+    worked = reg._last_record[sid]["exp"].experience_id
+    open_eids = [e.experience_id for e in load_library() if e.regime is Regime.open_ended]
+    target = ranked_first or next(e for e in open_eids if e != worked)
+    m = reg._last_record[sid]["model"]
+    m.concierge_converse = lambda problem, recent, *, stop_reason="converged", voice="": (
+        ConverseTurn(reply="that's the edge of this one", next_pressure=next_pressure)
+    )
+    m.map_territories = lambda situation, territories: TerritoryMap(
+        ranked=[target] + [e for e, _ in territories if e != target],
+        confidence=confidence,
+        reflection="[r]",
+        verdict=verdict,
+        conversion="",
+    )
+    return target
 
 
 def test_plateaued_segment_is_not_banked_and_can_be_reoffered(tmp_path, make_fake):
@@ -2584,3 +2611,75 @@ def test_interrupted_converse_fail_closed_is_honest_not_the_push_lie(tmp_path, m
     assert tag == "say"
     assert data["text"] == _v._CONVERSE_DONE_FRESH  # honest static, not the push lie
     assert data["text"] != _v.SAFE_CONTRACT
+
+
+# --- User-steered chapters: capture + the wind-down label (S-T4) --------------------------------
+
+
+def test_converse_captures_servable_steer_and_labels(tmp_path, make_fake):
+    """§2b/§2c: a servable fresh pressure becomes the pending steer; the wind-down say carries the
+    steer label with HER raw words, and the distilled pressure never reaches the wire (L-13/F2)."""
+    reg = SessionRegistry(str(tmp_path / "steer.db"), model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    assert _drive(reg, "s1", opening="chapter one")[0] == "done"
+    target = _arm_steer(reg, "s1", next_pressure="whether to disclose the defect now")
+    tag, data = reg.converse("s1", "Now I have to decide whether to tell the board.")
+    assert tag == "say"
+    assert data["next_kind"] == "steer"
+    assert data["next_title"] == ""  # the button is a fixed short lead
+    assert data["next_desc"] == "Now I have to decide whether to tell the board."  # HER raw words
+    assert "whether to disclose the defect now" not in str(data)  # distillation off the wire
+    assert reg._steer_pending["s1"] == (
+        "Now I have to decide whether to tell the board.",
+        "whether to disclose the defect now",
+        target,
+    )
+
+
+def test_converse_unservable_pressure_leaves_prior_steer(tmp_path, make_fake):
+    """F5 last-SERVABLE-wins: a non-empty pressure that maps LOW confidence is not servable and
+    leaves any prior steer untouched."""
+    reg = SessionRegistry(str(tmp_path / "steer2.db"), model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    _arm_steer(reg, "s1", next_pressure="P1")
+    reg.converse("s1", "raw one")
+    first = reg._steer_pending["s1"]
+    _arm_steer(reg, "s1", next_pressure="P2", confidence="low")  # unservable
+    reg.converse("s1", "raw two")
+    assert reg._steer_pending["s1"] == first  # the unservable turn left P1's steer
+
+
+def test_converse_empty_pressure_leaves_prior_steer(tmp_path, make_fake):
+    reg = SessionRegistry(str(tmp_path / "steer3.db"), model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    _arm_steer(reg, "s1", next_pressure="P1")
+    reg.converse("s1", "raw one")
+    first = reg._steer_pending["s1"]
+    _arm_steer(reg, "s1", next_pressure="")  # chatter — no capture call at all
+    reg.converse("s1", "just a comment")
+    assert reg._steer_pending["s1"] == first
+
+
+def test_converse_windowed_pressure_not_servable(tmp_path, make_fake):
+    """A pressure mapping to the JUST-WORKED (windowed) territory is not servable — no steer."""
+    reg = SessionRegistry(str(tmp_path / "steer4.db"), model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    worked = reg._last_record["s1"]["exp"].experience_id
+    _arm_steer(reg, "s1", next_pressure="P", ranked_first=worked)  # windowed
+    reg.converse("s1", "raw")
+    assert "s1" not in reg._steer_pending
+
+
+def test_end_sitting_clears_steer(tmp_path, make_fake):
+    reg = SessionRegistry(str(tmp_path / "steer5.db"), model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    _arm_steer(reg, "s1", next_pressure="P1")
+    reg.converse("s1", "raw one")
+    assert "s1" in reg._steer_pending
+    reg.close("s1")  # End -> _end_sitting
+    assert "s1" not in reg._steer_pending
+    assert "s1" not in reg._steer_consume
