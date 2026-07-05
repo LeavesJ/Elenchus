@@ -108,7 +108,11 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
             "kind": "done",
             "terminal": True,
             "landing": data.get("landing", ""),
+            # The readable Continue label (spec §2d): SHORT title + description + kind
+            # (chapter|pressure). next_kind is a derived enum — no ref/frame (L-13).
             "next_title": data.get("next_title", ""),
+            "next_desc": data.get("next_desc", ""),
+            "next_kind": data.get("next_kind", "pressure"),
         }
     if tag == "close":  # user-driven end: the honest close + the frozen-at-convergence village —
         # terrain regions plus one house per convergence (living sitting §2f; ordinal-only, L-13)

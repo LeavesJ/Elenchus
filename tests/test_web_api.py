@@ -313,6 +313,11 @@ def test_done_payload_carries_next_title(tmp_path, make_fake):
     assert isinstance(r["next_title"], str) and r["next_title"]
     assert "veldra" not in r["next_title"].lower()
     assert r["next_title"] != _ANCHOR_TITLE
+    # spec §2d: the done wire carries the description + kind too (the _emit projection must not
+    # strip them). This anchor path is a curated (non-world) segment — no sequel, so next_kind
+    # is "pressure"; the description line is empty on the curated path (no world to subtitle).
+    assert r["next_kind"] == "pressure"
+    assert isinstance(r["next_desc"], str)  # key present through _emit (may be empty when curated)
 
 
 def _drive_to_done(client):
@@ -801,8 +806,10 @@ def test_shell_renders_the_front_door_and_living_sitting_affordances():
     assert "r.bridge" in html  # the heard-you / fallback bridge renders as a muted line
     assert "kind==='reserve'" in html and "renderReserve(" in html
     assert "work_anyway" in html  # the informed re-serve's first choice posts it
-    # subtitled consent (review P4) — the source uses the file's \uXXXX escape convention;
-    # the RENDERED text is 'Continue — next pressure: {description}'
-    assert "Continue \\u2014 next pressure: " in html
+    # Continue label (spec §2d): the kind (chapter|pressure) is dynamic, the SHORT title in the
+    # button, the description demoted to a muted line — the RENDERED text is
+    # 'Continue — next {chapter|pressure}: {short title}'.
+    assert "Continue \\u2014 next " in html and "nextKind==='chapter'?'chapter':'pressure'" in html
+    assert "r.next_desc" in html and "r.next_kind" in html  # the readable-label fields ride the wire
     assert "r.frontdoor" in html  # resume of a sitting parked at the front door
     assert "veldra" not in html.lower()  # L-13 on the static shell, unchanged

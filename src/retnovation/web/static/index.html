@@ -89,20 +89,25 @@ endBtn.addEventListener('click', async ()=>{ endBtn.disabled=true; const t=think
 // Chained sittings: the in-thread Continue affordance. It FOLLOWS the conversation (re-rendered
 // after each converse reply so it is never stranded in scrollback); proceed lives in-thread, exit
 // stays in the sticky composer (deliberate layer split).
-let nextTitle='';
+let nextTitle='', nextDesc='', nextKind='pressure';
 let contBox=null;
 function renderContinue(title){
   if(contBox){ contBox.remove(); contBox=null; }
   contBox=document.createElement('div');
   contBox.style.cssText='align-self:center;display:flex;gap:12px;align-items:center;margin:6px 0';
   if(title){
+    const col=document.createElement('div');
+    col.style.cssText='display:flex;flex-direction:column;align-items:center;gap:4px';
     const b=document.createElement('button'); b.type='button';
     b.style.cssText='background:#155e63;color:#eafffb;border:0;border-radius:11px;padding:9px 16px;font:inherit;cursor:pointer';
-    // subtitled with the next territory's curated description (\u00a72c review P4): consent via
-    // the titled button, zero latency, zero new leak class
-    b.textContent='Continue \u2014 next pressure: '+title;
+    // SHORT title in the button, kind = chapter|pressure (\u00a72d): the description is demoted to a
+    // muted line beneath, never clipped inside the button (founder dogfood 2026-07-04).
+    b.textContent='Continue \u2014 next '+(nextKind==='chapter'?'chapter':'pressure')+': '+title;
     b.onclick=()=>goContinue(b,{});
-    contBox.append(b);
+    col.append(b);
+    if(nextDesc){ const s=document.createElement('div'); s.className='muted';
+      s.style.cssText='max-width:520px;text-align:center'; s.textContent=nextDesc; col.append(s); }
+    contBox.append(col);
   }
   // the doors link ALWAYS renders post-landing \u2014 a fully-worked window must not hide both
   // continue affordances (durable sittings \u00a72e)
@@ -202,7 +207,7 @@ function renderResume(r){
   thread.appendChild(frag);
   if(r.honesty) muted(r.honesty);
   mode = r.mode==='converse' ? 'converse' : 'engine';
-  nextTitle = r.next_title || '';
+  nextTitle = r.next_title || ''; nextDesc = r.next_desc || ''; nextKind = r.next_kind || 'pressure';
   if(r.frontdoor){ // a sitting parked at the front door resumes with its ask + small doors
     bubble('vera', r.frontdoor.text);
     muted('or start from one of these');
@@ -223,7 +228,7 @@ function advance(r){
   if(r.kind==='say'){ if(r.seam) muted(r.seam); if(r.bridge) muted(r.bridge);
     applyTheme(r.theme); bubble('vera', r.text); showComposer(true);
     if(mode==='converse') renderContinue(nextTitle); return; }
-  if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); nextTitle=r.next_title||''; renderContinue(nextTitle); return; }
+  if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); nextTitle=r.next_title||''; nextDesc=r.next_desc||''; nextKind=r.next_kind||'pressure'; renderContinue(nextTitle); return; }
   if(r.kind==='close'){ renderClose(r); return; }
   if(r.kind==='nudge'){ muted(r.message); showComposer(true); return; }
   muted('error: '+(r.message||'')); showComposer(true);
