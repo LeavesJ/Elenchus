@@ -155,6 +155,10 @@ class _Channel:
     def __init__(self):
         self.to_worker: queue.Queue = queue.Queue()
         self.from_worker: queue.Queue = queue.Queue()
+        self.sit: str | None = None  # the sitting this channel was BORN into (stamped in
+        # start(), immutable): every dequeue-layer write for this channel's emissions keys on
+        # it — a late emission after a mid-flight close + fresh sitting must land on ITS OWN
+        # sitting, never the current one (the deferred cross-write class, fixed 2026-07-04)
         self.last_menu: list[str] = []
         self.last_menu_refs: list[str] = []  # server-side only (menu_index); never sent to client
         self.last_menu_eids: list[str] = []  # server-side only — territory grain (reopen seam)
@@ -231,6 +235,7 @@ class SessionRegistry:
         now = now or datetime.now(timezone.utc)
         self._ensure_sitting(session_id, now)
         ch = _Channel()
+        ch.sit = self._sitting_id.get(session_id)  # stamped at birth; None on inert stores
         with self._lock:
             # Reap a replaced non-terminal channel (MF-4 class; batch-review C2/C8/C15): the
             # 18h-abandonment path and racing cold-starts otherwise orphan a parked worker
@@ -258,12 +263,12 @@ class SessionRegistry:
                 posture = a.posture  # resolves the presentation profile (voice + visual theme)
                 model = self._model_factory()
                 captured: dict = {}
-                # The sitting id was ensured before this thread started; None on an inert
-                # (:memory:) store. The SittingStore opens a connection per operation, so the
-                # worker thread may READ it (world, positions, history) and write the world row
-                # (which must precede the forge — a dequeue-layer write would only land at the
-                # next emission, after the very failure it guards against).
-                sit = self._sitting_id.get(session_id)
+                # The sitting id was stamped on the channel before this thread started; None on
+                # an inert (:memory:) store. The SittingStore opens a connection per operation,
+                # so the worker thread may READ it (world, positions, history) and write the
+                # world row (which must precede the forge — a dequeue-layer write would only
+                # land at the next emission, after the very failure it guards against).
+                sit = ch.sit
 
                 def decide(proposal):
                     menu = proposal.problem_menu()
@@ -894,10 +899,18 @@ class SessionRegistry:
         opening of a continued segment) and rides the response for the shell to render; the
         pending bridge (heard-you / fallback) rides the forged opening the same way. The
         worker-set channel attributes consumed here (mapped_rank, forged, pending_bridge,
-        inflight_exp) are ordered before this read by the queue put."""
-        sit = self._sitting_id.get(session_id)
+        inflight_exp) are ordered before this read by the queue put.
+
+        The sitting is the CHANNEL's (stamped at birth), never re-read from the session map: a
+        late emission dequeued after a mid-flight close + fresh sitting must write to its own
+        sitting (the deferred cross-write class, fixed 2026-07-04). When the channel is STALE
+        (the session moved on), the durable writes still land — on ch.sit, their truthful home
+        — but session-keyed side effects (rank cache, seam/bridge attachment, swallow flags)
+        belong to the NEW flow and are skipped."""
+        sit = ch.sit
         if sit is None:
             return
+        stale = self._ch.get(session_id) is not ch
         now = datetime.now(timezone.utc)
         if tag == "say" and data.get("frontdoor"):
             # The front door is signage + doors. A continue-boot's ask is INTERNAL (the boot
@@ -905,9 +918,10 @@ class SessionRegistry:
             # survives to the opening say. A RENDERED front door persists the ask and CLEARS
             # any pending seam (§2g: the seam attaches to the forged opening; a Continue that
             # re-enters the front door clears it).
-            if session_id in self._frontdoor_swallow:
+            if not stale and session_id in self._frontdoor_swallow:
                 return
-            self._seam_pending.pop(session_id, None)
+            if not stale:
+                self._seam_pending.pop(session_id, None)
             # Dedupe the durable ask (founder live dogfood 2026-07-02: reload-at-the-door replays
             # the persisted ask AND re-serves it — the transcript must hold ONE): skip when the
             # tail turn is already this exact ask.
@@ -924,15 +938,16 @@ class SessionRegistry:
         if tag == "say":
             if ch.mapped_rank is not None:
                 rank = list(ch.mapped_rank)
-                with self._lock:
-                    self._territory_rank[session_id] = rank
+                if not stale:
+                    with self._lock:
+                        self._territory_rank[session_id] = rank
                 ch.mapped_rank = None
                 # Restart-durable (triage fold, 2026-07-03): without the row, a mid-world
                 # restart's Continue targeting silently fell back to library order. State
                 # table, not turns — the inflight_json precedent (L-14 untouched); the write
                 # stays at this dequeue layer (queue handshake preserved).
                 self._store.write_state(sit, territory_rank=rank)
-            seam = self._seam_pending.pop(session_id, None)
+            seam = None if stale else self._seam_pending.pop(session_id, None)
             if seam:
                 self._store.append_turn(sit, "seam", {"text": seam}, now)
                 data["seam"] = seam
@@ -947,13 +962,13 @@ class SessionRegistry:
                 ref, eid, scenario = ch.forged
                 ch.forged = None
                 self._store.add_generated_problem(ref, sit, eid, scenario, now)
-            if (
-                ch.inflight_exp is not None
-                and self._inflight_synced.get(session_id) != ch.inflight_exp
+            if ch.inflight_exp is not None and (
+                stale or self._inflight_synced.get(session_id) != ch.inflight_exp
             ):
                 eid, ref = ch.inflight_exp
                 self._store.write_state(sit, inflight={"experience_id": eid, "ledger_ref": ref})
-                self._inflight_synced[session_id] = ch.inflight_exp
+                if not stale:
+                    self._inflight_synced[session_id] = ch.inflight_exp
             self._store.append_turn(sit, "vera", {"text": data["text"]}, now)
         if data.get("theme"):
             self._store.write_state(sit, theme=data["theme"])
@@ -977,22 +992,27 @@ class SessionRegistry:
         # highest-ranked proposal NOT already converged this sitting; if all repeat -> no door
         # (the within-sitting clock is frozen — same-day retention/staleness are zero — so the
         # policy alone cannot rotate a just-worked item away; the guard lives HERE, engine untouched).
+        # The sitting is the CHANNEL's (cross-write class fix, 2026-07-04): a done dequeued
+        # from a REPLACED channel banks its durable truth (convergence, record, landing) to its
+        # OWN sitting and must not touch the session-keyed maps — they belong to the new flow.
         now = datetime.now(timezone.utc)
-        sit = self._sitting_id.get(session_id)
+        sit = ch.sit
+        stale = self._ch.get(session_id) is not ch
         world = self._store.read_world(sit) if sit is not None else None
         if ch.record is not None:
             # Bounded difficulty (§2e): one step per converged move, snap back one step on any
             # non-converged stop. Stepped BEFORE this convergence is logged so a derive-on-miss
             # (restart) sees the same pre-landing history the in-memory walk saw.
-            lvl = self._level_idx.get(session_id)
-            if lvl is None:
-                lvl = self._derive_level_idx(session_id)
-            if ch.record.get("stop_reason") == "converged":
-                lvl = min(lvl + 1, len(LEVELS) - 1)
-            else:
-                lvl = max(lvl - 1, 0)
-            self._level_idx[session_id] = lvl
-            self._last_record[session_id] = ch.record
+            if not stale:
+                lvl = self._level_idx.get(session_id)
+                if lvl is None:
+                    lvl = self._derive_level_idx(session_id)
+                if ch.record.get("stop_reason") == "converged":
+                    lvl = min(lvl + 1, len(LEVELS) - 1)
+                else:
+                    lvl = max(lvl - 1, 0)
+                self._level_idx[session_id] = lvl
+                self._last_record[session_id] = ch.record
             # Instance-grain identity (§1): forged segments bank/log their gen:{sitting}:{n}
             # ref + the territory's experience_id (the window/houses key); curated segments
             # carry their curated ref, and logging their experience_id windows the SAME
@@ -1000,7 +1020,14 @@ class SessionRegistry:
             rec_ref = ch.record.get("ledger_ref") or ch.record["exp"].ledger_ref
             # F1: the dedupe banks CONVERGED refs ONLY — a plateaued/budget/errored problem was not
             # built into a house and may legitimately be re-offered (spec §6).
-            if ch.record.get("stop_reason") == "converged":
+            # A STALE convergence is a superseded flow's (the user closed this segment mid-flight
+            # and never saw it land): it must NOT bank — the durable log feeds the STATUS-BLIND
+            # cross-sitting reads (converged_within's 24h window, converged_log's village count),
+            # so banking it to a closed ch.sit would leak into the NEXT live sitting and suppress
+            # a door / inflate the village for work the user walked away from (cross-write review
+            # 2026-07-04, finding 1; L-4: reward arrival, and they never arrived). The record
+            # still persists to ch.sit below — an inert row on a closed sitting, never re-read.
+            if ch.record.get("stop_reason") == "converged" and not stale:
                 self._sitting_done.setdefault(session_id, set()).add(rec_ref)
                 if sit is not None:
                     self._store.log_converged(sit, rec_ref, now, ch.record["exp"].experience_id)
@@ -1019,7 +1046,18 @@ class SessionRegistry:
             if sit is not None:
                 # The landed record + cleared inflight marker, one honest boundary (spec §2b).
                 self._store.write_state(sit, record=_serialize_record(ch.record), inflight=None)
-                self._inflight_synced[session_id] = None
+                if not stale:
+                    self._inflight_synced[session_id] = None
+        if stale:
+            # The next-door bookkeeping and lost-context clears below belong to the SESSION's
+            # current flow; a replaced channel's done only banks its durable truth above. The
+            # landing still persists — to the channel's own sitting.
+            if sit is not None and data.get("landing"):
+                reason = (ch.record or {}).get("stop_reason", "")
+                self._store.append_turn(
+                    sit, "landing", {"text": data["landing"], "stop_reason": reason}, now
+                )
+            return
         if world is not None:
             # The living sitting's Continue (§2c): the next TERRITORY, subtitled with its
             # curated description (P4). No ref pick persists — the target is recomputed at

@@ -2223,3 +2223,175 @@ def test_resume_at_the_front_door_shows_one_ask(tmp_path, make_fake):
         t for t in store.turns(sit["id"]) if t["kind"] == "vera" and t["payload"].get("text") == ask
     ]
     assert len(asks) == 1
+
+
+# ---- The mid-flight close/continue cross-write class (deferred ticket, class fix
+# ---- 2026-07-04: a channel's emissions write to the sitting it was BORN into) ----------------
+
+import threading  # noqa: E402
+
+
+def test_late_emission_after_close_writes_to_its_own_sitting_never_the_new_one(tmp_path, make_fake):
+    """The deferred ticket's executed repro, now the regression: converge, continue through the
+    rendered front door, block the step inside the mapper, close (sitting A ends), cold-start
+    sitting B, release. The late emission (A's forged opening + rank + inflight + instance row)
+    must land on A — its truthful home — never on B."""
+    entered, gate = threading.Event(), threading.Event()
+    calls = {"n": 0}
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+
+        def mapper(s, t):
+            calls["n"] += 1
+            if calls["n"] >= 2:  # the continue pass's map blocks; the first flows
+                entered.set()
+                gate.wait(timeout=10)
+            return orig(s, t)
+
+        m.map_territories = mapper
+        return m
+
+    db = str(tmp_path / "race.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    store = SittingStore(db)
+    _open_world(reg, "s1")
+    tag, _ = _drive(reg, "s1", opening="position one")
+    assert tag == "done"  # segment 1 converged; a record exists
+    sit_a = store.live_sitting()["id"]
+    assert reg.continue_session("s1", menu=True)[0] == "say"  # rendered front door, sitting A
+
+    out = {}
+    t = threading.Thread(target=lambda: out.update(r=reg.step("s1", "a second situation")))
+    t.start()
+    assert entered.wait(5)  # the worker is parked inside the gated mapper
+    tag, _ = reg.close("s1")  # mid-flight close: sitting A ends (reap skipped, stepping guard)
+    assert tag == "close"
+    tag, _ = reg.resume_or_start("s1")  # cold start: sitting B
+    sit_b = store.live_sitting()["id"]
+    assert sit_b != sit_a
+    gate.set()
+    t.join(timeout=10)
+    assert not t.is_alive()
+
+    b_texts = [x["payload"].get("text") for x in store.turns(sit_b)]
+    assert _SCENARIO not in b_texts  # the late opening never crossed sittings
+    assert store.read_state(sit_b)["inflight"] is None
+    assert store.read_state(sit_b)["territory_rank"] is None
+    a_texts = [x["payload"].get("text") for x in store.turns(sit_a)]
+    assert _SCENARIO in a_texts  # ...it landed on the sitting it belongs to
+    import sqlite3 as _sq
+
+    con = _sq.connect(db)
+    homes = {r[0] for r in con.execute("SELECT sitting_id FROM web_generated_problem")}
+    con.close()
+    assert homes <= {sit_a}  # instance rows never mint under the new sitting
+
+
+def test_stale_done_never_hijacks_the_new_sittings_session_state(tmp_path, make_fake):
+    """The class's in-memory half: a done dequeued from a REPLACED channel must not overwrite
+    the session's record/pick/dedupe maps (they belong to the new sitting's flow); its durable
+    writes go to the channel's own sitting."""
+    db = str(tmp_path / "stale-done.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    store = SittingStore(db)
+    _open_world(reg, "s1")
+    tag, _ = _drive(reg, "s1", opening="position one")
+    assert tag == "done"
+    old_ch = reg._ch["s1"]
+    rec_before = reg._last_record["s1"]
+    sit_a = store.live_sitting()["id"]
+
+    reg.close("s1")  # sitting A ends
+    reg.resume_or_start("s1")  # sitting B, new channel
+    assert reg._ch["s1"] is not old_ch
+    # Seed sitting B's session-keyed flow state — the stale done must NOT touch it (finding 2).
+    reg._next_pick["s1"] = "guard:ref"
+    reg._next_pick_title["s1"] = "Guard title"
+    reg._lost_ref["s1"] = "guard:lost"
+    reg._lost_exp_id["s1"] = "guard:lost_eid"
+    rec_b = dict(rec_before)
+    rec_b["stop_reason"] = "converged"
+    rec_b["ledger_ref"] = "gen:stale:1"
+    old_ch.record = rec_b
+    n_conv_all = len(store.converged_log())
+    reg._on_done("s1", old_ch, {"state": None, "landing": ""})
+    assert reg._last_record.get("s1") is not rec_b  # the session's record was not hijacked
+    assert "gen:stale:1" not in reg._sitting_done.get("s1", set())  # nor the sitting dedupe
+    # A superseded-flow convergence banks NO house — anywhere (cross-write review finding 1):
+    # the village count / repeat window must not gain a row for work the user walked away from.
+    assert len(store.converged_log()) == n_conv_all
+    assert all(r["ref"] != "gen:stale:1" for r in store.converged_log())
+    # ...and the durable RECORD still lands on A (inert on the closed sitting, never re-read).
+    assert store.read_state(sit_a)["record"] is not None
+    # The session-keyed maps belong to sitting B's flow — the stale done left them untouched.
+    assert reg._next_pick["s1"] == "guard:ref"
+    assert reg._next_pick_title["s1"] == "Guard title"
+    assert reg._lost_ref["s1"] == "guard:lost"
+    assert reg._lost_exp_id["s1"] == "guard:lost_eid"
+
+
+def test_stale_say_persists_to_own_sitting_but_leaves_the_new_flows_maps(tmp_path, make_fake):
+    """Finding-2 teeth (cross-write review 2026-07-04): a stale say's dequeue writes its turn +
+    inflight + rank ROW to its own sitting (ch.sit), but must not clobber sitting B's session-
+    keyed in-memory flow — the territory-rank cache and the pending seam."""
+    db = str(tmp_path / "stale-say.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    store = SittingStore(db)
+    _open_world(reg, "s1")
+    tag, _ = _drive(reg, "s1", opening="position one")
+    assert tag == "done"
+    old_ch = reg._ch["s1"]
+    sit_a = store.live_sitting()["id"]
+
+    reg.close("s1")
+    reg.resume_or_start("s1")  # sitting B, new channel
+    assert reg._ch["s1"] is not old_ch
+    sit_b = reg._sitting_id["s1"]
+    # Sitting B's live flow state.
+    reg._territory_rank["s1"] = ["b_rank_head"]
+    reg._seam_pending["s1"] = "B's pending seam"
+    # A stale say arrives late, carrying A's worker-set attributes.
+    old_ch.mapped_rank = ["a_rank_head"]
+    old_ch.inflight_exp = ("a_eid", "gen:a:1")
+    reg._persist_emit("s1", old_ch, "say", {"text": "A's late opening"})
+    # Session-keyed maps for B are untouched.
+    assert reg._territory_rank["s1"] == ["b_rank_head"]
+    assert reg._seam_pending["s1"] == "B's pending seam"
+    # A's durable truth landed on A (its own sitting), never on B.
+    assert "A's late opening" in [t["payload"].get("text") for t in store.turns(sit_a)]
+    assert store.read_state(sit_a)["inflight"] == {
+        "experience_id": "a_eid",
+        "ledger_ref": "gen:a:1",
+    }
+    assert store.read_state(sit_a)["territory_rank"] == ["a_rank_head"]
+    assert "A's late opening" not in [t["payload"].get("text") for t in store.turns(sit_b)]
+    assert store.read_state(sit_b)["inflight"] is None
+
+
+def test_multi_restart_interleaved_turns_never_stack_identical_asks(tmp_path, make_fake):
+    """The duplicate-ask re-verify's offered pin (2026-07-03): mid-map deaths + restarts with a
+    user turn between produce only honest, user-turn-separated re-asks — never back-to-back
+    identical vera turns."""
+
+    def factory():
+        m = _world_factory(make_fake)()
+
+        def boom(s, t):
+            raise RuntimeError("mid-map death")
+
+        m.map_territories = boom
+        return m
+
+    db = str(tmp_path / "ask3.db")
+    store = SittingStore(db)
+    for i in range(3):  # fresh registry per loop = a restart
+        reg = SessionRegistry(db, model_factory=factory)
+        tag, _ = reg.resume_or_start("s1")
+        assert tag in ("say", "resume")
+        tag2, _ = reg.step("s1", f"situation {i}")
+        assert tag2 == "error"  # the worker died mid-map, honestly
+    turns = [(t["kind"], t["payload"].get("text")) for t in store.turns(store.live_sitting()["id"])]
+    for a, b in zip(turns, turns[1:]):
+        assert not (a[0] == "vera" and b[0] == "vera" and a[1] == b[1])  # no stacked asks
