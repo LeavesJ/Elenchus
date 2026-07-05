@@ -577,3 +577,11 @@ def test_forge_scenario_prompt_carries_the_sequel_doctrine():
     p = load_prompt("forge_scenario")
     assert "story so far" in p.lower()
     assert "specific call she made" in p.lower()  # decision-informed (§2a bar)
+
+
+def test_forge_scenario_prompt_carries_the_focus_line():
+    """User-steered chapters §2e: when a focus is given, chapter two poses the decision she named."""
+    from retnovation.content_loader import load_prompt
+
+    low = load_prompt("forge_scenario").lower()
+    assert "focus" in low

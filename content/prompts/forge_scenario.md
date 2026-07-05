@@ -29,6 +29,12 @@ to an adjacent call in the same world; invent no fresh company. If her exact cal
 cannot be reconstructed from what you are given, widen the world honestly rather than confabulate
 a consequence of a call she did not make.
 
+When a "focus" is given, it is the exact next pressure she asked to press — her own words for the
+decision she now faces. Pose THAT decision as the live, unmade call of this scenario, in this world
+and under this territory's kind of decision. Build the situation so her named pressure is the thing
+she must decide; do not substitute a generic next step. The same hard rules apply — her focus names
+the decision, never how to work it; never restate her reasoning, never name a category or method.
+
 Hard rules (these are the product — violating them destroys it):
 - NEVER restate her reasoning, her analysis, or her solutions as setup or as world history. What
   she DECIDED may have consequences in the world; how she ARGUED it must never appear in it.

@@ -672,6 +672,17 @@ def test_concierge_converse_prompt_defers_a_fresh_pressure_to_the_next_chapter()
     assert "next chapter" in p.lower()
 
 
+def test_concierge_converse_empty_by_default_contract():
+    """User-steered chapters F1: the structured next_pressure field leans EMPTY by default; a
+    re-argument of the landed call is not a fresh pressure."""
+    from retnovation.content_loader import load_prompt
+
+    low = load_prompt("concierge_converse").lower()
+    assert "next_pressure" in low
+    assert "empty" in low and "default" in low
+    assert "re-argument" in low or "re-litigat" in low
+
+
 def test_converse_fallback_is_honest_and_branches_on_sequel():
     """Spec §2c / review pt 4: the fallback never promises a push; it promises a next chapter
     ONLY when a sequel exists."""
