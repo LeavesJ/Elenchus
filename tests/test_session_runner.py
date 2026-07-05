@@ -1639,7 +1639,8 @@ def test_missing_generated_row_degrades_to_statics(tmp_path, make_fake):
     tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
     assert tag == "resume"
     tag, data = reg2.converse("s1", "hello again")
-    assert tag == "say" and data["text"] == _voice.SAFE_CONTRACT
+    # degraded rebuild → the honest static, never SAFE_CONTRACT's "I'll push" lie (spec §2c)
+    assert tag == "say" and data["text"] == _voice._CONVERSE_DONE_FRESH
     tag, data = reg2.close("s1")
     assert tag == "close" and isinstance(data["terrain"], list)
 
@@ -2508,3 +2509,23 @@ def test_label_kind_and_forge_path_agree_on_the_same_record(tmp_path, make_fake)
     reg.step("s1", "chapter two")
     forged_sequel = any(_SCENARIO in b[0] for b in briefs)
     assert forged_sequel == is_chapter  # the forge did what the label promised
+
+
+def test_post_landing_converse_uses_the_honest_static_not_safe_contract(tmp_path, make_fake):
+    """The founder's disclosure-question bounce (2026-07-04): a screened/refused post-landing
+    converse must serve the honest static, never SAFE_CONTRACT's 'I'll push' lie."""
+    from retnovation.web import voice as _v
+
+    def factory():
+        m = _world_factory(make_fake)()
+        m.concierge_converse = lambda problem, recent, *, stop_reason="converged", voice="": ""
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "wind.db"), model_factory=factory)
+    _open_world(reg, "s1")
+    tag, _ = _drive(reg, "s1", opening="position one")  # forged+converged -> a sequel exists
+    assert tag == "done"
+    tag, data = reg.converse("s1", "If Halvmark exposes a defect, do you disclose it?")
+    assert tag == "say"
+    assert data["text"] == _v._CONVERSE_DONE_STORY
+    assert data["text"] != _v.SAFE_CONTRACT

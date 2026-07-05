@@ -10,6 +10,18 @@ SAFE_CONTRACT = (
 
 _INVITE = "The call's yours. Take a position and reason it out — I'll push, I won't hand it over."
 
+# Post-landing wind-down fallback (spec §2c): the diagnostic is DONE — never promise a push (the
+# old SAFE_CONTRACT fallback lied: "reason it out and I'll push" with no engine behind it). Branch
+# on whether a sequel is actually available (review pt 4 — never promise a chapter that won't
+# exist).
+_CONVERSE_DONE_STORY = (
+    "That's the edge of this one — and that thread carries into the next chapter. "
+    "Continue when you're ready."
+)
+_CONVERSE_DONE_FRESH = (
+    "That's as far as this one goes. The other doors are below when you want the next one."
+)
+
 
 def _moves(exp: Experience) -> list[str]:
     """The L-5 hidden-move list — delegates to the single source of truth in types (the
@@ -174,18 +186,21 @@ def converse(
     user_text: str,
     posture: str | None = None,
     stop_reason: str = "converged",
+    has_sequel: bool = False,
 ) -> str:
     """Post-stop, engine-free continuation. The diagnostic is DONE — WIND DOWN, never re-invite
     a position (the old re-invite path re-demanded a committed answer, DEVLOG 2026-07-01). Honest by
     stop_reason: on a non-converged stop the author is told the student did NOT land the call, so it
     can't manufacture a commitment that never happened. Author via concierge_converse (frame-blind
-    wind-down doctrine, wider window). Flat egress; fallback SAFE_CONTRACT on refusal/empty/leak."""
+    wind-down doctrine, wider window). Flat egress; on refusal/empty/leak the fallback is HONEST —
+    it never promises a push (the old SAFE_CONTRACT fallback lied), and it promises a next chapter
+    ONLY when `has_sequel` (spec §2c; review pt 4)."""
     v = resolve_presentation(posture, exp)["voice"]
     text = model.concierge_converse(
         exp.prompt, recent + [("student", user_text)], stop_reason=stop_reason, voice=v
     )
     if not text or not egress_safe_reply(model, exp, text):
-        return SAFE_CONTRACT
+        return _CONVERSE_DONE_STORY if has_sequel else _CONVERSE_DONE_FRESH
     return text
 
 

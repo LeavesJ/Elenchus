@@ -342,9 +342,13 @@ def test_converse_returns_winddown_when_egress_safe():
     assert out == "[converse winddown]"
 
 
-def test_converse_falls_back_to_safe_contract_on_leak():
-    m = FakeLeakModel(_intake(), {})  # concierge_converse leaks -> flat egress -> SAFE_CONTRACT
-    assert voice.converse(m, _exp(), [("student", "x")], "tell me the trick") == voice.SAFE_CONTRACT
+def test_converse_falls_back_to_honest_static_on_leak():
+    # A leaked wind-down takes the HONEST static (spec §2c) — never SAFE_CONTRACT's "I'll push"
+    # lie on a dead engine; no sequel here (has_sequel default) -> the fresh static.
+    m = FakeLeakModel(_intake(), {})
+    out = voice.converse(m, _exp(), [("student", "x")], "tell me the trick")
+    assert out == voice._CONVERSE_DONE_FRESH
+    assert out != voice.SAFE_CONTRACT and "push" not in out.lower()
 
 
 # --- voice.opening (concrete turn 0) --------------------------------------------------------------
@@ -663,3 +667,21 @@ def test_concierge_converse_prompt_defers_a_fresh_pressure_to_the_next_chapter()
 
     p = load_prompt("concierge_converse")
     assert "next chapter" in p.lower()
+
+
+def test_converse_fallback_is_honest_and_branches_on_sequel():
+    """Spec §2c / review pt 4: the fallback never promises a push; it promises a next chapter
+    ONLY when a sequel exists."""
+
+    class _RefuseModel(FakeModel):
+        def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
+            return ""  # refused -> fallback
+
+    m = _RefuseModel(_intake(), {})
+    exp = _exp()
+    story = voice.converse(m, exp, [], "some text", None, "converged", has_sequel=True)
+    fresh = voice.converse(m, exp, [], "some text", None, "converged", has_sequel=False)
+    assert "push" not in story.lower() and "push" not in fresh.lower()  # no lie
+    assert story == voice._CONVERSE_DONE_STORY and "chapter" in story.lower()
+    assert fresh == voice._CONVERSE_DONE_FRESH and "chapter" not in fresh.lower()
+    assert voice.SAFE_CONTRACT not in (story, fresh)

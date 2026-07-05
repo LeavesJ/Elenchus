@@ -1377,9 +1377,11 @@ class SessionRegistry:
             if self._ch.get(session_id) is None:
                 return ("nudge", {"message": _STALE_NUDGE})  # a previous process's tab
             return ("error", {"message": "session has not converged"})
+        sit = self._sitting_id.get(session_id)
         if rec.get("exp") is None:
-            # Degraded rebuild (content drift): the safe static — never an unscreened author.
-            return ("say", {"text": voice.SAFE_CONTRACT})
+            # Degraded rebuild (content drift): the honest static — never an unscreened author,
+            # and never the SAFE_CONTRACT lie ("I'll push") on a dead engine (spec §2c).
+            return ("say", {"text": voice._CONVERSE_DONE_FRESH})
         reply = voice.converse(
             rec["model"],
             rec["exp"],
@@ -1387,6 +1389,7 @@ class SessionRegistry:
             value,
             rec["posture"],
             rec.get("stop_reason", "converged"),
+            has_sequel=self._story(sit) is not None,
         )
         lost = self._lost_context(session_id)
         if lost is not None and lost[1]:
