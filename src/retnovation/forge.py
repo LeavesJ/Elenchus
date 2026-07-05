@@ -72,13 +72,15 @@ def build_brief(
     role: str | None,
     level: str,
     story: str | None = None,
+    focus: str | None = None,
 ) -> str:
     """Assemble the forge brief — frame-blind and Vera-free (spec §2b / review D3).
 
     Inputs are EXACTLY: the territory description, her situation, her committed positions
     (her final substantive `you` turns — never landing or any Vera-authored text), the role
-    register, and the bounded 3-value level line. Never frame/trap details, rubric text, or
-    engine state (tests spy on this)."""
+    register, and the bounded 3-value level line. Optionally a `story` (prior chapter's world) and
+    a `focus` (her own next pressure, user-steered chapters §2e). Never frame/trap details, rubric
+    text, or engine state (tests spy on this)."""
     if level not in LEVELS:
         raise ValueError(f"level must be one of {LEVELS}, got {level!r}")
     lines = [f"Territory: {territory.strip()}", "", f"Her situation: {situation.strip()}"]
@@ -91,6 +93,16 @@ def build_brief(
             "build the new pressure as a consequence of the SPECIFIC call she made, not a "
             "generic development):",
             story.strip(),
+        ]
+    if focus:
+        # User-steered chapter (spec §2e): her own next decision, distilled and frame-blind, to be
+        # posed IN this world under the mapped rubric. AFTER the story block (world first, then her
+        # direction). Server-side (L-13): the scenario is union-screened on output like story.
+        lines += [
+            "",
+            "The pressure she wants to press next (her own words — pose THIS decision, in this "
+            "world):",
+            focus.strip(),
         ]
     if positions:
         lines += ["", "Her committed positions (her own words):"]
@@ -189,6 +201,7 @@ def forge_experience(
     model: Model,
     store: Store,
     story: str | None = None,
+    focus: str | None = None,
 ) -> ForgeResult:
     """Forge one generated problem over the curated base (spec §2b).
 
@@ -209,7 +222,13 @@ def forge_experience(
     world_ref = f"gen:{sitting_id}"
     instance_ref = f"gen:{sitting_id}:{n}"
     brief = build_brief(
-        load_territory_text(base.experience_id), situation, positions, base.role, level, story
+        load_territory_text(base.experience_id),
+        situation,
+        positions,
+        base.role,
+        level,
+        story,
+        focus,
     )
     requirements = _fit_requirements(base.rubric)
     union = _union_moves(base, engaged_frames)

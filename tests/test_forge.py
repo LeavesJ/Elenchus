@@ -259,10 +259,22 @@ def _engine_store(tmp_path):
     return Store(tmp_path / "engine.db")
 
 
-def _forge(model, store, *, sid="s1", n=1, level="base", engaged=None, base=None, story=None):
+def _forge(
+    model, store, *, sid="s1", n=1, level="base", engaged=None, base=None, story=None, focus=None
+):
     base = base or load_experience("license_continuity")
     return forge.forge_experience(
-        base, sid, n, SITUATION, POSITIONS, engaged or [], level, model, store, story=story
+        base,
+        sid,
+        n,
+        SITUATION,
+        POSITIONS,
+        engaged or [],
+        level,
+        model,
+        store,
+        story=story,
+        focus=focus,
     )
 
 
@@ -298,6 +310,52 @@ def test_forge_experience_threads_story_into_the_brief(tmp_path):
     m.forge_scenario = fs
     _forge(m, _engine_store(tmp_path), story="Chapter one's world: the Meridian pilot.")
     assert briefs and "Chapter one's world: the Meridian pilot." in briefs[0]
+
+
+def test_build_brief_focus_block_present_after_story():
+    """User-steered chapter (spec §2e): her own next decision, posed IN this world, AFTER the
+    story block (world first, then her direction)."""
+    b = forge.build_brief(
+        "Territory desc",
+        "Her situation",
+        [],
+        None,
+        "base",
+        story="the prior chapter world",
+        focus="whether to disclose the defect to the board before the round closes",
+    )
+    assert "The pressure she wants to press next" in b
+    assert "whether to disclose the defect to the board before the round closes" in b
+    assert b.index("the prior chapter world") < b.index("whether to disclose the defect")
+
+
+def test_build_brief_focus_absent_no_block():
+    b = forge.build_brief("t", "s", [], None, "base")
+    assert "The pressure she wants to press next" not in b
+
+
+def test_build_brief_focus_and_story_both_present():
+    """Smaller-2 (spec §2e): a steered sequel carries BOTH the world (story) and her direction
+    (focus) — a strictly larger, more specific prompt; the union egress screens the output."""
+    b = forge.build_brief(
+        "T", "S", [], None, "base", story="chapter one world", focus="the new call she named"
+    )
+    assert "The story so far" in b and "The pressure she wants to press next" in b
+    assert "chapter one world" in b and "the new call she named" in b
+
+
+def test_forge_experience_threads_focus_into_the_brief(tmp_path):
+    """forge_experience passes focus to build_brief (spy the generated brief)."""
+    briefs = []
+    m = _MovesSpyModel()
+
+    def fs(brief, steer=""):
+        briefs.append(brief)
+        return _SCENARIO
+
+    m.forge_scenario = fs
+    _forge(m, _engine_store(tmp_path), focus="raise a bridge round before the launch")
+    assert briefs and "raise a bridge round before the launch" in briefs[0]
 
 
 def test_forge_happy_path_world_grain_scene_none_rubric_byte_equal(tmp_path):
