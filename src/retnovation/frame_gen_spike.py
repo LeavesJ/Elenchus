@@ -7,7 +7,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .content_loader import load_library
+from .content_loader import load_library, load_mush_frames
 from .lift_test import run_lift_test
 from .types import CandidateFrame, LiftScenario, Regime
 
@@ -121,3 +121,41 @@ def format_report(arm1, mush) -> str:
                 f"    CONTROL: {s['control'][:400]}",
             ]
     return "\n".join(lines)
+
+
+PROBLEMS = [
+    "I set the subscription tiers for our AI-agent software in a saturated market. What pricing "
+    "move pulls the most customers without starving revenue — and doesn't just get matched and "
+    "erased by a bigger incumbent?",
+    "My technical co-founder wants to hand our biggest customer's integration support to a junior "
+    "engineer so the seniors can ship the launch. I don't trust the junior on it, but I can't have "
+    "my best people babysitting one account. Do I overrule my co-founder?",
+    "We connect indie designers with small brands; neither side shows up without the other. "
+    "Subsidize the designers, subsidize the brands, or fake liquidity on one side first — which?",
+    "A larger company wants to integrate our tech into their platform — huge distribution, but it "
+    "hands them the data and know-how that is our actual advantage; they could build their own "
+    "version in a year. Take the deal?",
+    "We can ship a clearly-valuable feature that sits in a regulatory gray area; the rules will "
+    "probably tighten in 12-18 months. Move now and grab the market before it closes, or wait for "
+    "clarity and cede first-mover advantage?",
+]
+
+
+def main(out_path: str = "/tmp/frame_gen_spike_report.md") -> None:  # pragma: no cover (@live)
+    from .model import AnthropicModel
+
+    model = AnthropicModel()
+    config = {"theta_dist": 1, "min_scenarios": 2}
+    art = "/tmp/frame_gen_spike_artifacts"
+    arm1 = run_arm(PROBLEMS, model, config, out_dir=art)
+    mush_scenarios = model.generate_scenarios(PROBLEMS[0])  # a real decision for the teeth test
+    mush = run_mush_arm(load_mush_frames(), mush_scenarios, model, config, out_dir=art)
+    report = format_report(arm1, mush)
+    Path(out_path).write_text(report)
+    a1 = sum(_pass(r) for r in arm1)
+    print(f"Arm 1: {a1}/{len(arm1)} passed | Arm 2 mush: {sum(_pass(r) for r in mush)}/{len(mush)}")
+    print(f"report -> {out_path}")
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

@@ -122,3 +122,10 @@ def test_format_report_has_both_arms(tmp_path):
     )
     report = format_report(arm1, arm1)  # reuse arm1 as a stand-in mush arm for the shape test
     assert "Arm 1" in report and "Arm 2" in report and "lift" in report
+
+
+def test_spike_problem_set_is_wellformed():
+    from retnovation.frame_gen_spike import PROBLEMS
+
+    assert 4 <= len(PROBLEMS) <= 6
+    assert all(isinstance(p, str) and len(p.strip()) > 40 for p in PROBLEMS)
