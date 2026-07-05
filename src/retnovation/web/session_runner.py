@@ -1404,7 +1404,11 @@ class SessionRegistry:
             except Exception:
                 lost_exp = None
             if lost_exp is None or not voice.egress_safe_reply(rec["model"], lost_exp, reply):
-                reply = voice.SAFE_CONTRACT
+                # Fail closed to the HONEST static, never SAFE_CONTRACT's "I'll push" lie on a
+                # dead engine (spec §2c consistency fold, 2026-07-05): equally safe (a static,
+                # performs no move), just not a lie. Fresh variant — an interrupted/lost state
+                # is not the place to promise a next chapter.
+                reply = voice._CONVERSE_DONE_FRESH
         rec["recent"].append(("student", value))
         rec["recent"].append(("Vera", reply))
         sit = self._sitting_id.get(session_id)

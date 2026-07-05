@@ -937,7 +937,10 @@ def test_union_screen_fails_closed_and_catches_lost_exp_moves(tmp_path, make_fak
     assert tag == "resume" and data["mode"] == "converse"
     tag_c, data_c = reg2.converse("s1", "so about that other problem…")
     assert tag_c == "say"
-    assert data_c["text"] == voice_mod.SAFE_CONTRACT  # union screen caught the lost-exp move
+    # union screen caught the lost-exp move → fail closed to the HONEST static, never the
+    # SAFE_CONTRACT "I'll push" lie (spec §2c consistency fold, 2026-07-05)
+    assert data_c["text"] == voice_mod._CONVERSE_DONE_FRESH
+    assert data_c["text"] != voice_mod.SAFE_CONTRACT
 
     # and an UNRESOLVABLE lost exp fails closed too (never unscreened)
     store = SittingStore(db)
@@ -949,7 +952,7 @@ def test_union_screen_fails_closed_and_catches_lost_exp_moves(tmp_path, make_fak
     tag, data = reg3.resume_or_start("s1", now=datetime.now(timezone.utc))
     assert tag == "resume"
     tag_c3, data_c3 = reg3.converse("s1", "hello again")
-    assert tag_c3 == "say" and data_c3["text"] == voice_mod.SAFE_CONTRACT
+    assert tag_c3 == "say" and data_c3["text"] == voice_mod._CONVERSE_DONE_FRESH
 
 
 def test_reopen_seam_on_reentering_the_interrupted_door(tmp_path, make_fake):
@@ -2528,4 +2531,51 @@ def test_post_landing_converse_uses_the_honest_static_not_safe_contract(tmp_path
     tag, data = reg.converse("s1", "If Halvmark exposes a defect, do you disclose it?")
     assert tag == "say"
     assert data["text"] == _v._CONVERSE_DONE_STORY
+    assert data["text"] != _v.SAFE_CONTRACT
+
+
+def test_next_kind_survives_a_restart_on_the_resume_payload(tmp_path, make_fake):
+    """Spec §4 test 7 (review fold): the resume-path label derives from the SAME _story predicate,
+    so a resumed Continue keeps 'chapter' across a restart; a plateaued sitting resumes 'pressure'."""
+    db = str(tmp_path / "resume-kind.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    tag, _ = _drive(reg, "s1", opening="chapter one position")
+    assert tag == "done"  # forged+converged
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))  # the restart
+    tag, data = reg2.resume_or_start("s1")
+    assert tag == "resume"
+    assert data["next_kind"] == "chapter"  # the sequel survives the restart
+    assert data["next_desc"]  # the description rides too
+
+    db2 = str(tmp_path / "resume-kind2.db")
+    reg3 = SessionRegistry(db2, model_factory=_world_factory(make_fake, outcome={"v": "unchanged"}))
+    _open_world(reg3, "s2")
+    _drive(reg3, "s2", opening="a hedge")  # plateaued
+    reg4 = SessionRegistry(db2, model_factory=_world_factory(make_fake, outcome={"v": "unchanged"}))
+    _, d2 = reg4.resume_or_start("s2")
+    assert d2["next_kind"] == "pressure"  # no sequel to continue
+
+
+def test_interrupted_converse_fail_closed_is_honest_not_the_push_lie(tmp_path, make_fake):
+    """Review fold (informational note): the lost-context fail-closed path served SAFE_CONTRACT's
+    'I'll push' lie — the whole batch kills that lie. It now serves the honest fresh static
+    (equally safe: a static, no move, no push promise)."""
+    from retnovation.web import voice as _v
+
+    # The screen against a lost exp fail-closes: force it by making every reply "leak".
+    def factory():
+        m = _world_factory(make_fake)()
+        m.concierge_converse = lambda problem, recent, *, stop_reason="converged", voice="": "ok"
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "lost.db"), model_factory=factory)
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="position one")
+    # simulate an unresolvable lost context: a lost exp id that no library entry matches
+    reg._lost_exp_id["s1"] = "no_such_experience_xyz"
+    reg._lost_ref["s1"] = "gen:lost:1"
+    tag, data = reg.converse("s1", "a probe")
+    assert tag == "say"
+    assert data["text"] == _v._CONVERSE_DONE_FRESH  # honest static, not the push lie
     assert data["text"] != _v.SAFE_CONTRACT
