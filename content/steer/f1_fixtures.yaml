@@ -6,6 +6,11 @@
 # stays at/under max_false_nonempty_rate. Re-run it (under threshold) on ANY change to
 # concierge_converse.md or the model id (documented gate, spec §4). Structure runs offline (L-22).
 # Generic startup scenarios only — no confidential material (L-2/L-26).
+#
+# NOTE (calibration, adversarial-review fold): 0.15 is a PROVISIONAL a-priori bar, not yet an
+# empirically-recorded baseline. With 7 non_steers it tolerates floor(7*0.15)=1 slip (judge noise),
+# so it is no longer effectively zero-tolerance. On the first founder-run test_live_steer_f1, record
+# the OBSERVED false-non-empty rate here and confirm/replace 0.15 with the measured baseline.
 max_false_nonempty_rate: 0.15
 context:
   problem: >
@@ -21,6 +26,8 @@ non_steers:
   - "So to be clear, saying no here was about focus, not about the money."
   - "Honestly that clarified a lot. Thanks."
   - "I still think holding the roadmap is right, just wanted to say it out loud once more."
+  - "So the real reason I'm saying no is that the launch is the whole company — that's the crux, right?"
+  - "Can you say more about why chasing the logo would have been the wrong instinct here?"
 genuine:
   - "Okay, separate thing — now I have to decide whether to raise a bridge round before the launch or run lean into it."
   - "Different call: my technical co-founder wants to hand pilot support to a junior eng and I'm not sure I trust that."

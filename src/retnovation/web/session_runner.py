@@ -1448,7 +1448,17 @@ class SessionRegistry:
                 # is not the place to promise a next chapter.
                 reply = voice._CONVERSE_DONE_FRESH
         now = datetime.now(timezone.utc)
-        if next_pressure and sit is not None and self._store.read_world(sit) is not None:
+        # Don't capture a steer on an interrupted/degraded turn (adversarial-review fold F3): the
+        # reply may have fail-closed to the honest static, and steering does not belong in a
+        # lost-context state — she re-types after resume. The rec["exp"] is None path already
+        # returned above; this covers the lost-context fail-close.
+        interrupted = lost is not None and bool(lost[1])
+        if (
+            next_pressure
+            and not interrupted
+            and sit is not None
+            and self._store.read_world(sit) is not None
+        ):
             # The mapper gate at CAPTURE (user-steered chapters §2b): a servable fresh pressure
             # becomes the pending steer (raw words + distilled pressure + pre-mapped territory).
             self._capture_steer(session_id, sit, value, next_pressure, now, rec["model"])
@@ -1731,14 +1741,20 @@ class SessionRegistry:
         """The wind-down Continue label (§2c). A servable steer pending -> next_kind='steer', the
         button a fixed short lead, next_desc = HER raw words (never the distillation, L-13/F2).
         Else on a world sitting -> the recomputed rotation-sequel label (chapter|pressure), so the
-        label tracks the live window; on a curated sitting -> leave the prior label unchanged."""
+        label tracks the live window; on a curated sitting -> leave the prior label unchanged.
+
+        The steer label RE-CHECKS the window (adversarial-review fold F2): a steer whose territory
+        windowed AFTER capture must not keep promising "press what you raised" — consume would then
+        fall back to rotation, breaking the agreement invariant. A windowed pending steer shows the
+        rotation label instead; it stays pending (the window is effectively frozen within a
+        wind-down, so it does not spuriously resurrect, but the pending steer is not destroyed by a
+        transient read)."""
         with self._lock:
             steer = self._steer_pending.get(session_id)
-        if steer is not None:
-            raw, _pressure, _eid = steer
+        if steer is not None and steer[2] not in self._store.territories_within(now):
             data["next_kind"] = "steer"
             data["next_title"] = ""
-            data["next_desc"] = _clip80(raw)
+            data["next_desc"] = _clip80(steer[0])  # HER raw words
             return
         if sit is not None and self._store.read_world(sit) is not None:
             target = self._next_territory(session_id, now)

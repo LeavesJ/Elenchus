@@ -2791,3 +2791,54 @@ def test_no_steer_continue_carries_no_focus(tmp_path, make_fake):
     reg.continue_session("s1")  # rotation — no steer
     assert briefs
     assert all("The pressure she wants to press next" not in b[0] for b in briefs)
+
+
+# --- User-steered chapters: adversarial-review folds (label window re-check, interrupted, sweep) ---
+
+
+def test_windowed_steer_label_is_suppressed_on_a_later_turn(tmp_path, make_fake):
+    """Review F2: a steer whose territory windows AFTER capture must not keep showing the 'steer'
+    label on a later chatter turn — the label tracks the LIVE window (agreement invariant)."""
+    reg = SessionRegistry(str(tmp_path / "stale-label.db"), model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    target = _arm_steer(reg, "s1", next_pressure="P1")
+    _, data = reg.converse("s1", "raw words")
+    assert data["next_kind"] == "steer"  # captured, non-windowed -> steer label
+    reg._store.territories_within = lambda now: {target}  # the steer's territory now windows
+    _arm_steer(reg, "s1", next_pressure="")  # a chatter turn (no fresh pressure)
+    _, data2 = reg.converse("s1", "just a comment")
+    assert data2["next_kind"] != "steer"  # windowed -> rotation label, not a false promise
+
+
+def test_interrupted_turn_does_not_capture_a_steer(tmp_path, make_fake):
+    """Review F3: an interrupted/lost-context converse (reply fail-closed to the honest static)
+    must not simultaneously capture a steer and promise 'press what you raised'."""
+    reg = SessionRegistry(str(tmp_path / "interrupt.db"), model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    _arm_steer(reg, "s1", next_pressure="a fresh call")
+    reg._lost_exp_id["s1"] = "no_such_experience_xyz"  # unresolvable lost context -> fail-close
+    reg._lost_ref["s1"] = "gen:lost:1"
+    _, data = reg.converse("s1", "raw")
+    assert data.get("next_kind") != "steer"  # no steer promise on a degraded turn
+    assert "s1" not in reg._steer_pending  # and nothing captured
+
+
+def test_distilled_pressure_never_reaches_the_projected_wire(tmp_path, make_fake):
+    """Spec §4 test 10 + review Minor: the distilled next_pressure/focus never reaches ANY client
+    payload — sweep the REAL converse -> _emit projection AND the continue payload (composition
+    seam, not a hand-built dict)."""
+    from retnovation.web.app import _emit
+
+    reg = SessionRegistry(str(tmp_path / "sweep.db"), model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="chapter one")
+    _arm_steer(reg, "s1", next_pressure="DISTILLED_SECRET_CLAUSE")
+    tag, data = reg.converse("s1", "her raw typed words")
+    wire = _emit(reg, tag, data)  # the ACTUAL projected client payload
+    assert wire["kind"] == "say" and wire["next_kind"] == "steer"
+    assert wire["next_desc"] == "her raw typed words"  # HER words, not the distillation
+    assert "DISTILLED_SECRET_CLAUSE" not in str(wire)  # the distillation never projects (L-13)
+    ctag, cdata = reg.continue_session("s1")
+    assert "DISTILLED_SECRET_CLAUSE" not in str(_emit(reg, ctag, cdata))  # nor the continue wire
