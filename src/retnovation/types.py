@@ -368,6 +368,16 @@ class TerritoryMap(BaseModel):
     conversion: str = ""  # on "topic": engage her subject + ask for the call inside it
 
 
+class ConverseTurn(BaseModel):
+    # The post-landing wind-down (user-steered chapters §2a). `reply` is authored exactly as the
+    # freeform wind-down was. `next_pressure` is EMPTY-BY-DEFAULT (F1) — a distilled fresh decision
+    # ONLY when the student unmistakably raises a NEW decision-frame she now faces (not a
+    # re-argument of the call just landed), else "". Server-side: the distillation never reaches
+    # the client (L-13/F2); the label echoes her raw words.
+    reply: str
+    next_pressure: str = ""
+
+
 class FitCheck(BaseModel):
     # The forge's reject-only fit gate (living sitting §2b): does the scenario establish the
     # preconditions the rubric's meaning presumes? The reason speaks precondition /

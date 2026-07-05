@@ -398,7 +398,9 @@ def test_converse_winds_down_does_not_re_demand_a_position(tmp_path):
 
     exp = _first_open_exp(str(tmp_path / "conv.db"))
     m = AnthropicModel()
-    reply = voice.converse(m, exp, _CONVERGED, "yeah, I think that's where I land.", "founder_ceo")
+    reply, _ = voice.converse(
+        m, exp, _CONVERGED, "yeah, I think that's where I land.", "founder_ceo"
+    )
     assert reply and reply != voice.SAFE_CONTRACT  # a real wind-down, not the re-invite fallback
     low = reply.lower()
     # the regression: it must NOT re-demand the already-committed position

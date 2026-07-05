@@ -1382,7 +1382,7 @@ class SessionRegistry:
             # Degraded rebuild (content drift): the honest static — never an unscreened author,
             # and never the SAFE_CONTRACT lie ("I'll push") on a dead engine (spec §2c).
             return ("say", {"text": voice._CONVERSE_DONE_FRESH})
-        reply = voice.converse(
+        reply, _next_pressure = voice.converse(
             rec["model"],
             rec["exp"],
             rec["recent"],

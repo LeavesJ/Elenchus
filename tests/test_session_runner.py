@@ -5,6 +5,7 @@ from retnovation.cli import build_store
 from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
 from retnovation.orchestration import run_session
 from retnovation.types import (
+    ConverseTurn,
     EntryClass,
     EntryClassification,
     FrameState,
@@ -2521,7 +2522,9 @@ def test_post_landing_converse_uses_the_honest_static_not_safe_contract(tmp_path
 
     def factory():
         m = _world_factory(make_fake)()
-        m.concierge_converse = lambda problem, recent, *, stop_reason="converged", voice="": ""
+        m.concierge_converse = lambda problem, recent, *, stop_reason="converged", voice="": (
+            ConverseTurn(reply="", next_pressure="")
+        )
         return m
 
     reg = SessionRegistry(str(tmp_path / "wind.db"), model_factory=factory)
@@ -2566,7 +2569,9 @@ def test_interrupted_converse_fail_closed_is_honest_not_the_push_lie(tmp_path, m
     # The screen against a lost exp fail-closes: force it by making every reply "leak".
     def factory():
         m = _world_factory(make_fake)()
-        m.concierge_converse = lambda problem, recent, *, stop_reason="converged", voice="": "ok"
+        m.concierge_converse = lambda problem, recent, *, stop_reason="converged", voice="": (
+            ConverseTurn(reply="ok", next_pressure="")
+        )
         return m
 
     reg = SessionRegistry(str(tmp_path / "lost.db"), model_factory=factory)

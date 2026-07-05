@@ -8,6 +8,7 @@ from .content_loader import load_prompt
 from .types import (
     CheckableGrade,
     CheckableQuestion,
+    ConverseTurn,
     EgressScreen,
     EntryClass,
     EntryClassification,
@@ -92,7 +93,7 @@ class Model(Protocol):
         *,
         stop_reason: str = "converged",
         voice: str = "",
-    ) -> str: ...
+    ) -> "ConverseTurn": ...
     def concierge_land(
         self,
         problem: str,
@@ -175,7 +176,7 @@ class FakeModel:
         return "[open]"
 
     def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
-        return "[converse winddown]"
+        return ConverseTurn(reply="[converse winddown]", next_pressure="")
 
     def concierge_land(self, problem, recent, stop_reason, *, steer="", voice=""):
         return f"[land:{stop_reason}]"
@@ -534,29 +535,27 @@ class AnthropicModel:
         *,
         stop_reason: str = "converged",
         voice: str = "",
-    ) -> str:
+    ) -> ConverseTurn:
         # Post-stop wind-down: no engine push, no re-invite. Wider window (limit=20) so a committed
         # position can't age out of view and get re-demanded. Honest by stop_reason (a process signal,
         # never a grade — L-4): on a non-converged stop the author must NOT assume the student
-        # committed (dogfood 2026-07-01). Frame-blind.
+        # committed (dogfood 2026-07-01). Frame-blind. STRUCTURED (§2a): reply + next_pressure
+        # (empty-by-default, F1); the distilled next_pressure is server-side only (L-13/F2). Rides
+        # _parse_required (L-17: one budget-doubled retry on truncation, then loud). _CLASSIFY budget:
+        # the subtle F1 judgment can spend adaptive-thinking tokens, and a larger cap only buys
+        # thinking room (adaptive spends what it needs).
         system = (voice + "\n\n" if voice else "") + load_prompt("concierge_converse")
         user = (
             f"Problem:\n{problem}\n\nStop reason: {stop_reason}\n\n"
             f"{_render_turns(recent, limit=20)}Respond to the student's latest."
         )
-        resp = self._get_client().messages.create(
-            model=self._model,
-            max_tokens=_ECHO_MAX_TOKENS,
+        return self._parse_required(
+            max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,
             messages=[{"role": "user", "content": user}],
+            output_format=ConverseTurn,
             **_PARAMS,
         )
-        if getattr(resp, "stop_reason", None) == "refusal":
-            return ""
-        for block in resp.content:
-            if getattr(block, "type", None) == "text":
-                return block.text
-        return ""
 
     def concierge_land(
         self,

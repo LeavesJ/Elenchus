@@ -187,21 +187,24 @@ def converse(
     posture: str | None = None,
     stop_reason: str = "converged",
     has_sequel: bool = False,
-) -> str:
-    """Post-stop, engine-free continuation. The diagnostic is DONE — WIND DOWN, never re-invite
-    a position (the old re-invite path re-demanded a committed answer, DEVLOG 2026-07-01). Honest by
-    stop_reason: on a non-converged stop the author is told the student did NOT land the call, so it
-    can't manufacture a commitment that never happened. Author via concierge_converse (frame-blind
-    wind-down doctrine, wider window). Flat egress; on refusal/empty/leak the fallback is HONEST —
-    it never promises a push (the old SAFE_CONTRACT fallback lied), and it promises a next chapter
-    ONLY when `has_sequel` (spec §2c; review pt 4)."""
+) -> tuple[str, str]:
+    """Post-stop, engine-free continuation. Returns (reply_text, next_pressure). The diagnostic is
+    DONE — WIND DOWN, never re-invite a position (the old re-invite path re-demanded a committed
+    answer, DEVLOG 2026-07-01). Honest by stop_reason: on a non-converged stop the author is told the
+    student did NOT land the call, so it can't manufacture a commitment that never happened. Author
+    via concierge_converse (STRUCTURED — reply + next_pressure). `reply` is flat-egress screened; on
+    refusal/empty/leak the fallback is HONEST — it never promises a push (the old SAFE_CONTRACT
+    fallback lied), and it promises a next chapter ONLY when `has_sequel` (spec §2c; review pt 4).
+    The distilled `next_pressure` is passed up UN-screened (server-side data — the forge screens the
+    eventual scenario, not this clause; L-13/F2 hold on the label, which echoes her raw words)."""
     v = resolve_presentation(posture, exp)["voice"]
-    text = model.concierge_converse(
+    turn = model.concierge_converse(
         exp.prompt, recent + [("student", user_text)], stop_reason=stop_reason, voice=v
     )
-    if not text or not egress_safe_reply(model, exp, text):
-        return _CONVERSE_DONE_STORY if has_sequel else _CONVERSE_DONE_FRESH
-    return text
+    reply, next_pressure = turn.reply, turn.next_pressure
+    if not reply or not egress_safe_reply(model, exp, reply):
+        return (_CONVERSE_DONE_STORY if has_sequel else _CONVERSE_DONE_FRESH), next_pressure
+    return reply, next_pressure
 
 
 def resolve_presentation(posture: str | None, exp: Experience | None) -> dict:

@@ -4,7 +4,13 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
-from retnovation.types import EntryClass, EntryClassification, FrameState, TrapState
+from retnovation.types import (
+    ConverseTurn,
+    EntryClass,
+    EntryClassification,
+    FrameState,
+    TrapState,
+)
 from retnovation.web.app import create_app
 
 # irreversible_anchor's display title — the menu shows titles, never the veldra: ref, so the tests
@@ -230,7 +236,7 @@ class _PlateauModel(FakeModel):
 
     def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
         type(self).told = stop_reason
-        return "[converse winddown]"
+        return ConverseTurn(reply="[converse winddown]", next_pressure="")
 
 
 def test_converse_is_told_the_records_stop_reason(tmp_path):
@@ -810,6 +816,8 @@ def test_shell_renders_the_front_door_and_living_sitting_affordances():
     # button, the description demoted to a muted line — the RENDERED text is
     # 'Continue — next {chapter|pressure}: {short title}'.
     assert "Continue \\u2014 next " in html and "nextKind==='chapter'?'chapter':'pressure'" in html
-    assert "r.next_desc" in html and "r.next_kind" in html  # the readable-label fields ride the wire
+    assert (
+        "r.next_desc" in html and "r.next_kind" in html
+    )  # the readable-label fields ride the wire
     assert "r.frontdoor" in html  # resume of a sitting parked at the front door
     assert "veldra" not in html.lower()  # L-13 on the static shell, unchanged

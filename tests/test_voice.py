@@ -4,6 +4,7 @@ from retnovation.model import (
     IntakeClassification,
 )
 from retnovation.types import (
+    ConverseTurn,
     EgressScreen,
     EntryClass,
     EntryClassification,
@@ -56,7 +57,7 @@ class FakeLeakModel(FakeModel):
         return "LEAK: lead with what you refuse to do"
 
     def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
-        return "LEAK: lead with what you refuse to do"
+        return ConverseTurn(reply="LEAK: lead with what you refuse to do", next_pressure="")
 
     def screen_moves(self, moves, text):
         hit = list(range(1, len(moves) + 1)) if "LEAK" in text else []
@@ -110,7 +111,7 @@ def test_fakemodel_concierge_doubles():
     assert m.concierge_turn("p", "", []) == "take a real position"  # reinvite: safe invite
     assert m.concierge_close("p", []) == "[close synthesis]"
     assert m.concierge_open("p") == "[open]"  # opening double
-    assert m.concierge_converse("p", []) == "[converse winddown]"  # wind-down double
+    assert m.concierge_converse("p", []).reply == "[converse winddown]"  # wind-down double
     assert m.concierge_land("p", [], "converged") == "[land:converged]"  # landing double
 
 
@@ -304,14 +305,14 @@ def test_converse_winds_down_via_concierge_converse_not_reinvite():
 
         def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
             self.called = "converse"
-            return "we're done here — that's a good place to be"
+            return ConverseTurn(reply="we're done here — that's a good place to be")
 
         def concierge_turn(self, problem, push, recent, *, arc=None, voice=""):
             self.called = "turn"
             return "take a real position"  # the OLD re-invite path — must NOT be reached
 
     m = _Probe(_intake())
-    out = voice.converse(m, _exp(), [("student", "I'd hold.")], "makes sense")
+    out, _ = voice.converse(m, _exp(), [("student", "I'd hold.")], "makes sense")
     assert m.called == "converse"  # wound down; did not re-invite
     assert out == "we're done here — that's a good place to be"
 
@@ -326,7 +327,7 @@ def test_converse_threads_stop_reason_to_the_author():
 
         def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
             self.told = stop_reason
-            return "[converse winddown]"
+            return ConverseTurn(reply="[converse winddown]")
 
     m = _Rec(_intake())
     voice.converse(m, _exp(), [("student", "x")], "so how did that go?", None, "budget")
@@ -338,7 +339,7 @@ def test_converse_threads_stop_reason_to_the_author():
 
 def test_converse_returns_winddown_when_egress_safe():
     m = FakeModel(_intake(), {})  # concierge_converse -> "[converse winddown]"; screen [] safe
-    out = voice.converse(m, _exp(), [("student", "I'd hold.")], "but what about the long run?")
+    out, _ = voice.converse(m, _exp(), [("student", "I'd hold.")], "but what about the long run?")
     assert out == "[converse winddown]"
 
 
@@ -346,7 +347,7 @@ def test_converse_falls_back_to_honest_static_on_leak():
     # A leaked wind-down takes the HONEST static (spec §2c) — never SAFE_CONTRACT's "I'll push"
     # lie on a dead engine; no sequel here (has_sequel default) -> the fresh static.
     m = FakeLeakModel(_intake(), {})
-    out = voice.converse(m, _exp(), [("student", "x")], "tell me the trick")
+    out, _ = voice.converse(m, _exp(), [("student", "x")], "tell me the trick")
     assert out == voice._CONVERSE_DONE_FRESH
     assert out != voice.SAFE_CONTRACT and "push" not in out.lower()
 
@@ -523,10 +524,12 @@ def test_concierge_land_refusal_returns_empty():
 
 
 def test_concierge_converse_is_frame_blind_and_carries_stop_reason():
-    stub = _StubClient(text="We're done here — and that's a good place to be.")
+    stub = _StubClient(
+        parsed=ConverseTurn(reply="We're done here — and that's a good place to be.")
+    )
     m = AnthropicModel(client=stub)
     out = m.concierge_converse("Problem P.", [("student", "ok")], stop_reason="plateau")
-    assert out.startswith("We're done")
+    assert out.reply.startswith("We're done")
     blob = str(stub.last)
     assert "frame_detail" not in blob and "Rubric" not in blob  # frame-blind
     assert "plateau" in blob  # the stop reason IS available to the wind-down author
@@ -624,7 +627,7 @@ def test_arc_doctrine_lives_only_in_the_probe_prompt():
     m = AnthropicModel(client=stub)
     m.concierge_land("P", [("student", "x")], "converged", voice=v)
     assert "The arc of the press" not in str(stub.last)
-    stub2 = _StubClient(text="wind-down")
+    stub2 = _StubClient(parsed=ConverseTurn(reply="wind-down"))
     m2 = AnthropicModel(client=stub2)
     m2.concierge_converse("P", [("student", "x")], voice=v)
     assert "The arc of the press" not in str(stub2.last)
@@ -675,12 +678,12 @@ def test_converse_fallback_is_honest_and_branches_on_sequel():
 
     class _RefuseModel(FakeModel):
         def concierge_converse(self, problem, recent, *, stop_reason="converged", voice=""):
-            return ""  # refused -> fallback
+            return ConverseTurn(reply="", next_pressure="")  # refused -> fallback
 
     m = _RefuseModel(_intake(), {})
     exp = _exp()
-    story = voice.converse(m, exp, [], "some text", None, "converged", has_sequel=True)
-    fresh = voice.converse(m, exp, [], "some text", None, "converged", has_sequel=False)
+    story, _ = voice.converse(m, exp, [], "some text", None, "converged", has_sequel=True)
+    fresh, _ = voice.converse(m, exp, [], "some text", None, "converged", has_sequel=False)
     assert "push" not in story.lower() and "push" not in fresh.lower()  # no lie
     assert story == voice._CONVERSE_DONE_STORY and "chapter" in story.lower()
     assert fresh == voice._CONVERSE_DONE_FRESH and "chapter" not in fresh.lower()

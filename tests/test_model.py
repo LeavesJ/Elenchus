@@ -1,5 +1,18 @@
 from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
-from retnovation.types import FrameState, TrapState
+from retnovation.types import ConverseTurn, FrameState, TrapState
+
+
+def test_converseturn_defaults_empty():
+    t = ConverseTurn(reply="that's the edge of it")
+    assert t.reply == "that's the edge of it"
+    assert t.next_pressure == ""  # F1: empty-by-default is the confident default
+
+
+def test_fakemodel_concierge_converse_returns_converseturn():
+    m = FakeModel(IntakeClassification(frame_states={}, trap_states={}), responses={})
+    out = m.concierge_converse("problem", [("student", "hi")])
+    assert isinstance(out, ConverseTurn)
+    assert out.next_pressure == ""
 
 
 def _exp():  # minimal stand-in; FakeModel ignores it
