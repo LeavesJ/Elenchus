@@ -149,3 +149,37 @@ def test_spikemodel_wrapper_enlarges_budget_and_delegates():
     w.generate_output("p", "inj")
     assert seen["mt"] == 4096  # enlarged budget passed through
     assert w.other() == "delegated"  # everything else delegates
+
+
+def test_spikemodel_rate_preference_coerces_invalid_to_tie():
+    """The model sometimes emits a non-tie preference with magnitude 0 (fails the cross-field
+    validator); the wrapper retries then coerces to a conservative tie rather than crashing."""
+    from retnovation.frame_gen_spike import _SpikeModel
+
+    class M:
+        def rate_preference(self, prompt, a, b):
+            # constructing this raises ValidationError (magnitude 0 with a non-tie preference)
+            return PreferenceRating(
+                distinguishability=1, preferred="A", magnitude=0, key_difference="x"
+            )
+
+    out = _SpikeModel(M()).rate_preference("p", "a", "b")
+    assert out.preferred == "tie" and out.magnitude == 0
+
+
+def test_run_arm_records_error_row_on_frame_failure(tmp_path):
+    """A single frame's failure records an error row and does not kill the run (experiment resilience)."""
+    from retnovation.frame_gen_spike import run_arm
+
+    class Boom:
+        def generate_frames(self, p, e):
+            return [CandidateFrame(frame_code="boom", frame_detail="d", injection="i")]
+
+        def generate_scenarios(self, p):
+            return ["s1", "s2"]
+
+        def generate_output(self, prompt, injection, *, max_tokens=1024):
+            raise RuntimeError("boom")
+
+    rows = run_arm(["p"], Boom(), {"theta_dist": 1, "min_scenarios": 2}, out_dir=str(tmp_path))
+    assert len(rows) == 1 and rows[0]["verdict"].startswith("error")

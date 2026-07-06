@@ -7,9 +7,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from .content_loader import load_library, load_mush_frames
 from .lift_test import run_lift_test
-from .types import CandidateFrame, LiftScenario, Regime
+from .types import CandidateFrame, LiftScenario, PreferenceRating, Regime
 
 
 class _SpikeModel:
@@ -24,6 +26,20 @@ class _SpikeModel:
 
     def generate_output(self, prompt, injection, *, max_tokens=None):
         return self._m.generate_output(prompt, injection, max_tokens=self._max)
+
+    def rate_preference(self, scenario_prompt, output_a, output_b):
+        # The model sometimes returns a non-tie preference with magnitude 0 ("difference is
+        # minimal"), which passes the JSON schema but fails PreferenceRating's cross-field validator.
+        # Retry once, then coerce to a CONSERVATIVE tie (no lift credited) so one bad rating can't
+        # nuke the experiment.
+        for _ in range(2):
+            try:
+                return self._m.rate_preference(scenario_prompt, output_a, output_b)
+            except ValidationError:
+                continue
+        return PreferenceRating(
+            distinguishability=0, preferred="tie", magnitude=0, key_difference="(coerced tie)"
+        )
 
     def __getattr__(self, name):
         return getattr(self._m, name)
@@ -45,11 +61,29 @@ def _order(scenarios: list[LiftScenario]) -> dict[str, str]:
     return {s.scenario_id: ("AB" if i % 2 == 0 else "BA") for i, s in enumerate(scenarios)}
 
 
+def _error_row(prob_id, cand, exc):
+    return {
+        "problem": prob_id,
+        "frame_code": cand.frame_code,
+        "frame_detail": cand.frame_detail,
+        "verdict": f"error: {type(exc).__name__}",
+        "mean_pref": 0.0,
+        "mean_dist": 0.0,
+        "framed_preferred": 0,
+        "below_floor": True,
+        "scenarios": [],
+    }
+
+
 def _lift_rows(prob_id, prob, frames, scenarios, model, config, out_dir):
     rows = []
     order = _order(scenarios)
     for cand in frames:
-        result = run_lift_test(cand, scenarios, model, order, config)
+        try:  # a single frame's failure (529, an odd parse) must not kill the whole experiment
+            result = run_lift_test(cand, scenarios, model, order, config)
+        except Exception as exc:  # noqa: BLE001 — experiment resilience; the row records the class
+            rows.append(_error_row(prob_id, cand, exc))
+            continue
         (Path(out_dir) / f"screen_{cand.frame_code}.json").write_text(
             json.dumps(result.model_dump(), indent=2)
         )
