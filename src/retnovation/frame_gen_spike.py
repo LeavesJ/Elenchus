@@ -56,23 +56,44 @@ def curated_exemplars() -> str:
     return "\n".join(lines)
 
 
+def _curated_frames() -> list[tuple[str, str]]:
+    """The 5 curated frames as (frame_code, frame_detail) — the novelty gate's comparison set."""
+    seen: dict[str, str] = {}
+    for e in load_library():
+        if e.regime is not Regime.open_ended or e.rubric is None:
+            continue
+        for f in e.rubric.frames:
+            seen.setdefault(f.frame_code, f.frame_detail)
+    return list(seen.items())
+
+
 def _order(scenarios: list[LiftScenario]) -> dict[str, str]:
     # Fixed A/B randomization map (deterministic for the spike): alternate AB/BA by index.
     return {s.scenario_id: ("AB" if i % 2 == 0 else "BA") for i, s in enumerate(scenarios)}
 
 
-def _error_row(prob_id, cand, exc):
-    return {
-        "problem": prob_id,
-        "frame_code": cand.frame_code,
-        "frame_detail": cand.frame_detail,
-        "verdict": f"error: {type(exc).__name__}",
-        "mean_pref": 0.0,
-        "mean_dist": 0.0,
-        "framed_preferred": 0,
-        "below_floor": True,
-        "scenarios": [],
-    }
+def _categorize(result):
+    """Both axes, manipulation-check applied (review fold): a frame is read on distinguishability
+    AND signed preference over ONLY the scenarios where the injection was EXPRESSED. Errors/
+    all-inconclusive are pulled out of the denominator; depreciation (dist+/pref-, the model already
+    does the move) is separated from invisible (dist<theta) and from the mush-band boundary."""
+    theta = result.theta_dist
+    valid = [s for s in result.scenarios if s.injection_expressed]
+    incon = result.inconclusive_count
+    if not valid:
+        return "INCONCLUSIVE(no valid injection)", 0, incon
+    statuses = [s.status(theta) for s in valid]
+    if all(x == "lift" for x in statuses):
+        return (
+            ("HARD-LIFT" if not result.below_floor else f"lift(below_floor n={len(valid)})"),
+            len(valid),
+            incon,
+        )
+    if result.mean_distinguishability < theta:
+        return "INVISIBLE(null)", len(valid), incon
+    if result.mean_preference < 0:
+        return "DEPRECIATION(dist+/pref-)", len(valid), incon
+    return "BOUNDARY(mush-band)", len(valid), incon
 
 
 def _lift_rows(prob_id, prob, frames, scenarios, model, config, out_dir):
@@ -82,23 +103,41 @@ def _lift_rows(prob_id, prob, frames, scenarios, model, config, out_dir):
         try:  # a single frame's failure (529, an odd parse) must not kill the whole experiment
             result = run_lift_test(cand, scenarios, model, order, config)
         except Exception as exc:  # noqa: BLE001 — experiment resilience; the row records the class
-            rows.append(_error_row(prob_id, cand, exc))
+            rows.append(
+                {
+                    "problem": prob_id,
+                    "frame_code": cand.frame_code,
+                    "frame_detail": cand.frame_detail,
+                    "category": f"INCONCLUSIVE(errored: {type(exc).__name__})",
+                    "mean_pref": None,
+                    "mean_dist": None,
+                    "valid": 0,
+                    "inconclusive": None,
+                    "novelty": None,
+                    "scenarios": [],
+                }
+            )
             continue
         (Path(out_dir) / f"screen_{cand.frame_code}.json").write_text(
             json.dumps(result.model_dump(), indent=2)
         )
+        category, valid, incon = _categorize(result)
         rows.append(
             {
                 "problem": prob_id,
                 "frame_code": cand.frame_code,
                 "frame_detail": cand.frame_detail,
-                "verdict": result.verdict,
-                "mean_pref": round(result.mean_preference, 2),
+                "category": category,
+                "mean_pref": round(result.mean_preference, 2),  # SIGNED — carried as its own axis
                 "mean_dist": round(result.mean_distinguishability, 2),
-                "framed_preferred": result.framed_preferred_count,
-                "below_floor": result.below_floor,
+                "valid": valid,
+                "inconclusive": incon,
+                "novelty": None,  # filled by the novelty GATE for HARD-LIFT frames (run_arm)
                 "scenarios": [
                     {
+                        "expressed": s.injection_expressed,  # per-scenario manipulation check
+                        "dist": s.distinguishability if s.injection_expressed else None,
+                        "pref": s.preference if s.injection_expressed else None,
                         "framed": s.framed_output,
                         "control": s.control_output,
                         "key_difference": s.key_difference,
@@ -110,8 +149,26 @@ def _lift_rows(prob_id, prob, frames, scenarios, model, config, out_dir):
     return rows
 
 
+def _apply_novelty_gate(rows, model):
+    """The novelty GATE (review fold): for HARD-LIFT frames only, ask the mapper whether the move
+    restates a curated frame at high confidence (convergent) — a DEFINED gate, not a founder's
+    free-text memory. Only hard-lift frames are worth the call; everything below is already out."""
+    curated = _curated_frames()
+    for r in rows:
+        if r["category"] != "HARD-LIFT":
+            continue
+        c = model.frame_convergence(r["frame_detail"], curated)
+        r["novelty"] = (
+            f"convergent(~{c.nearest})"
+            if (c.maps_to_existing and c.confidence.strip().lower() == "high")
+            else "novel"
+        )
+    return rows
+
+
 def run_arm(problems, model, config, *, out_dir):
-    """Arm 1: per problem, generate frames + scenarios, lift-test each frame."""
+    """Arm 1: per problem, generate frames + scenarios, lift-test each frame, novelty-gate the
+    hard-lift survivors."""
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     model = _SpikeModel(model)  # decision-sized generate_output budget (L-17)
     exemplars = curated_exemplars()
@@ -124,7 +181,7 @@ def run_arm(problems, model, config, *, out_dir):
             for j, p in enumerate(prompts)
         ]
         rows += _lift_rows(f"p{i}", prob, frames, scenarios, model, config, out_dir)
-    return rows
+    return _apply_novelty_gate(rows, model)
 
 
 def run_mush_arm(mush, scenarios_prompts, model, config, *, out_dir):
@@ -139,20 +196,47 @@ def run_mush_arm(mush, scenarios_prompts, model, config, *, out_dir):
     return _lift_rows("mush", "(mush control)", frames, scenarios, model, config, out_dir)
 
 
-def _pass(row) -> bool:
-    return row["verdict"] == "lift"
+def _is_hard_lift(row) -> bool:
+    return row["category"] == "HARD-LIFT"
+
+
+def _is_inconclusive(row) -> bool:
+    return row["category"].startswith("INCONCLUSIVE")
+
+
+def _summary(rows) -> dict:
+    """The corrected numbers: the denominator EXCLUDES inconclusive/errored (they measured nothing);
+    the operative signal is HARD-LIFT (the only band that separates from mush), and HARD-LIFT ∧
+    NOVEL is the real go count."""
+    valid = [r for r in rows if not _is_inconclusive(r)]
+    hard = [r for r in valid if _is_hard_lift(r)]
+    hard_novel = [r for r in hard if r.get("novelty") == "novel"]
+    return {
+        "total": len(rows),
+        "denominator": len(valid),
+        "inconclusive": len(rows) - len(valid),
+        "hard_lift": len(hard),
+        "hard_lift_novel": len(hard_novel),
+        "depreciation": sum(1 for r in valid if r["category"].startswith("DEPRECIATION")),
+        "boundary": sum(1 for r in valid if r["category"].startswith("BOUNDARY")),
+    }
 
 
 def format_report(arm1, mush) -> str:
-    a1_pass = sum(_pass(r) for r in arm1)
-    mush_pass = sum(_pass(r) for r in mush)
+    a1, m2 = _summary(arm1), _summary(mush)
     lines = [
-        "# Frame-Generation Spike — results",
+        "# Frame-Generation Spike — results (both axes; manipulation-check applied)",
         "",
         "## Summary",
-        f"- Arm 1 (generated): {a1_pass}/{len(arm1)} frames passed (verdict==lift)",
-        f"- Arm 2 (mush): {mush_pass}/{len(mush)} frames passed  <-- must be MUCH lower (teeth)",
-        "- Novel vs convergent-on-the-5: (founder fills, per passing frame below)",
+        f"- Arm 1 (generated): denominator {a1['denominator']} "
+        f"(excl {a1['inconclusive']} inconclusive/errored)",
+        f"    HARD-LIFT (robust, all valid scenarios lift): {a1['hard_lift']}",
+        f"    HARD-LIFT ∧ NOVEL (the real go count): {a1['hard_lift_novel']}",
+        f"    DEPRECIATION (dist+/pref-, Opus already does it): {a1['depreciation']}  |  "
+        f"BOUNDARY (mush-band): {a1['boundary']}",
+        f"- Arm 2 (mush): HARD-LIFT {m2['hard_lift']}/{m2['denominator']} (teeth: 0 = clean); "
+        f"BOUNDARY {m2['boundary']} + DEPRECIATION {m2['depreciation']} — the SAME bands as Arm 1's "
+        "non-hard-lift, i.e. the gate only separates at the hard-lift cluster.",
         "",
         "## Arm 1 — generated frames",
     ]
@@ -160,16 +244,19 @@ def format_report(arm1, mush) -> str:
         if "_hdr" in r:
             lines += ["", r["_hdr"]]
             continue
+        nov = f" novelty={r['novelty']}" if r.get("novelty") else ""
         lines += [
             "",
-            f"### [{r['problem']}] {r['frame_code']} — verdict={r['verdict']} "
-            f"pref={r['mean_pref']} dist={r['mean_dist']} framed_preferred={r['framed_preferred']}"
-            f"{' (below_floor)' if r['below_floor'] else ''}",
+            f"### [{r['problem']}] {r['frame_code']} — {r['category']}"
+            f" pref={r['mean_pref']} dist={r['mean_dist']} valid={r['valid']}"
+            f" inconclusive={r['inconclusive']}{nov}",
             f"move: {r['frame_detail']}",
         ]
         for s in r["scenarios"]:
+            exp = "expressed" if s["expressed"] else "NOT-EXPRESSED(inconclusive)"
+            axes = f"dist={s['dist']} pref={s['pref']}" if s["expressed"] else ""
             lines += [
-                f"  - key_difference: {s['key_difference']}",
+                f"  - [{exp}] {axes}  key_difference: {s['key_difference']}",
                 f"    FRAMED: {s['framed'][:400]}",
                 f"    CONTROL: {s['control'][:400]}",
             ]
@@ -205,8 +292,11 @@ def main(out_path: str = "/tmp/frame_gen_spike_report.md") -> None:  # pragma: n
     mush = run_mush_arm(load_mush_frames(), mush_scenarios, model, config, out_dir=art)
     report = format_report(arm1, mush)
     Path(out_path).write_text(report)
-    a1 = sum(_pass(r) for r in arm1)
-    print(f"Arm 1: {a1}/{len(arm1)} passed | Arm 2 mush: {sum(_pass(r) for r in mush)}/{len(mush)}")
+    a1, m2 = _summary(arm1), _summary(mush)
+    print(
+        f"Arm 1: HARD-LIFT {a1['hard_lift']}, HARD-LIFT∧NOVEL {a1['hard_lift_novel']} "
+        f"(denominator {a1['denominator']}) | Arm 2 mush HARD-LIFT {m2['hard_lift']}/{m2['denominator']}"
+    )
     print(f"report -> {out_path}")
 
 

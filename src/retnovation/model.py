@@ -9,6 +9,7 @@ from .types import (
     CandidateFrame,
     CheckableGrade,
     CheckableQuestion,
+    ConvergenceCheck,
     ConverseTurn,
     EgressScreen,
     EntryClass,
@@ -194,6 +195,13 @@ class FakeModel:
 
     def generate_scenarios(self, problem):
         return getattr(self, "_scenarios", [])
+
+    def frame_convergence(self, frame_detail, curated):
+        return getattr(
+            self,
+            "_convergence",
+            ConvergenceCheck(maps_to_existing=False, nearest="", confidence="low"),
+        )
 
     def forge_scenario(self, brief, steer=""):
         return "[forged scenario]"
@@ -774,6 +782,23 @@ class AnthropicModel:
             **_PARAMS,
         )
         return list(resp.scenarios)
+
+    def frame_convergence(
+        self, frame_detail: str, curated: list[tuple[str, str]]
+    ) -> ConvergenceCheck:
+        # The novelty GATE (frame-gen spike): does this move restate a curated move? Move-to-move,
+        # NOT situation-to-territory (map_territories' job) — the frame's detail against the curated
+        # frames. Structured; a defined gate that sharpens as problems get more novel.
+        numbered = "\n".join(f"{i + 1}. [{c}] {d}" for i, (c, d) in enumerate(curated))
+        system = load_spike_prompt("frame_novelty")
+        user = f"Candidate move:\n{frame_detail}\n\nExisting moves:\n{numbered}"
+        return self._parse_required(
+            max_tokens=_CLASSIFY_MAX_TOKENS,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            output_format=ConvergenceCheck,
+            **_MED_PARAMS,
+        )
 
     def forge_scenario(self, brief: str, steer: str = "") -> str:
         # Authors the scenario IN OPENING VOICE — it IS the opening say (§2b/M6: one generation,

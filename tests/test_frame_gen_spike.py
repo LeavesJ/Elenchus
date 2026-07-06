@@ -6,6 +6,7 @@ from retnovation.content_loader import load_mush_frames, load_spike_prompt
 from retnovation.model import FakeModel, IntakeClassification
 from retnovation.types import (
     CandidateFrame,
+    ConvergenceCheck,
     GeneratedOutput,
     InjectionExpressed,
     PreferenceRating,
@@ -33,6 +34,17 @@ def test_frame_gen_doctrine_forbids_mush():
     # the generator must demand non-obvious hidden moves and forbid generic advice (L-6)
     assert "hidden move" in p or "non-obvious" in p
     assert "generic advice" in p or "recognize the type" in p or "homework" in p
+
+
+def test_frame_novelty_doctrine_judges_the_move_not_the_topic():
+    p = load_spike_prompt("frame_novelty").lower()
+    assert "move" in p and ("restate" in p or "same move" in p)
+
+
+def test_fakemodel_frame_convergence_default_and_scripted():
+    assert _fake().frame_convergence("d", [("c", "cd")]).maps_to_existing is False
+    scripted = ConvergenceCheck(maps_to_existing=True, nearest="c", confidence="high")
+    assert _fake(convergence=scripted).frame_convergence("d", [("c", "cd")]) == scripted
 
 
 def test_fakemodel_generate_frames_returns_candidate_frames():
@@ -89,6 +101,9 @@ class FakeSpikeModel:
             key_difference="k",
         )
 
+    def frame_convergence(self, frame_detail, curated):
+        return ConvergenceCheck(maps_to_existing=False, nearest="", confidence="low")
+
 
 def test_curated_exemplars_renders_the_five():
     from retnovation.frame_gen_spike import curated_exemplars
@@ -109,7 +124,9 @@ def test_run_arm_produces_lift_verdicts(tmp_path):
     )
     assert len(rows) == 1
     assert rows[0]["frame_code"] == "good"
-    assert rows[0]["verdict"] == "lift"  # framed preferred + distinguishable across scenarios
+    assert rows[0]["category"] == "HARD-LIFT"  # all valid scenarios lift, >= min_scenarios
+    assert rows[0]["novelty"] == "novel"  # the novelty gate ran (fake maps low-confidence)
+    assert rows[0]["scenarios"][0]["expressed"] is True  # per-scenario manipulation check surfaced
     assert (tmp_path / "screen_good.json").exists()  # persisted (L-24 resume)
 
 
@@ -121,7 +138,26 @@ def test_format_report_has_both_arms(tmp_path):
         ["p"], FakeSpikeModel(frames), {"theta_dist": 1, "min_scenarios": 2}, out_dir=str(tmp_path)
     )
     report = format_report(arm1, arm1)  # reuse arm1 as a stand-in mush arm for the shape test
-    assert "Arm 1" in report and "Arm 2" in report and "lift" in report
+    assert "Arm 1" in report and "Arm 2" in report and "HARD-LIFT" in report
+    assert "HARD-LIFT ∧ NOVEL" in report  # the corrected go count is surfaced
+
+
+def test_summary_excludes_errors_and_counts_hard_lift_novel():
+    """The corrected numbers (review fold): errored/inconclusive out of the denominator; the go
+    count is HARD-LIFT ∧ NOVEL, not a lift bool."""
+    from retnovation.frame_gen_spike import _summary
+
+    rows = [
+        {"category": "HARD-LIFT", "novelty": "novel"},
+        {"category": "HARD-LIFT", "novelty": "convergent(~x)"},
+        {"category": "DEPRECIATION(dist+/pref-)", "novelty": None},
+        {"category": "BOUNDARY(mush-band)", "novelty": None},
+        {"category": "INCONCLUSIVE(errored: ModelError)", "novelty": None},
+    ]
+    s = _summary(rows)
+    assert s["denominator"] == 4  # the errored row is out of the denominator
+    assert s["hard_lift"] == 2 and s["hard_lift_novel"] == 1  # only the NOVEL hard-lift counts
+    assert s["depreciation"] == 1 and s["boundary"] == 1
 
 
 def test_spike_problem_set_is_wellformed():
@@ -182,4 +218,4 @@ def test_run_arm_records_error_row_on_frame_failure(tmp_path):
             raise RuntimeError("boom")
 
     rows = run_arm(["p"], Boom(), {"theta_dist": 1, "min_scenarios": 2}, out_dir=str(tmp_path))
-    assert len(rows) == 1 and rows[0]["verdict"].startswith("error")
+    assert len(rows) == 1 and rows[0]["category"].startswith("INCONCLUSIVE(errored")

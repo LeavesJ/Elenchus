@@ -371,6 +371,15 @@ class TerritoryMap(BaseModel):
     # (gated like conversion/reflection); the generic territory description is the fallback
 
 
+class ConvergenceCheck(BaseModel):
+    # Frame-novelty gate (frame-gen spike): does a generated frame's MOVE restate a curated frame?
+    # A DEFINED gate (mapper-style confidence), not a memory-dependent free-text judgment — a
+    # high-confidence map to an existing move => convergent (adds no new doctrine).
+    maps_to_existing: bool
+    nearest: str  # the curated frame_code it is nearest to, or ""
+    confidence: str  # "high" | "low"
+
+
 class ConverseTurn(BaseModel):
     # The post-landing wind-down (user-steered chapters §2a). `reply` is authored exactly as the
     # freeform wind-down was. `next_pressure` is EMPTY-BY-DEFAULT (F1) — a distilled fresh decision
