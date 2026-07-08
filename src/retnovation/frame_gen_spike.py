@@ -113,7 +113,10 @@ def _lift_rows(prob_id, prob, frames, scenarios, model, config, out_dir):
                     "mean_dist": None,
                     "valid": 0,
                     "inconclusive": None,
-                    "novelty": None,
+                    "verdict": None,  # 3-way; filled by the novelty GATE for HARD-LIFT frames
+                    "nearest": None,  # curated anchor (a novel row's nearest is NOT a partial match)
+                    "restates_nearest": None,
+                    "rationale": None,
                     "scenarios": [],
                 }
             )
@@ -132,7 +135,10 @@ def _lift_rows(prob_id, prob, frames, scenarios, model, config, out_dir):
                 "mean_dist": round(result.mean_distinguishability, 2),
                 "valid": valid,
                 "inconclusive": incon,
-                "novelty": None,  # filled by the novelty GATE for HARD-LIFT frames (run_arm)
+                "verdict": None,  # 3-way; filled by the novelty GATE for HARD-LIFT frames
+                "nearest": None,  # curated anchor (a novel row's nearest is NOT a partial match)
+                "restates_nearest": None,
+                "rationale": None,
                 "scenarios": [
                     {
                         "expressed": s.injection_expressed,  # per-scenario manipulation check
@@ -150,19 +156,30 @@ def _lift_rows(prob_id, prob, frames, scenarios, model, config, out_dir):
 
 
 def _apply_novelty_gate(rows, model):
-    """The novelty GATE (review fold): for HARD-LIFT frames only, ask the mapper whether the move
-    restates a curated frame at high confidence (convergent) — a DEFINED gate, not a founder's
-    free-text memory. Only hard-lift frames are worth the call; everything below is already out."""
+    """The novelty GATE (M2 honest 3-way): for HARD-LIFT frames, get the directional restates_nearest
+    call at SYMMETRIC confidence and DERIVE the verdict HERE — never returned by the model (L-1 seam).
+    Uncertainty AND ungated/error rows both HOLD; the ONLY path to 'novel' is
+    restates_nearest=false & confidence=high (fail-safe, L-13/L-30)."""
     curated = _curated_frames()
     for r in rows:
         if r["category"] != "HARD-LIFT":
-            continue
+            continue  # errored/inconclusive/boundary rows keep verdict=None -> never 'novel'
         c = model.frame_convergence(r["frame_detail"], curated)
-        r["novelty"] = (
-            f"convergent(~{c.nearest})"
-            if (c.maps_to_existing and c.confidence.strip().lower() == "high")
-            else "novel"
-        )
+        r["nearest"] = c.nearest
+        r["restates_nearest"] = c.restates_nearest
+        r["rationale"] = c.rationale
+        if c.confidence == "high" and c.restates_nearest:
+            r["verdict"] = "convergent"
+        elif c.confidence == "high" and not c.restates_nearest:
+            r["verdict"] = "novel"  # confidently distinct — the new positive signal
+        else:  # confidence == "low" (either direction) -> HOLD for the human adjudicator
+            r["verdict"] = "uncertain"
+    # L-28/L-1: every gated hard-lift row is scored with exactly one 3-way verdict
+    for r in rows:
+        if r["category"] == "HARD-LIFT":
+            assert r.get("verdict") in ("convergent", "novel", "uncertain"), (
+                "novelty gate left a hard-lift row unscored"
+            )
     return rows
 
 
@@ -206,17 +223,19 @@ def _is_inconclusive(row) -> bool:
 
 def _summary(rows) -> dict:
     """The corrected numbers: the denominator EXCLUDES inconclusive/errored (they measured nothing);
-    the operative signal is HARD-LIFT (the only band that separates from mush), and HARD-LIFT ∧
-    NOVEL is the real go count."""
+    the operative go count is HARD-LIFT ∧ CONFIDENTLY-NOVEL; convergent and uncertain are their own
+    buckets (L-28). Ungated rows (the mush arm never runs the gate) carry verdict=None and fall in
+    none of the three."""
     valid = [r for r in rows if not _is_inconclusive(r)]
     hard = [r for r in valid if _is_hard_lift(r)]
-    hard_novel = [r for r in hard if r.get("novelty") == "novel"]
     return {
         "total": len(rows),
         "denominator": len(valid),
         "inconclusive": len(rows) - len(valid),
         "hard_lift": len(hard),
-        "hard_lift_novel": len(hard_novel),
+        "hard_lift_novel": sum(1 for r in hard if r.get("verdict") == "novel"),
+        "hard_lift_convergent": sum(1 for r in hard if r.get("verdict") == "convergent"),
+        "hard_lift_uncertain": sum(1 for r in hard if r.get("verdict") == "uncertain"),
         "depreciation": sum(1 for r in valid if r["category"].startswith("DEPRECIATION")),
         "boundary": sum(1 for r in valid if r["category"].startswith("BOUNDARY")),
     }
@@ -231,7 +250,10 @@ def format_report(arm1, mush) -> str:
         f"- Arm 1 (generated): denominator {a1['denominator']} "
         f"(excl {a1['inconclusive']} inconclusive/errored)",
         f"    HARD-LIFT (robust, all valid scenarios lift): {a1['hard_lift']}",
-        f"    HARD-LIFT ∧ NOVEL (the real go count): {a1['hard_lift_novel']}",
+        f"    HARD-LIFT ∧ CONFIDENTLY-NOVEL (auto-go candidate): {a1['hard_lift_novel']}",
+        f"    HARD-LIFT ∧ CONVERGENT (adds no doctrine): {a1['hard_lift_convergent']}",
+        f"    HARD-LIFT ∧ UNCERTAIN (HELD for human adjudication — never auto-admitted): "
+        f"{a1['hard_lift_uncertain']}",
         f"    DEPRECIATION (dist+/pref-, Opus already does it): {a1['depreciation']}  |  "
         f"BOUNDARY (mush-band): {a1['boundary']}",
         f"- Arm 2 (mush): HARD-LIFT {m2['hard_lift']}/{m2['denominator']} (teeth: 0 = clean); "
@@ -244,14 +266,18 @@ def format_report(arm1, mush) -> str:
         if "_hdr" in r:
             lines += ["", r["_hdr"]]
             continue
-        nov = f" novelty={r['novelty']}" if r.get("novelty") else ""
+        vrd = f" verdict={r['verdict']}" if r.get("verdict") else ""
         lines += [
             "",
             f"### [{r['problem']}] {r['frame_code']} — {r['category']}"
             f" pref={r['mean_pref']} dist={r['mean_dist']} valid={r['valid']}"
-            f" inconclusive={r['inconclusive']}{nov}",
+            f" inconclusive={r['inconclusive']}{vrd}",
             f"move: {r['frame_detail']}",
         ]
+        if r.get("verdict"):
+            lines.append(
+                f"novelty: {r['verdict']} (nearest ~{r.get('nearest')}) — {r.get('rationale')}"
+            )
         for s in r["scenarios"]:
             exp = "expressed" if s["expressed"] else "NOT-EXPRESSED(inconclusive)"
             axes = f"dist={s['dist']} pref={s['pref']}" if s["expressed"] else ""

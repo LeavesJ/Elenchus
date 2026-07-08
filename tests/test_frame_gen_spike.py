@@ -57,8 +57,11 @@ def test_frame_novelty_doctrine_is_symmetric_and_names_rationale():
 
 
 def test_fakemodel_frame_convergence_default_and_scripted():
-    assert _fake().frame_convergence("d", [("c", "cd")]).maps_to_existing is False
-    scripted = ConvergenceCheck(maps_to_existing=True, nearest="c", confidence="high")
+    d = _fake().frame_convergence("d", [("c", "cd")])
+    assert d.restates_nearest is False and d.confidence == "low" and d.nearest == "c"
+    scripted = ConvergenceCheck(
+        nearest="c", restates_nearest=True, confidence="high", rationale="shared lever"
+    )
     assert _fake(convergence=scripted).frame_convergence("d", [("c", "cd")]) == scripted
 
 
@@ -117,7 +120,13 @@ class FakeSpikeModel:
         )
 
     def frame_convergence(self, frame_detail, curated):
-        return ConvergenceCheck(maps_to_existing=False, nearest="", confidence="low")
+        # low confidence -> UNCERTAIN under M2 (the L-30 fix: low no longer auto-admits novel)
+        return ConvergenceCheck(
+            nearest="choose_the_failure_default_deliberately",
+            restates_nearest=False,
+            confidence="low",
+            rationale="(fake: boundary)",
+        )
 
 
 def test_curated_exemplars_renders_the_five():
@@ -140,7 +149,7 @@ def test_run_arm_produces_lift_verdicts(tmp_path):
     assert len(rows) == 1
     assert rows[0]["frame_code"] == "good"
     assert rows[0]["category"] == "HARD-LIFT"  # all valid scenarios lift, >= min_scenarios
-    assert rows[0]["novelty"] == "novel"  # the novelty gate ran (fake maps low-confidence)
+    assert rows[0]["verdict"] == "uncertain"  # low-confidence no longer auto-admits (L-30 fix)
     assert rows[0]["scenarios"][0]["expressed"] is True  # per-scenario manipulation check surfaced
     assert (tmp_path / "screen_good.json").exists()  # persisted (L-24 resume)
 
@@ -154,25 +163,59 @@ def test_format_report_has_both_arms(tmp_path):
     )
     report = format_report(arm1, arm1)  # reuse arm1 as a stand-in mush arm for the shape test
     assert "Arm 1" in report and "Arm 2" in report and "HARD-LIFT" in report
-    assert "HARD-LIFT ∧ NOVEL" in report  # the corrected go count is surfaced
+    assert "HARD-LIFT ∧ CONFIDENTLY-NOVEL" in report
+    assert "HELD for human adjudication" in report  # the 3-way surfaces the uncertain bucket (L-28)
 
 
-def test_summary_excludes_errors_and_counts_hard_lift_novel():
-    """The corrected numbers (review fold): errored/inconclusive out of the denominator; the go
-    count is HARD-LIFT ∧ NOVEL, not a lift bool."""
+def test_summary_counts_the_three_way_and_excludes_errors():
+    """L-28: the go count is HARD-LIFT ∧ CONFIDENTLY-NOVEL; convergent and uncertain are their own
+    buckets; errored/inconclusive stay out of the denominator."""
     from retnovation.frame_gen_spike import _summary
 
     rows = [
-        {"category": "HARD-LIFT", "novelty": "novel"},
-        {"category": "HARD-LIFT", "novelty": "convergent(~x)"},
-        {"category": "DEPRECIATION(dist+/pref-)", "novelty": None},
-        {"category": "BOUNDARY(mush-band)", "novelty": None},
-        {"category": "INCONCLUSIVE(errored: ModelError)", "novelty": None},
+        {"category": "HARD-LIFT", "verdict": "novel"},
+        {"category": "HARD-LIFT", "verdict": "convergent"},
+        {"category": "HARD-LIFT", "verdict": "uncertain"},
+        {"category": "DEPRECIATION(dist+/pref-)", "verdict": None},
+        {"category": "BOUNDARY(mush-band)", "verdict": None},
+        {"category": "INCONCLUSIVE(errored: ModelError)", "verdict": None},
     ]
     s = _summary(rows)
-    assert s["denominator"] == 4  # the errored row is out of the denominator
-    assert s["hard_lift"] == 2 and s["hard_lift_novel"] == 1  # only the NOVEL hard-lift counts
+    assert s["denominator"] == 5  # only the errored row leaves the denominator
+    assert s["hard_lift"] == 3
+    assert s["hard_lift_novel"] == 1
+    assert s["hard_lift_convergent"] == 1
+    assert s["hard_lift_uncertain"] == 1
     assert s["depreciation"] == 1 and s["boundary"] == 1
+
+
+@pytest.mark.parametrize(
+    "restates,conf,expected",
+    [
+        (True, "high", "convergent"),
+        (False, "high", "novel"),
+        (True, "low", "uncertain"),
+        (False, "low", "uncertain"),  # the L-30 fix: low NEVER auto-admits novel
+    ],
+)
+def test_novelty_gate_derivation_table(restates, conf, expected):
+    """The 3-way verdict is DERIVED in code from restates_nearest × confidence (L-1 seam)."""
+    from retnovation.frame_gen_spike import _apply_novelty_gate
+
+    class _M:
+        def frame_convergence(self, frame_detail, curated):
+            return ConvergenceCheck(
+                nearest="choose_the_failure_default_deliberately",
+                restates_nearest=restates,
+                confidence=conf,
+                rationale="r",
+            )
+
+    rows = [{"category": "HARD-LIFT", "frame_detail": "d"}]
+    _apply_novelty_gate(rows, _M())
+    assert rows[0]["verdict"] == expected
+    assert rows[0]["nearest"] == "choose_the_failure_default_deliberately"
+    assert rows[0]["restates_nearest"] is restates
 
 
 def test_spike_problem_set_is_wellformed():

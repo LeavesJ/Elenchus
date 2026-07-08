@@ -200,7 +200,12 @@ class FakeModel:
         return getattr(
             self,
             "_convergence",
-            ConvergenceCheck(maps_to_existing=False, nearest="", confidence="low"),
+            ConvergenceCheck(
+                nearest=(curated[0][0] if curated else "choose_the_failure_default_deliberately"),
+                restates_nearest=False,
+                confidence="low",
+                rationale="(fake: no judgment)",
+            ),
         )
 
     def forge_scenario(self, brief, steer=""):
@@ -797,7 +802,7 @@ class AnthropicModel:
             system=system,
             messages=[{"role": "user", "content": user}],
             output_format=ConvergenceCheck,
-            **_MED_PARAMS,
+            **_PARAMS,  # HIGH effort — the symmetric call is harder than the classifiers (spec §3C)
         )
 
     def forge_scenario(self, brief: str, steer: str = "") -> str:

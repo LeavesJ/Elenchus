@@ -372,12 +372,23 @@ class TerritoryMap(BaseModel):
 
 
 class ConvergenceCheck(BaseModel):
-    # Frame-novelty gate (frame-gen spike): does a generated frame's MOVE restate a curated frame?
-    # A DEFINED gate (mapper-style confidence), not a memory-dependent free-text judgment — a
-    # high-confidence map to an existing move => convergent (adds no new doctrine).
-    maps_to_existing: bool
-    nearest: str  # the curated frame_code it is nearest to, or ""
-    confidence: str  # "high" | "low"
+    # Frame-novelty gate (frame-gen spike, M2 honest 3-way): does a generated frame's MOVE restate a
+    # curated frame? ADJUDICATOR-FACING ONLY — `nearest` is a frame_code and `rationale` names the
+    # move (the exact L-13 content); NEVER serialize to a learner surface (cf. TerritoryMap.reflection,
+    # server-side until egress-screened). The convergent/novel/uncertain VERDICT is DERIVED in
+    # frame_gen_spike, never returned by the model. `nearest` on a novel row is a reference ANCHOR,
+    # not a partial match — proximity is not convergence.
+    nearest: str  # ALWAYS one of the curated frame_codes (validated non-empty)
+    restates_nearest: bool  # symmetric directional call (replaces the overloaded maps_to_existing)
+    confidence: Literal["high", "low"]  # symmetric — sure of the directional call, either way
+    rationale: str  # the directional distinguishing judgment (EgressScreen.evidence precedent)
+
+    @field_validator("nearest")
+    @classmethod
+    def _nearest_nonempty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("nearest must name a curated frame_code (reference anchor)")
+        return v
 
 
 class ConverseTurn(BaseModel):
