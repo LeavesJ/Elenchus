@@ -182,8 +182,8 @@ def test_elevation_is_independent_of_vitality_two_axis():
 # ---- Houses are converged segments (living sitting §2f/M7, plan L5) --------------------------
 
 
-def _row(eid, ref="P1", at="t"):
-    return {"sitting_id": "s", "ref": ref, "converged_at": at, "experience_id": eid}
+def _row(eid, ref="P1", at="t", sitting_id="s"):
+    return {"sitting_id": sitting_id, "ref": ref, "converged_at": at, "experience_id": eid}
 
 
 def _two_region_view():
@@ -199,10 +199,9 @@ def _two_region_view():
     return project_terrain(state, NOW)
 
 
-def test_houses_founder_regression_two_convergences_one_region():
-    # The 2026-07-02 dogfood (§0 defect 2): two problems sharing frames -> ONE region — the
-    # region view collapsed two convergences into one felt reward. Houses mend it: one house
-    # PER converged row, both bucketed to the same region.
+def test_houses_founder_regression_two_convergences_one_saga_two_stories():
+    # The 2026-07-02 dogfood collapse is mended by HEIGHT now: two convergences in one sitting =
+    # ONE saga = one house whose height is 2 stories (not two separate houses).
     state = LearnerState(
         frames={
             "embed": _fs(Strength.strong, ["P1", "P2"]),
@@ -214,23 +213,30 @@ def test_houses_founder_regression_two_convergences_one_region():
         "anchor": (["embed", "choose_failure"], "choose_failure"),
         "stakes": (["choose_failure"], "choose_failure"),
     }
-    rows = [_row("anchor", ref="P1", at="t1"), _row("stakes", ref="P2", at="t2")]
+    rows = [
+        _row("anchor", ref="P1", at="t1"),
+        _row("stakes", ref="P2", at="t2"),
+    ]  # same sitting "s"
     houses = compose_houses(view.regions, rows, membership)
-    assert len(houses) == 2  # every convergence is a house
-    assert houses[0]["region"] == houses[1]["region"] == 0
-    # the house carries the region's EXISTING public bucket — nothing new to decode
-    assert houses[0]["bucket"] == view.learner_view()[0]["vitality"]
+    assert len(houses) == 1  # one saga -> one house
+    assert houses[0]["region"] == 0
+    assert houses[0]["bucket"] == view.learner_view()[0]["vitality"]  # region's public vitality
+    assert houses[0]["height_bucket"] == 2  # two stories (region rendered, so the gate is open)
 
 
-def test_house_order_follows_converged_rows_not_region_order():
-    # Arrival order carries time (no timestamps on the wire): a house in the DIMMER region (r1)
-    # that converged first stays first.
+def test_house_order_follows_converged_arrival_not_region_order():
+    # Arrival order carries time: a saga in the DIMMER region (r1) that converged first stays first.
+    # DISTINCT sittings -> two sagas -> two houses (one convergence each).
     view = _two_region_view()
     membership = {"dim_t": (["a_weak_a"], None), "bright_t": (["z_strong_a"], None)}
-    rows = [_row("dim_t", ref="P8", at="t1"), _row("bright_t", ref="P1", at="t2")]
+    rows = [
+        _row("dim_t", ref="P8", at="t1", sitting_id="s1"),
+        _row("bright_t", ref="P1", at="t2", sitting_id="s2"),
+    ]
     houses = compose_houses(view.regions, rows, membership)
     assert [h["region"] for h in houses] == [1, 0]
     assert houses[0]["bucket"] == 1 and houses[1]["bucket"] == 3
+    assert houses[0]["height_bucket"] == 1 and houses[1]["height_bucket"] == 1  # one story each
 
 
 def test_spanning_territory_resolves_to_its_decision_frame_region():
@@ -246,21 +252,19 @@ def test_spanning_territory_resolves_to_its_decision_frame_region():
 
 def test_curated_and_unknown_rows_fall_back_to_ref_then_region_zero():
     # Pre-living-sitting rows (experience_id='') match their REF against Region.problems; an
-    # unmatched ref (or an eid the library no longer knows) lands in region 0 — never dropped,
-    # never a crash.
+    # unmatched ref lands in region 0 — never dropped. DISTINCT sittings keep them three sagas.
     view = _two_region_view()
     rows = [
-        _row("", ref="P8", at="t1"),  # curated row: ref matches the dim region's problems
-        _row("", ref="GONE", at="t2"),  # unmatched ref -> region 0
-        _row("unknown_t", ref="P9", at="t3"),  # unknown eid -> ref matching -> dim region
+        _row("", ref="P8", at="t1", sitting_id="s1"),  # curated: ref matches the dim region
+        _row("", ref="GONE", at="t2", sitting_id="s2"),  # unmatched -> region 0
+        _row("unknown_t", ref="P9", at="t3", sitting_id="s3"),  # unknown eid -> ref -> dim region
     ]
     assert [h["region"] for h in compose_houses(view.regions, rows, {})] == [1, 0, 1]
 
 
 def test_first_convergence_house_sits_in_a_seed_region_with_no_bucket():
-    # One forged convergence: the world grain gives every banked frame the SAME single problem,
-    # so the region is still a seed — the house renders anyway (the reward is the house, not
-    # the region's ignition), carrying the seed's public bucket: None.
+    # One forged convergence in a still-seed region: the house renders anyway, carrying the seed's
+    # public bucket (None) and a floored height_bucket (1 — the gate is closed on a seed).
     state = LearnerState(
         frames={
             "embed": _fs(Strength.forming, ["G1"]),
@@ -271,20 +275,19 @@ def test_first_convergence_house_sits_in_a_seed_region_with_no_bucket():
     assert view.regions[0].render is RegionRender.seed
     rows = [_row("anchor", ref="G1")]
     houses = compose_houses(view.regions, rows, {"anchor": (["embed", "choose_failure"], None)})
-    assert houses == [{"region": 0, "bucket": None}]
+    assert houses == [{"region": 0, "bucket": None, "height_bucket": 1}]
 
 
 def test_houses_with_no_regions_default_safely():
-    # A converged row over an empty projection (e.g. rows imported from another engine db):
-    # region 0, bucket None — the composition never crashes.
-    assert compose_houses([], [_row("", ref="veldra:x")], {}) == [{"region": 0, "bucket": None}]
+    # A converged row over an empty projection: region 0, bucket None, height 1 — never crashes.
+    assert compose_houses([], [_row("", ref="veldra:x")], {}) == [
+        {"region": 0, "bucket": None, "height_bucket": 1}
+    ]
 
 
 def test_houses_payload_is_rename_invariant():
-    # Extends the rename-invariance guard (mirrors test_learner_view_is_non_invertible_under_
-    # frame_rename) to the houses payload: renaming a frame consistently across the state AND
-    # the territory membership leaves the houses byte-identical — the wire carries region
-    # ordinals + public buckets only, never frame identity.
+    # Renaming a frame consistently leaves the houses byte-identical — the wire carries region
+    # ordinals + public buckets only, never frame identity. (height_bucket is a count, rename-invariant.)
     state = LearnerState(
         frames={
             "embed": _fs(Strength.strong, ["P1", "P2"]),
@@ -297,7 +300,7 @@ def test_houses_payload_is_rename_invariant():
             "aaa_renamed": _fs(Strength.forming, ["P1"]),
         }
     )
-    rows = [_row("anchor", ref="P1", at="t1"), _row("anchor", ref="P2", at="t2")]
+    rows = [_row("anchor", ref="P1", at="t1"), _row("anchor", ref="P2", at="t2")]  # one sitting
     h1 = compose_houses(
         project_terrain(state, NOW).regions,
         rows,
@@ -309,10 +312,43 @@ def test_houses_payload_is_rename_invariant():
         {"anchor": (["zzz_other", "aaa_renamed"], "aaa_renamed")},
     )
     assert h1 == h2  # rename invariant -> non-invertible wire
+    assert len(h1) == 1  # one sitting -> one saga -> one house (two stories)
     for h in h1:
-        assert set(h) == {"region", "bucket"}  # exactly the L-13-safe keys
+        assert set(h) == {"region", "bucket", "height_bucket"}  # exactly the L-13-safe keys
         assert isinstance(h["region"], int)
-        assert h["bucket"] in (None, 1, 2, 3)  # the region's coarse public bucket, nothing finer
+        assert h["bucket"] in (None, 1, 2, 3)
+        assert h["height_bucket"] in (1, 2, 3)
+
+
+def test_cross_sitting_convergences_are_distinct_sagas_not_one_pile():
+    # THE "6 houses for 3 convergences" REGRESSION: six convergences across three sittings (2+2+2)
+    # must render as THREE houses (three sagas), each two stories — not six houses. This is the
+    # dogfood bug, fixed by construction. (L-25: earlier tests never crossed sittings.)
+    view = _two_region_view()
+    membership = {"dim_t": (["a_weak_a"], None)}
+    rows = []
+    for s in ("s1", "s2", "s3"):
+        rows.append(_row("dim_t", ref="P8", at=f"{s}a", sitting_id=s))
+        rows.append(_row("dim_t", ref="P8", at=f"{s}b", sitting_id=s))
+    houses = compose_houses(view.regions, rows, membership)
+    assert len(houses) == 3  # three sagas, NOT six houses
+    assert all(h["region"] == 1 for h in houses)
+    assert all(h["height_bucket"] == 2 for h in houses)  # each saga is two stories
+
+
+def test_saga_region_follows_its_most_recent_convergence():
+    # A saga spanning territories/regions across chapters takes the region of its MOST-RECENT
+    # converged row (the last in arrival order), deterministically.
+    view = _two_region_view()
+    membership = {"dim_t": (["a_weak_a"], None), "bright_t": (["z_strong_a"], None)}
+    rows = [  # same sitting: chapter 1 in the dim region, chapter 2 (latest) in the bright region
+        _row("dim_t", ref="P8", at="t1", sitting_id="s1"),
+        _row("bright_t", ref="P1", at="t2", sitting_id="s1"),
+    ]
+    houses = compose_houses(view.regions, rows, membership)
+    assert len(houses) == 1
+    assert houses[0]["region"] == 0  # the bright region (r0) — the most-recent chapter's region
+    assert houses[0]["height_bucket"] == 2
 
 
 def test_elevation_is_rename_invariant():

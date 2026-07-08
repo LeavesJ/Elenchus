@@ -76,32 +76,38 @@ def compose_houses(
     rows: list[dict],
     territory_frames: dict[str, tuple[list[str], str | None]],
 ) -> list[dict]:
-    """Houses are converged segments (living sitting §2f/M7/D2): one house per `web_converged`
-    row, cumulative across sittings (the village accumulates exactly as the terrain's own engine
-    state does), in the rows' converged_at order — a public time signal; ORDER carries time, no
-    timestamps ride the wire.
+    """Houses are SAGAS (a saga = one sitting's forged world). One house per distinct `sitting_id`,
+    in FIRST-ARRIVAL order (rows arrive `converged_at`-ordered from `converged_log`), so a saga's
+    position is stable as it grows. A saga's HEIGHT = its convergence count; its REGION = its
+    MOST-RECENTLY-converged row's region (the last row in arrival order).
 
-    Wire shape per house: ``{"region": <ordinal into the ORDERED regions — the same positional
-    ids the learner_view wire assigns>, "bucket": <that region's existing public vitality
-    bucket>}`` — no refs, no codes (L-13: houses are positional).
+    Wire shape per house: ``{"region": <ordinal into the ORDERED regions>, "bucket": <that region's
+    public vitality bucket>, "height_bucket": <coarse 1|2|3 saga-height tier>}`` — no refs, no codes,
+    no sitting_id, no raw count (L-13: houses are positional; the raw height stays server-side and is
+    used here only to derive the bucket). Grouping is by `sitting_id` ALONE — a sitting is one saga
+    regardless of what mix of curated/`gen:` refs its rows carry.
 
-    Region membership: the row's territory (`experience_id`) -> its rubric's frame codes (from
-    `territory_frames`) -> the region containing them. A territory whose frames span regions
-    resolves to the region holding its decision_frame; absent a DF among the holders, the lowest
-    ordinal wins (deterministic). Rows without a territory (pre-living-sitting curated
-    convergences, experience_id='') fall back to the region whose `problems` hold the row's ref;
-    a row nothing matches lands in region 0 — never dropped, never a crash.
+    height_bucket is FLOORED to 1 on a seed region (`bucket is None`) — the same non-invertibility
+    gate the region vitality/elevation axes clear (`region_clears_guard`).
 
-    Honest residual (review D11): per-region converged COUNTS and problem-to-region grouping
-    become public — justified as user-known (she lived each convergence; the close narrates
-    them) and as the intended reward. Codes stay protected: membership is computed from frame
-    SETS, so a consistent content rename leaves the payload byte-identical; tied-region order
-    remains the accepted coarse-shape residual (§6)."""
-    houses: list[dict] = []
+    Region membership per representative row: the row's territory (`experience_id`) -> its rubric's
+    frame codes (from `territory_frames`) -> the region containing them; a territory spanning regions
+    resolves to its decision_frame's region, else the lowest ordinal. Rows without a territory
+    (curated `experience_id=''`) fall back to the region whose `problems` hold the row's ref; a row
+    nothing matches lands in region 0 — never dropped, never a crash."""
+    groups: dict[str, list[dict]] = {}
     for row in rows:
-        idx = _house_region(regions, row, territory_frames)
+        groups.setdefault(row["sitting_id"], []).append(row)
+    houses: list[dict] = []
+    for (
+        saga_rows
+    ) in groups.values():  # insertion order == first-arrival order (rows are time-ordered)
+        idx = _house_region(
+            regions, saga_rows[-1], territory_frames
+        )  # the most-recent row's region
         bucket = _vitality_bucket(regions[idx].vitality) if regions else None
-        houses.append({"region": idx, "bucket": bucket})
+        height_bucket = _house_height_bucket(len(saga_rows)) if bucket is not None else 1
+        houses.append({"region": idx, "bucket": bucket, "height_bucket": height_bucket})
     return houses
 
 

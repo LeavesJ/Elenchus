@@ -598,10 +598,10 @@ def test_front_door_free_text_flow_over_http(tmp_path, make_fake):
     assert "gen:" not in _json.dumps(blobs)  # L-13: the instance/world grain stays server-side
 
 
-def test_close_payload_counts_two_houses_for_two_convergences(tmp_path, make_fake):
-    """The founder regression (spec §0 defect 2, review P12): two convergences in one sitting →
-    the close payload carries TWO houses — never collapsed into one region node. Each house is
-    ordinal-only ({region, bucket}); no gen: ref, no frame code anywhere in the payload."""
+def test_close_payload_shows_one_saga_for_two_same_sitting_convergences(tmp_path, make_fake):
+    """The founder regression (spec §0 defect 2, review P12): two convergences in ONE sitting =
+    ONE house (a saga; its height is the story count) — never two houses. Each house is
+    ordinal-only ({region, bucket, height_bucket}); no gen: ref, no frame code in the payload."""
     import json as _json
 
     app = create_app(db_path=str(tmp_path / "h2.db"), model_factory=_world_factory(make_fake))
@@ -617,11 +617,14 @@ def test_close_payload_counts_two_houses_for_two_convergences(tmp_path, make_fak
     cl = client.post("/api/session/s/close").json()
     assert cl["kind"] == "close"
     houses = cl["houses"]
-    assert len(houses) == 2  # geometry: two houses raised (the copy is pinned in the shell test)
-    for h in houses:
-        assert set(h) == {"region", "bucket"}  # ordinal-only wire (L-13)
-        assert isinstance(h["region"], int) and 0 <= h["region"] < len(cl["terrain"])
-        assert h["bucket"] in (None, 1, 2, 3)
+    assert (
+        len(houses) == 1
+    )  # two convergences in one sitting = ONE saga (not two houses) — the bug fix
+    h = houses[0]
+    assert set(h) == {"region", "bucket", "height_bucket"}  # additive L-13-safe wire
+    assert isinstance(h["region"], int) and 0 <= h["region"] < len(cl["terrain"])
+    assert h["bucket"] in (None, 1, 2, 3)
+    assert h["height_bucket"] in (1, 2, 3)
     blob = _json.dumps(cl)
     assert "gen:" not in blob and "veldra:" not in blob
     assert "embed_credentials_as_a_list" not in blob
@@ -658,9 +661,10 @@ def test_plateau_adds_no_house(tmp_path, make_fake):
     assert len(cl["houses"]) == 1
 
 
-def test_same_territory_reserve_convergence_adds_another_house(tmp_path, make_fake):
-    """An informed re-serve (work_anyway) convergence on an ALREADY-worked territory adds a NEW
-    house — houses are per-convergence, never per-territory-deduped."""
+def test_reserve_convergence_grows_a_saga_not_a_new_house(tmp_path, make_fake):
+    """An informed re-serve (work_anyway) convergence on an ALREADY-worked territory in the SAME
+    sitting adds a STORY to that saga's house, never a new house; a separate sitting is a separate
+    house."""
     from datetime import datetime, timedelta, timezone
 
     from retnovation.web.sitting_store import SittingStore
@@ -683,19 +687,19 @@ def test_same_territory_reserve_convergence_adds_another_house(tmp_path, make_fa
     assert client.post("/api/session").json()["kind"] == "frontdoor"
     r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
     assert r["kind"] == "say"
-    _drive_to_done(client)  # the fifth territory converges: 4 prior rows + 1 = 5 houses so far
+    _drive_to_done(client)  # the fifth territory converges: story 1 of the live sitting's saga
     rv = client.post("/api/session/s/continue", json={}).json()
     assert rv["kind"] == "reserve"
     r2 = client.post("/api/session/s/continue", json={"work_anyway": True}).json()
     assert r2["kind"] == "say"
-    _drive_to_done(client)  # re-serve convergence: SAME territory as a prior row -> a 6th house
+    _drive_to_done(client)  # re-serve convergence: another STORY on the SAME saga, not a new house
 
     cl = client.post("/api/session/s/close").json()
     assert cl["kind"] == "close"
-    assert len(cl["houses"]) == 6
+    assert len(cl["houses"]) == 2  # prior sitting (4 stories) + live sitting (2 stories) = 2 sagas
 
 
-def test_house_order_is_stable_across_a_restart(tmp_path, make_fake):
+def test_houses_are_stable_across_a_restart(tmp_path, make_fake):
     """Ordering by converged_at is append-stable: a new registry over the same db serves the
     SAME houses in the SAME order the first process froze at the landing."""
     from retnovation.web.sitting_store import SittingStore
@@ -713,7 +717,7 @@ def test_house_order_is_stable_across_a_restart(tmp_path, make_fake):
 
     store = SittingStore(db)
     frozen = store.read_state(store.live_sitting()["id"])["record"]["houses"]
-    assert len(frozen) == 2
+    assert len(frozen) == 1  # one saga (two stories)
 
     app2 = create_app(db_path=db, model_factory=_world_factory(make_fake))  # the restart
     c2 = TestClient(app2)
@@ -746,7 +750,7 @@ def test_preexisting_curated_rows_do_not_crash_the_house_composition(tmp_path, m
     assert cl["kind"] == "close"
     assert len(cl["houses"]) == 2  # the old curated row + the new convergence
     for h in cl["houses"]:
-        assert set(h) == {"region", "bucket"}
+        assert set(h) == {"region", "bucket", "height_bucket"}
 
 
 def test_shell_close_copy_counts_houses():
