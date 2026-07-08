@@ -224,8 +224,10 @@ def _is_inconclusive(row) -> bool:
 def _summary(rows) -> dict:
     """The corrected numbers: the denominator EXCLUDES inconclusive/errored (they measured nothing);
     the operative go count is HARD-LIFT ∧ CONFIDENTLY-NOVEL; convergent and uncertain are their own
-    buckets (L-28). Ungated rows (the mush arm never runs the gate) carry verdict=None and fall in
-    none of the three."""
+    buckets (L-28). Ungated rows (the mush arm never runs the gate) carry verdict=None: the mush arm
+    is intentionally ungated, so `hard_lift_unscored` is the L-28 no-hidden-bucket guard — in a GATED
+    arm it is 0 (the per-row assert in `_apply_novelty_gate` guarantees it), and any nonzero value in
+    Arm 1 would surface a gating drift instead of hiding it."""
     valid = [r for r in rows if not _is_inconclusive(r)]
     hard = [r for r in valid if _is_hard_lift(r)]
     return {
@@ -236,6 +238,9 @@ def _summary(rows) -> dict:
         "hard_lift_novel": sum(1 for r in hard if r.get("verdict") == "novel"),
         "hard_lift_convergent": sum(1 for r in hard if r.get("verdict") == "convergent"),
         "hard_lift_uncertain": sum(1 for r in hard if r.get("verdict") == "uncertain"),
+        "hard_lift_unscored": sum(
+            1 for r in hard if r.get("verdict") not in ("novel", "convergent", "uncertain")
+        ),
         "depreciation": sum(1 for r in valid if r["category"].startswith("DEPRECIATION")),
         "boundary": sum(1 for r in valid if r["category"].startswith("BOUNDARY")),
     }
@@ -259,6 +264,12 @@ def format_report(arm1, mush) -> str:
         f"- Arm 2 (mush): HARD-LIFT {m2['hard_lift']}/{m2['denominator']} (teeth: 0 = clean); "
         f"BOUNDARY {m2['boundary']} + DEPRECIATION {m2['depreciation']} — the SAME bands as Arm 1's "
         "non-hard-lift, i.e. the gate only separates at the hard-lift cluster.",
+    ]
+    if a1["hard_lift_unscored"]:
+        lines.append(
+            f"    HARD-LIFT ∧ UNSCORED (not gated — a gating drift for Arm 1): {a1['hard_lift_unscored']}"
+        )
+    lines += [
         "",
         "## Arm 1 — generated frames",
     ]

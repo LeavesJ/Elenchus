@@ -183,7 +183,9 @@ def test_live_novelty_over_admit_guard():
 @pytest.mark.skipif(not _HAS_KEY, reason="no Anthropic credential in env")
 def test_live_novelty_convergent_and_boundary():
     """CONVERGENT: a verbatim paraphrase of a curated move restates it (true & high). BOUNDARY:
-    design_for_the_teardown half-restates embed_credentials -> expect confidence=low (recorded)."""
+    design_for_the_teardown half-restates embed_credentials -> assert not-confident-novel (a
+    low-confidence boundary OR a convergent call both pass; low is the recorded expectation, not a
+    hard assert)."""
     from retnovation.frame_gen_spike import _curated_frames
 
     m, curated = AnthropicModel(), _curated_frames()

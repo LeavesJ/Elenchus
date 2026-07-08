@@ -51,7 +51,7 @@ def test_frame_novelty_doctrine_is_symmetric_and_names_rationale():
     # the directional rationale field
     assert "rationale" in p
     # the necessity bar + whole-list guard (founder decision 1)
-    assert "necessary" in p and "whole" in p
+    assert "necessary" in p and "whole curated list" in p
     # the mandatory 3-field return contract + the uncertain branch
     assert "restates_nearest" in p and "nearest" in p
 
@@ -187,6 +187,31 @@ def test_summary_counts_the_three_way_and_excludes_errors():
     assert s["hard_lift_convergent"] == 1
     assert s["hard_lift_uncertain"] == 1
     assert s["depreciation"] == 1 and s["boundary"] == 1
+
+
+def test_summary_surfaces_unscored_hard_lift_rows_no_silent_drop():
+    """L-28 partition seam: a HARD-LIFT row that never ran the gate (verdict=None — e.g. the ungated
+    mush arm, or a hand-built/resumed row) must be COUNTED in hard_lift_unscored, never silently
+    dropped from all three buckets. novel+convergent+uncertain+unscored must total hard_lift."""
+    from retnovation.frame_gen_spike import _summary
+
+    rows = [
+        {"category": "HARD-LIFT", "verdict": "novel"},
+        {"category": "HARD-LIFT", "verdict": "convergent"},
+        {"category": "HARD-LIFT", "verdict": "uncertain"},
+        {"category": "HARD-LIFT", "verdict": None},  # ungated (mush-style) — must NOT vanish
+    ]
+    s = _summary(rows)
+    assert s["hard_lift"] == 4
+    assert s["hard_lift_unscored"] == 1  # the verdict=None row is surfaced, not dropped
+    # total partition holds: nothing silently lost
+    assert (
+        s["hard_lift_novel"]
+        + s["hard_lift_convergent"]
+        + s["hard_lift_uncertain"]
+        + s["hard_lift_unscored"]
+        == s["hard_lift"]
+    )
 
 
 @pytest.mark.parametrize(
