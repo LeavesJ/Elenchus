@@ -2914,3 +2914,21 @@ def test_distilled_pressure_never_reaches_the_projected_wire(tmp_path, make_fake
     assert "DISTILLED_SECRET_CLAUSE" not in str(wire)  # the distillation never projects (L-13)
     ctag, cdata = reg.continue_session("s1")
     assert "DISTILLED_SECRET_CLAUSE" not in str(_emit(reg, ctag, cdata))  # nor the continue wire
+
+
+def test_returning_line_counts_distinct_sagas_not_rows(tmp_path, make_fake):
+    """The 'Your world so far' line must count SAGAS (distinct sitting_ids), not raw convergence
+    rows — else a saga of N chapters inflates it (the second '6 houses' count-bug site)."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "saga_count.db")
+    store = SittingStore(db)
+    wall = datetime.now(timezone.utc)
+    # two sagas: sitting A converged twice, sitting B once -> 2 houses, NOT 3 rows
+    store.log_converged("A", "gen:A:1", wall - timedelta(hours=3), "eid1")
+    store.log_converged("A", "gen:A:2", wall - timedelta(hours=2), "eid1")
+    store.log_converged("B", "gen:B:1", wall - timedelta(hours=1), "eid2")
+    reg = SessionRegistry(db, model_factory=make_fake)
+    tag, data = reg.resume_or_start("single")
+    assert "2 houses" in data["returning"]  # 2 sagas, NOT "3 houses"
+    assert "3 houses" not in data["returning"]

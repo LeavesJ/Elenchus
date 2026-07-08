@@ -745,7 +745,7 @@ class SessionRegistry:
                 # nothing rendered → houses only; a seed-stage world is not "alight".
                 rows = self._store.converged_log()
                 if rows:
-                    n = len(rows)
+                    n = len({r["sitting_id"] for r in rows})  # distinct SAGAS, not raw rows
                     houses = "house" if n == 1 else "houses"
                     line = f"Your world so far: {n} {houses}."
                     terrain = self._store.latest_terrain()
@@ -1532,8 +1532,9 @@ class SessionRegistry:
     # ---- Living-sitting helpers (spec §2c/§2e/§2f): durable-history readers ------------------
 
     def _compose_houses(self, state, now: datetime) -> list[dict]:
-        """The cumulative village (§2f, L5): one house per converged row — every sitting's, the
-        village is as cumulative as the terrain's own engine state — with region membership
+        """The cumulative village (§2f, L5): one house per SITTING (a saga = one sitting's forged
+        world; height = its convergence count) — every sitting's, the village is as cumulative as
+        the terrain's own engine state — with region membership
         computed against the SAME projection that freezes the record's terrain, so house region
         ordinals and the terrain wire can never disagree. Territory membership comes from the
         L-1 content library (experience_id -> rubric frame codes + decision_frame); an unreadable
