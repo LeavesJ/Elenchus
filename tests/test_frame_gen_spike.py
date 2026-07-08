@@ -41,6 +41,21 @@ def test_frame_novelty_doctrine_judges_the_move_not_the_topic():
     assert "move" in p and ("restate" in p or "same move" in p)
 
 
+def test_frame_novelty_doctrine_is_symmetric_and_names_rationale():
+    """M2 fold 1: the prompt must make confidence earnable in BOTH directions and require a
+    rationale + a whole-list necessity bar — else the model keeps emitting the one-sided low (L-30)."""
+    p = load_spike_prompt("frame_novelty").lower()
+    # symmetric confidence — high reachable on a NON-restatement too
+    assert "either direction" in p or "either way" in p
+    assert "different is a high-confidence answer" in p
+    # the directional rationale field
+    assert "rationale" in p
+    # the necessity bar + whole-list guard (founder decision 1)
+    assert "necessary" in p and "whole" in p
+    # the mandatory 3-field return contract + the uncertain branch
+    assert "restates_nearest" in p and "nearest" in p
+
+
 def test_fakemodel_frame_convergence_default_and_scripted():
     assert _fake().frame_convergence("d", [("c", "cd")]).maps_to_existing is False
     scripted = ConvergenceCheck(maps_to_existing=True, nearest="c", confidence="high")
