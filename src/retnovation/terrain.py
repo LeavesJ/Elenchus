@@ -105,6 +105,18 @@ def compose_houses(
     return houses
 
 
+def _house_height_bucket(stories: int) -> int:
+    """A saga-height bucket (1 story / a few / many). DIFFERS from `_elevation_bucket` (which buckets
+    region breadth-count with `<=2 -> 1`): a saga's FIRST growth (1 -> 2 stories) must cross a tier so
+    the "watch my saga grow" payoff registers, so 1 story is its OWN floor tier. Coarse 3-tier only —
+    the raw count stays server-side (L-13); only this bucket rides the wire."""
+    if stories <= 1:
+        return 1
+    if stories <= 4:
+        return 2
+    return 3
+
+
 def _house_region(
     regions: list[Region], row: dict, territory_frames: dict[str, tuple[list[str], str | None]]
 ) -> int:

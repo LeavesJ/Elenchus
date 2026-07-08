@@ -332,3 +332,15 @@ def test_elevation_is_rename_invariant():
     assert (
         project_terrain(state, NOW).learner_view() == project_terrain(renamed, NOW).learner_view()
     )
+
+
+def test_house_height_bucket_puts_one_story_on_its_own_floor_tier():
+    from retnovation.terrain import _house_height_bucket
+
+    # 1 story = tier 1; "a few" (2-4) = tier 2; "many" (5+) = tier 3. The 1->2 growth MUST cross a
+    # tier (unlike _elevation_bucket's <=2 -> 1) so the "watch my saga grow" payoff registers.
+    assert _house_height_bucket(1) == 1
+    assert _house_height_bucket(2) == 2
+    assert _house_height_bucket(4) == 2
+    assert _house_height_bucket(5) == 3
+    assert _house_height_bucket(20) == 3
