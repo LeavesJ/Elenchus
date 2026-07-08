@@ -272,3 +272,42 @@ def test_latest_terrain_quotes_the_most_recent_landed_village(tmp_path):
     st.append_turn(sid2, "you", {"text": "bump freshness"}, NOW + timedelta(hours=2))
     assert st.latest_terrain() == [{"render": "rendered"}, {"render": "rendered"}]
     assert SittingStore(":memory:").latest_terrain() is None
+
+
+def test_compose_houses_over_a_real_store_groups_mixed_ontology_sittings(tmp_path):
+    """Retrofit gate (spec §7/§9): over a REAL SittingStore, compose_houses must yield ONE house per
+    SITTING — (a) a sitting mixing a curated ref and a forged gen: ref stays ONE house (never split by
+    ref-prefix), (b) a multi-chapter forged saga is ONE house, (c) a legacy curated-only sitting is ONE
+    house — in first-arrival order, NEVER one house per row (the '6 for 3' bug)."""
+    from datetime import datetime, timedelta, timezone
+
+    from retnovation.terrain import compose_houses, project_terrain
+    from retnovation.types import LearnerState
+    from retnovation.web.sitting_store import SittingStore
+
+    store = SittingStore(str(tmp_path / "retrofit.db"))
+    wall = datetime.now(timezone.utc)
+    # sitting "mix": curated + forged rows in ONE sitting -> must stay ONE house (not split)
+    store.log_converged(
+        "mix", "veldra:license_fork_risk", wall - timedelta(hours=6), "license_continuity"
+    )
+    store.log_converged("mix", "gen:mix:1", wall - timedelta(hours=5), "license_continuity")
+    # sitting "saga": three forged chapters -> ONE house
+    store.log_converged("saga", "gen:saga:1", wall - timedelta(hours=4), "irreversible_anchor")
+    store.log_converged("saga", "gen:saga:2", wall - timedelta(hours=3), "irreversible_anchor")
+    store.log_converged("saga", "gen:saga:3", wall - timedelta(hours=2), "irreversible_anchor")
+    # sitting "legacy": curated-only -> ONE house
+    store.log_converged(
+        "legacy", "veldra:proof_before_promise", wall - timedelta(hours=1), "proof_before_promise"
+    )
+
+    rows = store.converged_log()
+    assert len(rows) == 6  # six convergence rows across three sittings
+    houses = compose_houses(project_terrain(LearnerState(frames={}), wall).regions, rows, {})
+    assert (
+        len(houses) == 3
+    )  # THREE sagas -> THREE houses (NOT six) — mixed sitting NOT split, saga NOT fragmented
+    for h in houses:
+        assert set(h) == {"region", "bucket", "height_bucket"}
+    # empty projection -> every house lands region 0 with bucket None (seed) -> height floored to 1
+    assert all(h["height_bucket"] == 1 for h in houses)
