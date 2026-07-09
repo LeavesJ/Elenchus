@@ -38,6 +38,10 @@ class _Cont(BaseModel):
     work_anyway: bool = False  # the informed re-serve's first choice (living sitting §2c)
 
 
+class _Enter(BaseModel):
+    house_index: int
+
+
 def _default_model():
     from ..model import AnthropicModel
 
@@ -193,5 +197,12 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
     @app.post("/api/session/{sid}/close")
     def close_session(sid: str):
         return _emit(reg, *reg.close(_SID))
+
+    @app.post("/api/session/{sid}/enter")
+    def enter(sid: str, body: _Enter) -> dict:
+        # Re-entry (world-as-homebase §5): the click sends an INDEX; the server maps it to the
+        # saga (saga_order) — no sitting id ever rides the wire (L-13). Every outcome uses an
+        # existing _emit branch (nudge/resume/say/done/error).
+        return _emit(reg, *reg.enter_saga(_SID, body.house_index))
 
     return app

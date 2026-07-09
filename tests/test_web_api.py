@@ -555,6 +555,16 @@ def _world_factory(make_fake):
     return factory
 
 
+def _world_client(tmp_path, make_fake):
+    """The file's world-factory TestClient builder — extracted from
+    test_front_door_free_text_flow_over_http's setup (the frontdoor-capable model wired to a
+    fresh db + TestClient), shared by any HTTP test that needs the living-sitting/world path.
+    Not the bare-registry pattern used by the load-sweep test (no client there)."""
+    db = str(tmp_path / "world.db")
+    app = create_app(db_path=db, model_factory=_world_factory(make_fake))
+    return TestClient(app)
+
+
 def test_front_door_free_text_flow_over_http(tmp_path, make_fake):
     """The living sitting end-to-end at the HTTP layer: frontdoor kind → free text → bridge on
     the opening say → done with the subtitled next_title → same-world continue → sitting-story
@@ -907,3 +917,33 @@ def test_emit_say_without_a_label_is_unchanged():
 
     out = _emit(None, "say", {"text": "reply"})
     assert out == {"kind": "say", "text": "reply"}
+
+
+def test_enter_route_continues_a_closed_saga_after_a_real_page_load(tmp_path, make_fake):
+    import json
+
+    client = _world_client(tmp_path, make_fake)  # the file's world-factory TestClient builder
+    client.post("/api/session")  # the session must exist before _drive_to_done's first /say
+    _drive_to_done(client)
+    client.post("/api/session/single/close")
+    # the PRODUCTION shape: a page load (which creates the virgin front-door sitting) precedes
+    # every click — this exercises the virgin-close deviation over HTTP
+    r = client.post("/api/session").json()
+    assert r["kind"] == "frontdoor" and r.get("houses")
+    r = client.post("/api/session/single/enter", json={"house_index": 0}).json()
+    assert r["kind"] in ("say", "frontdoor"), r
+    blob = json.dumps(r)
+    assert "gen:" not in blob and "veldra:" not in blob
+
+
+def test_enter_route_bounds_and_types(tmp_path, make_fake):
+    client = _world_client(tmp_path, make_fake)
+    client.post("/api/session")
+    _drive_to_done(client)
+    client.post("/api/session/single/close")
+    r = client.post("/api/session/single/enter", json={"house_index": -1}).json()
+    assert r["kind"] == "nudge"
+    r = client.post("/api/session/single/enter", json={"house_index": 99}).json()
+    assert r["kind"] == "nudge"
+    resp = client.post("/api/session/single/enter", json={"house_index": "zero"})
+    assert resp.status_code == 422  # pydantic holds the type boundary
