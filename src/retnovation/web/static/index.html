@@ -223,6 +223,7 @@ function renderResume(r){
   mode = r.mode==='converse' ? 'converse' : 'engine';
   nextTitle = r.next_title || ''; nextDesc = r.next_desc || ''; nextKind = r.next_kind || 'pressure';
   if(r.frontdoor){ // a sitting parked at the front door resumes with its ask + small doors
+    renderHomebase(r.terrain, r.houses);  // Phase 2 T7: the world shows on reload-to-front-door too
     bubble('vera', r.frontdoor.text);
     muted('or start from one of these');
     renderMenu(r.frontdoor.menu.problems, r.frontdoor.menu.nonce, true);

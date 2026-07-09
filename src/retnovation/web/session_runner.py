@@ -883,6 +883,15 @@ class SessionRegistry:
             ):
                 turns.pop()
             payload["frontdoor"] = frontdoor_block
+            # Phase 2 T7 (Decision 3): a resume PARKED at the front door is a landing too — carry
+            # the frozen cumulative homebase so the world is the first screen on reload, not only on
+            # a fresh cold start. Same latest_homebase() bytes as the frontdoor path (L-13-safe); the
+            # resume _emit branch spreads **data so terrain/houses reach the wire. A mid-conversation
+            # resume (frontdoor_block is None) still defers the homebase (founder scope).
+            home = self._store.latest_homebase()
+            if home["terrain"]:
+                payload["terrain"] = home["terrain"]
+                payload["houses"] = home["houses"]
         return ("resume", payload)
 
     def _rebuild(self, session_id: str) -> dict | None:

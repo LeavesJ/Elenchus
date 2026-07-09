@@ -2973,3 +2973,37 @@ def test_frontdoor_load_payload_omits_homebase_on_first_visit(tmp_path, make_fak
     wire = _emit(reg, tag, data)
     assert wire["kind"] == "frontdoor"
     assert "terrain" not in wire and "houses" not in wire
+
+
+def test_resume_parked_at_frontdoor_carries_the_homebase(tmp_path, make_fake):
+    """Phase 2 T7 (Decision 3 on reload): a resume PARKED at the front door is a landing too — it
+    must carry the frozen homebase so the world shows on reload, not only on a fresh cold start.
+    The first resume_or_start creates the parked live sitting (frontdoor); the second hits _resume."""
+    import json
+    from retnovation.web.sitting_store import SittingStore
+    from retnovation.web.session_runner import SessionRegistry
+    from retnovation.web.app import _emit
+
+    db = str(tmp_path / "t7.db")
+    store = SittingStore(db)
+    sit = store.create_sitting(NOW)
+    store.log_converged(sit, "gen:x:1", NOW, "eid1")
+    terrain = [{"region_id": "r0", "render": "rendered", "vitality": 2, "elevation": 1}]
+    houses = [{"region": 0, "bucket": 2, "height_bucket": 1}]
+    store.write_state(sit, record={"terrain": terrain, "houses": houses})
+    store.close_sitting(sit)  # a PRIOR landed saga (the cumulative world so far)
+    reg = SessionRegistry(db, model_factory=make_fake)
+    reg.resume_or_start("single")  # 1st: frontdoor — CREATES the parked live sitting
+    tag, data = reg.resume_or_start("single")  # 2nd: _resume, parked at the front door
+    assert tag == "resume"
+    assert data.get("frontdoor")  # parked at the front door (not mid-conversation)
+    assert data.get("terrain") == terrain
+    assert data.get("houses") == houses
+    wire = _emit(reg, tag, data)  # resume branch spreads **data -> terrain/houses on the wire
+    assert wire["kind"] == "resume"
+    assert wire["terrain"] == terrain and wire["houses"] == houses
+    # L-13 on the resume passthrough: house keys safe, no ref/id/sitting_id token
+    for h in wire["houses"]:
+        assert set(h) == {"region", "bucket", "height_bucket"}
+    blob = json.dumps(wire["terrain"]) + json.dumps(wire["houses"])
+    assert "gen:" not in blob and "veldra:" not in blob and "eid1" not in blob and sit not in blob
