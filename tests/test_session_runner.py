@@ -1007,6 +1007,8 @@ def test_reopen_seam_on_reentering_the_interrupted_door(tmp_path, make_fake):
 from retnovation.content_loader import load_territory_text  # noqa: E402
 from retnovation.web import voice as _voice  # noqa: E402
 from retnovation.web.session_runner import (  # noqa: E402
+    _ENTER_BUSY_NUDGE,
+    _ENTER_REOPEN_HONESTY,
     _FRONTDOOR_ASK,
     _HONEST_FIT,
     _RESERVE_COPY,
@@ -3218,3 +3220,203 @@ def test_enter_saga_reopened_sitting_survives_the_idle_reaper_on_the_inflight_pa
     tag, data = reg3.resume_or_start("s1")
     assert tag == "resume"
     assert store.live_sitting() is not None and store.live_sitting()["id"] == sit
+
+
+# ---- enter_saga: fault honesty (§5e), the L-3 full-reset regression, the enter wire-sweep -----
+
+
+def test_enter_saga_interrupted_saga_resumes_the_unfinished_door_honestly(tmp_path, make_fake):
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg)  # chapter 1 converges -> the house exists
+    tag, data = reg.continue_session("s1")
+    assert tag == "say"  # chapter 2 opening served -> durable inflight is SET
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    assert store.read_state(sit)["inflight"] is not None
+    store.close_sitting(sit)  # closed mid-problem (restart-shaped close)
+
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg2.enter_saga("s1", 0)
+    # NOT a clean next chapter: the lost-segment machinery, presented honestly
+    assert tag == "resume", (tag, data)
+    # cause-NEUTRAL copy (C7/C16): the default lost-segment line would claim "the server
+    # restarted" — false for a user-End/idle-reap close
+    assert data.get("honesty") == _ENTER_REOPEN_HONESTY
+    assert "restarted" not in data["honesty"]
+    assert store.live_sitting()["id"] == sit  # reopened, adopted
+
+
+def test_second_click_on_the_open_saga_resumes_without_reaping(tmp_path, make_fake):
+    """The live==target deviation's teeth (review finding, 3 lenses): a second click / stale tab
+    on the just-entered saga must resume it NON-destructively — never reap the in-flight
+    chapter's worker, never serve recovery copy."""
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg)
+    store = SittingStore(db)
+    sit = {r["sitting_id"] for r in store.converged_log()}.pop()
+    reg.close("s1")
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, _data = reg2.enter_saga("s1", 0)
+    assert tag == "say"  # chapter 2 open, worker parked awaiting the reply
+    ch = reg2._ch.get("s1")
+    assert ch is not None and not ch.terminal
+    assert store.read_state(sit)["inflight"] is not None
+    tag, data = reg2.enter_saga("s1", 0)  # the second click
+    assert tag == "resume"
+    assert reg2._ch.get("s1") is ch and not ch.terminal  # the in-flight chapter SURVIVES
+    assert store.read_state(sit)["inflight"] is not None
+    # and the chapter still finishes normally after the noise
+    t, d = reg2.step("s1", "mechanism")
+    while t == "say":
+        t, d = reg2.step("s1", "mechanism")
+    assert t == "done"
+
+
+def test_enter_saga_is_single_flight_per_sid(tmp_path, make_fake):
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg)
+    reg.close("s1")
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    reg2._entering.add("s1")  # a concurrent enter is mid-flight
+    tag, data = reg2.enter_saga("s1", 0)
+    assert tag == "nudge" and data["message"] == _ENTER_BUSY_NUDGE
+    reg2._entering.discard("s1")
+    tag, _data = reg2.enter_saga("s1", 0)
+    assert tag == "say"  # and the gate RELEASES (the finally)
+
+
+def test_enter_saga_missing_scenario_row_refuses_and_never_forges(tmp_path, make_fake):
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg)
+    store = SittingStore(db)
+    sit = {r["sitting_id"] for r in store.converged_log()}.pop()
+    reg.close("s1")
+    # simulate the storage fault (test-only injection; production never deletes — L-3)
+    import sqlite3
+
+    with sqlite3.connect(db) as c:
+        c.execute("DELETE FROM web_generated_problem WHERE sitting_id=?", (sit,))
+        n_before = c.execute("SELECT COUNT(*) FROM web_generated_problem").fetchone()[0]
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg2.enter_saga("s1", 0)
+    assert tag == "nudge"
+    with sqlite3.connect(db) as c:
+        status = c.execute("SELECT status FROM web_sitting WHERE id=?", (sit,)).fetchone()[0]
+        n_after = c.execute("SELECT COUNT(*) FROM web_generated_problem").fetchone()[0]
+    assert status == "closed"  # refused BEFORE the flip
+    assert n_after == n_before  # and nothing was forged under the saga's ref
+
+
+def test_enter_saga_full_reset_prevents_the_forge_counter_overwrite(tmp_path, make_fake):
+    """§5d's L-3 teeth: a stale `_forge_n` from an old sitting, surviving into an adopted saga,
+    would seed the next instance ref BELOW the saga's max and upsert-overwrite a prior chapter's
+    scenario. Mutation-proof: commenting out the _reset_session_state call in enter_saga must
+    turn this RED."""
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg)
+    store = SittingStore(db)
+    sit = {r["sitting_id"] for r in store.converged_log()}.pop()
+    reg.close("s1")
+
+    import sqlite3
+
+    with sqlite3.connect(db) as c:
+        chapters = dict(
+            c.execute(
+                "SELECT ref, scenario FROM web_generated_problem WHERE sitting_id=?", (sit,)
+            ).fetchall()
+        )
+    assert chapters  # at least chapter 1's instance row exists
+
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    reg2._forge_n["s1"] = 0  # the stale counter an old sitting left behind
+    tag, _data = reg2.enter_saga("s1", 0)
+    assert tag == "say"
+    with sqlite3.connect(db) as c:
+        after = dict(
+            c.execute(
+                "SELECT ref, scenario FROM web_generated_problem WHERE sitting_id=?", (sit,)
+            ).fetchall()
+        )
+    for ref, scenario in chapters.items():
+        assert after[ref] == scenario  # no prior chapter was overwritten (L-3)
+    assert len(after) == len(chapters) + 1  # the new chapter took a FRESH instance n
+
+
+def test_enter_saga_response_wire_sweep(tmp_path, make_fake):
+    """Spec §5 emission fold: sweep the ACTUAL bytes enter_saga returns through _emit, per
+    outcome class — not only the render that follows. Legs: bounds-nudge, happy say,
+    live==target resume, genuine fold-(a) resume, e(i) resume, reserve."""
+    import json
+
+    from retnovation.web.app import _emit
+
+    def sweep(reg, sit, tag, data, kinds):
+        wire = _emit(reg, tag, data)
+        assert wire["kind"] in kinds, wire
+        blob = json.dumps(wire)
+        for needle in ("gen:", "veldra:", sit, "sitting_id", "experience_id", "ledger_ref"):
+            assert needle not in blob, (needle, wire["kind"])
+        return wire
+
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg)
+    store = SittingStore(db)
+    sit = {r["sitting_id"] for r in store.converged_log()}.pop()
+    reg.close("s1")
+
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    # leg 1: the bounds nudge
+    sweep(reg2, sit, *reg2.enter_saga("s1", 99), kinds=("nudge",))
+    # leg 2: the happy next-chapter opening
+    sweep(reg2, sit, *reg2.enter_saga("s1", 0), kinds=("say", "frontdoor"))
+    # leg 3: live==target — the second click's non-destructive resume
+    sweep(reg2, sit, *reg2.enter_saga("s1", 0), kinds=("resume",))
+
+    # leg 4: genuine fold (a) — a DIFFERENT live sitting with content resumes
+    db4 = str(tmp_path / "y.db")
+    reg4 = SessionRegistry(db4, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg4)
+    sit4 = {r["sitting_id"] for r in SittingStore(db4).converged_log()}.pop()
+    reg4.close("s1")
+    tag, data = reg4.resume_or_start("s1")  # a new front door...
+    assert tag == "say" and data.get("frontdoor")
+    tag, data = reg4.step("s1", "a different hard call")  # ...made NON-virgin (a "you" turn)
+    assert tag == "say"
+    live4 = SittingStore(db4).live_sitting()["id"]
+    assert live4 != sit4
+    sweep(reg4, sit4, *reg4.enter_saga("s1", 0), kinds=("resume",))
+    # sweep the OTHER sitting's id off the wire too
+    tag, data = reg4.enter_saga("s1", 0)
+    assert live4 not in json.dumps(_emit(reg4, tag, data))
+
+    # leg 5: e(i) — the interrupted-door resume (built like the inflight test above)
+    db5 = str(tmp_path / "z.db")
+    reg5 = SessionRegistry(db5, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg5)
+    tag, _d = reg5.continue_session("s1")
+    assert tag == "say"
+    store5 = SittingStore(db5)
+    sit5 = store5.live_sitting()["id"]
+    store5.close_sitting(sit5)
+    reg5b = SessionRegistry(db5, model_factory=_world_factory(make_fake))
+    sweep(reg5b, sit5, *reg5b.enter_saga("s1", 0), kinds=("resume",))
+
+    # leg 6: reserve — force the all-windowed exit at the _next_territory seam (constructing a
+    # real all-5-territories-converged-within-24h store is out of scope for a wire test; check
+    # _next_territory's all-windowed sentinel in continue_session's world path, session_runner.py
+    # ~1315-1323, and monkeypatch to return it)
+    db6 = str(tmp_path / "r.db")
+    reg6 = SessionRegistry(db6, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg6)
+    sit6 = {r["sitting_id"] for r in SittingStore(db6).converged_log()}.pop()
+    reg6.close("s1")
+    reg6b = SessionRegistry(db6, model_factory=_world_factory(make_fake))
+    reg6b._next_territory = lambda *a, **k: None  # the all-windowed sentinel
+    sweep(reg6b, sit6, *reg6b.enter_saga("s1", 0), kinds=("reserve",))
