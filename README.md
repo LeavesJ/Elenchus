@@ -15,21 +15,24 @@ open-ended judgment (graded on trajectory, not correctness) and checkable techni
 
 **Dogfood MVP — not beta.** The full six-link engine (`aim → core → experience →
 assessment → state → cadence`) is standing and green, wrapped by a conversational
-**engaged-agent** web surface. Curated content covers five open-ended decision
-territories; the content-expansion pass (more territories, more role registers) is the
-gate before any external use. Suite: **499 passing / 25 skipped**; the graded engine core
-(`orchestration`, `assessment/`) is held byte-stable — the surface work rides additive
-seams around it. See `docs/DEVLOG.md` and `docs/superpowers/` for the narrative.
+**engaged-agent** web surface whose 3D world you now **land on** as your home. Curated
+content covers five open-ended decision territories; the content-expansion pass (more
+territories, more role registers) is the gate before any external use. Suite: **560 passing
+/ 30 skipped**; the graded engine core (`orchestration`, `assessment/`) is held byte-stable
+— the surface work rides additive seams around it. See `docs/DEVLOG.md` and
+`docs/superpowers/` for the narrative.
 
 ## The engaged agent
 
 `python -m retnovation.web` serves a chat surface where you describe a real situation you
 face; the engine forges a specific, unlabeled decision scenario around it, presses you on
-it turn by turn, and lands when your reasoning converges. Staying in a world spins the next
-*chapter* of the same story; each convergence banks a house into a cultivated 3D valley
-that ignites as your world grows. The problem is never labeled and the doctrine is never
-spoken — recognizing "what kind of decision this is" is the work, not a hint the product
-gives away.
+it turn by turn, and lands when your reasoning converges. Staying in a sitting spins the
+next *chapter* of the same story. Every forged world you build is a **saga** — one house in
+a cultivated 3D valley that is your **home**: you land on that world first, reading where
+your judgment is deep and where it is thin, and launch a new saga from it. A saga's house
+rises in **stories** as you land more decisions inside it, and its valley brightens as your
+judgment there strengthens. The problem is never labeled and the doctrine is never spoken —
+recognizing "what kind of decision this is" is the work, not a hint the product gives away.
 
 ## Layout
 
