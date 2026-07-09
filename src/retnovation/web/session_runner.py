@@ -1448,8 +1448,9 @@ class SessionRegistry:
         C7/C16 rule), and a saga whose thread hit the storage fault is REFUSED, never silently
         re-forged under its own ref.
         The whole span is single-flight per sid (`_entering`, the M1 `continued` pattern) — a
-        concurrent double-click would otherwise double-forge with an instance-ref upsert
-        collision (probe E). Every outcome rides an EXISTING wire tag (nudge / resume / say /
+        concurrent SAME-PROCESS double-click would otherwise double-forge with an instance-ref
+        upsert collision (probe E); cross-process is held by reopen_sitting's unique-live index.
+        Every outcome rides an EXISTING wire tag (nudge / resume / say /
         frontdoor-say / reserve / error)."""
         now = now or datetime.now(timezone.utc)
         sagas = saga_order(self._store.converged_log())
@@ -1488,7 +1489,11 @@ class SessionRegistry:
             if got != target:
                 winner = self._store.live_sitting()
                 if winner is not None:
-                    return self._resume(session_id, winner, now)  # a race: adopt, never 500
+                    # a cross-process reopen race: adopt the winner, never 500 — and reset
+                    # first so no stale per-sid map (e.g. _forge_n) leaks into the adopted
+                    # session (fold (d) holds on EVERY adopt path, not just the primary one)
+                    self._reset_session_state(session_id)
+                    return self._resume(session_id, winner, now)
                 return ("nudge", {"message": _ENTER_FAULT_NUDGE})
             self._reset_session_state(session_id)  # fold (d) — before adopting
             self._sitting_id[session_id] = target
