@@ -2,11 +2,11 @@
  * Terrain3D.render(container, payload) builds a WebGL valley from the L-13 wire payload:
  *   each rendered region -> a village (elevation bucket -> terraces, vitality bucket -> brightness);
  *   each seed region     -> a dark ember waiting to be kindled;
- *   each converged HOUSE -> a lit house on a deterministic ring inside its region's cluster
- *   (living sitting §2f: one house per convergence, ordinal-only wire, +N many-cue past 9).
+ *   each saga HOUSE -> a lit house on a deterministic ring inside its region's cluster; its
+ *   height_bucket (1..3) stacks stories (Phase 2), ordinal-only wire, +N many-cue past 9.
  * Village POSITIONS are a function of the public ordinal ONLY (never frame identity). Requires the
  * vendored global THREE (+ optional EffectComposer/UnrealBloomPass for bloom); degrades to a note if absent.
- * Served ONLY at the close (two-phase L-13 timing). No frame_code / veldra: ref is ever consumed.
+ * Served at the close AND as the homebase on load (Phase 2). No frame_code / veldra: ref is ever consumed.
  */
 window.Terrain3D = (function () {
   "use strict";
@@ -155,16 +155,28 @@ window.Terrain3D = (function () {
       g.position.set(cx, vb + localCy, cz); g.rotation.y = rot; world.add(g);
     }
 
-    function house(x, y, z, s, lit, bright) {
+    // A house is a SAGA (Phase 1/2): `stories` (its height_bucket, 1..3) stacks that many floors,
+    // a PER-HOUSE vertical axis distinct from a region's concentric terraces (reg.elevation). One
+    // story = the floor tier; a multi-story house reads as a saga you kept building. `s`=scale,
+    // `bright`=vitality glow. Default stories=1 keeps the ambient houseRing houses one story.
+    function house(x, y, z, s, lit, bright, stories) {
       var g = new THREE.Group();
-      var b = new THREE.Mesh(new THREE.BoxGeometry(1.7 * s, 1.4 * s, 1.7 * s), lit ? timber : dB); b.position.y = 0.7 * s; g.add(b);
-      var rf = new THREE.Mesh(new THREE.ConeGeometry(1.5 * s, 1.2 * s, 4), lit ? roofM : dR); rf.position.y = 1.4 * s + 0.58 * s; rf.rotation.y = Math.PI / 4; g.add(rf);
-      var ch = new THREE.Mesh(new THREE.BoxGeometry(0.28 * s, 0.7 * s, 0.28 * s), chimMat); ch.position.set(0.5 * s, 1.7 * s, 0.3 * s); g.add(ch);
-      if (lit) {
-        var wm = litWinMat(bright);
-        var w = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.5 * s, 0.06), wm); w.position.set(0, 0.66 * s, 0.86 * s); g.add(w);
-        var w2 = w.clone(); w2.position.set(0, 0.66 * s, -0.86 * s); g.add(w2);
+      var floors = Math.max(1, Math.min(3, stories || 1)), fh = 1.4 * s;
+      for (var f = 0; f < floors; f++) {
+        var b = new THREE.Mesh(new THREE.BoxGeometry(1.7 * s, fh, 1.7 * s), lit ? timber : dB);
+        b.position.y = fh * f + 0.7 * s; g.add(b);
+        if (lit) {
+          var wm = litWinMat(bright);
+          var w = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.5 * s, 0.06), wm);
+          w.position.set(0, fh * f + 0.66 * s, 0.86 * s); g.add(w);
+          var w2 = w.clone(); w2.position.set(0, fh * f + 0.66 * s, -0.86 * s); g.add(w2);
+        }
       }
+      var top = fh * floors;
+      var rf = new THREE.Mesh(new THREE.ConeGeometry(1.5 * s, 1.2 * s, 4), lit ? roofM : dR);
+      rf.position.y = top + 0.58 * s; rf.rotation.y = Math.PI / 4; g.add(rf);
+      var ch = new THREE.Mesh(new THREE.BoxGeometry(0.28 * s, 0.7 * s, 0.28 * s), chimMat);
+      ch.position.set(0.5 * s, top + 0.3 * s, 0.3 * s); g.add(ch);  // top+0.3*s -> 1.7*s at floors=1 (exact)
       g.position.set(x, y, z); g.rotation.y = Math.random() * 6.28; world.add(g);
     }
     function houseRing(cx, cz, vb, n, r, localY, s, lit, bright) {
@@ -210,8 +222,9 @@ window.Terrain3D = (function () {
       else buildEmber(pp.x, pp.z);
     }
 
-    // Converged houses (living sitting §2f): one LIT house per convergence, clustered inside its
-    // region's area — the region's ordinal position anchors the cluster; houses take deterministic
+    // Saga houses (Phase 1/2): one LIT house per saga (a sitting's forged world), height_bucket ->
+    // stacked stories, clustered inside its region's area — the region's ordinal anchors the cluster;
+    // houses take deterministic
     // ordinal ring slots (arrival order fixes the angle: no jitter, no data beyond order). Capped
     // at HOUSE_CAP per region with a many-cue: one brighter, larger beacon over the cluster.
     // Earned houses live ON the first terrace (r inside the tier-1 rim, elevated to its
@@ -239,7 +252,7 @@ window.Terrain3D = (function () {
         // (founder dogfood 2026-07-04: the caption's number must be visible on screen).
         var onTerrace = data.regions[gi] && data.regions[gi].render === "rendered";
         var hy = wh(anchor.x, anchor.z) + (onTerrace ? 2.15 : 0);
-        house(hx, hy, hz, 1.45, true, hb);
+        house(hx, hy, hz, 1.45, true, hb, hs[hk].height_bucket);  // Phase 2: saga stories (2d)
         var hearth = new THREE.PointLight(0xffb066, 0.55 + 0.5 * hb, 12, 2.0);
         hearth.position.set(hx, hy + 2.2, hz); world.add(hearth);
         litHouses++;
@@ -354,5 +367,11 @@ window.Terrain3D = (function () {
     return { litHouses: litHouses };
   }
 
-  return { render: render, _pos: pos, _normalize: normalize };
+  // teardown: stop the active scene's loop + listeners (Phase 2: #homebase recedes on saga start).
+  return {
+    render: render,
+    teardown: function () { if (activeTeardown) { activeTeardown(); activeTeardown = null; } },
+    _pos: pos,
+    _normalize: normalize,
+  };
 })();
