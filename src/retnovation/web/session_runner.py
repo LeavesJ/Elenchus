@@ -748,12 +748,18 @@ class SessionRegistry:
                     n = len({r["sitting_id"] for r in rows})  # distinct SAGAS, not raw rows
                     houses = "house" if n == 1 else "houses"
                     line = f"Your world so far: {n} {houses}."
-                    terrain = self._store.latest_terrain()
+                    # Phase 2: the world is the first screen (spec §6). Read the frozen cumulative
+                    # (terrain, houses) ONCE — the same record feeds the caption's rendered-region
+                    # count AND the render payload, so they can never disagree (spec §3).
+                    home = self._store.latest_homebase()
+                    terrain = home["terrain"]
                     if terrain:
                         m = sum(1 for r in terrain if r.get("render") == "rendered")
                         if m:
                             regions = "region" if m == 1 else "regions"
                             line = f"Your world so far: {n} {houses}, {m} {regions} alight."
+                        data["terrain"] = terrain
+                        data["houses"] = home["houses"]
                     data["returning"] = line
             return (tag, data)
         return self._resume(session_id, row, now)

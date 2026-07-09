@@ -86,6 +86,14 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
         }
         if data.get("returning"):  # the return-visit muted line (§2f review P10)
             out["returning"] = data["returning"]
+        # Phase 2 (spec §6): the world is the first screen. The frozen cumulative homebase rides
+        # the load payload behind the SAME allowlist the close payload uses — positional/bucketed
+        # only (terrain = coarse learner_view; houses = {region, bucket, height_bucket}); no refs,
+        # no sitting_id, no raw count (L-13). Attached only when non-empty (first visit = no world).
+        if data.get("terrain"):
+            out["terrain"] = data["terrain"]
+        if data.get("houses"):
+            out["houses"] = data["houses"]
         return out
     if tag == "say":  # every Concierge-authored visible turn (opening, re-invite, probe, wind-down)
         out = {"kind": "say", "text": data["text"]}

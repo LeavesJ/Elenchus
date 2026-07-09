@@ -2932,3 +2932,44 @@ def test_returning_line_counts_distinct_sagas_not_rows(tmp_path, make_fake):
     tag, data = reg.resume_or_start("single")
     assert "2 houses" in data["returning"]  # 2 sagas, NOT "3 houses"
     assert "3 houses" not in data["returning"]
+
+
+def test_frontdoor_load_payload_carries_homebase_terrain_and_houses(tmp_path, make_fake):
+    """Phase 2 2a/2b: on a returning load (no live sitting) the front-door payload carries the
+    frozen cumulative (terrain, houses) so the world renders on landing — and _emit surfaces
+    them behind the frontdoor allowlist."""
+    from retnovation.web.sitting_store import SittingStore
+    from retnovation.web.session_runner import SessionRegistry
+    from retnovation.web.app import _emit
+
+    db = str(tmp_path / "hbpay.db")
+    store = SittingStore(db)  # seed via the store...
+    sit = store.create_sitting(NOW)
+    store.log_converged(
+        sit, "gen:x:1", NOW, "eid1"
+    )  # (sit, ref, now, eid) — matches _on_done's call
+    terrain = [{"region_id": "r0", "render": "rendered", "vitality": 2, "elevation": 1}]
+    houses = [{"region": 0, "bucket": 2, "height_bucket": 1}]
+    store.write_state(sit, record={"terrain": terrain, "houses": houses})
+    store.close_sitting(sit)  # no live sitting -> resume_or_start -> frontdoor branch
+    reg = SessionRegistry(db, model_factory=make_fake)  # ...read via a registry on the SAME db PATH
+    tag, data = reg.resume_or_start("single")
+    assert data.get("terrain") == terrain
+    assert data.get("houses") == houses
+    wire = _emit(reg, tag, data)
+    assert wire["kind"] == "frontdoor"
+    assert wire["terrain"] == terrain
+    assert wire["houses"] == houses
+
+
+def test_frontdoor_load_payload_omits_homebase_on_first_visit(tmp_path, make_fake):
+    """First-ever visit (no landed record): no terrain/houses on the wire -> the shell shows an
+    empty world (just the front door), never a crash or a phantom village."""
+    from retnovation.web.session_runner import SessionRegistry
+    from retnovation.web.app import _emit
+
+    reg = SessionRegistry(str(tmp_path / "fresh.db"), model_factory=make_fake)
+    tag, data = reg.resume_or_start("single")
+    wire = _emit(reg, tag, data)
+    assert wire["kind"] == "frontdoor"
+    assert "terrain" not in wire and "houses" not in wire
