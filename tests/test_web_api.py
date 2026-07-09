@@ -630,6 +630,61 @@ def test_close_payload_shows_one_saga_for_two_same_sitting_convergences(tmp_path
     assert "embed_credentials_as_a_list" not in blob
 
 
+def _drive_reg_to_done(reg, sid):
+    """reg-level twin of _drive_to_done(client) — same free-text script, called directly against
+    a SessionRegistry (no HTTP layer) so the driven sitting's own `reg` is still in hand to close
+    and reload afterward."""
+    tag, data = reg.step(sid, "reasoning that already holds the move")
+    while tag == "say":
+        tag, data = reg.step(sid, "mechanism")
+    assert tag == "done"
+    return data
+
+
+def test_load_payload_wire_sweep_over_engine_composed_bytes(tmp_path, make_fake):
+    """spec §9: the NEW load-time (frontdoor) payload path, swept over ENGINE-COMPOSED bytes.
+    LOAD-path twin of test_close_payload_shows_one_saga_for_two_same_sitting_convergences — same
+    real-convergence seeding, but assert on the bytes the homebase load serves. Catches a leak in
+    EITHER the composition path (compose_houses/learner_view) or the _emit/resume_or_start
+    passthrough that a close-only sweep would not cover."""
+    import json
+
+    from retnovation.web.app import _emit
+    from retnovation.web.session_runner import SessionRegistry
+
+    # Seed EXACTLY as the close sweep does (same factory, same script) — driven directly against a
+    # SessionRegistry so terrain/houses are engine-composed and persisted into record_json, and the
+    # registry stays in hand afterward to close the sitting and reload.
+    reg = SessionRegistry(str(tmp_path / "loadsweep.db"), _world_factory(make_fake))
+    assert reg.resume_or_start("single")[0] == "say"  # frontdoor cold start
+    tag, r = reg.step("single", _SITUATION)
+    assert tag == "say" and r["text"] == _SCENARIO
+    _drive_reg_to_done(reg, "single")
+    tag, r2 = reg.continue_session("single")
+    assert tag == "say"
+    _drive_reg_to_done(reg, "single")  # second convergence, different territory, same sitting
+
+    reg._store.close_sitting(reg._store.live_sitting()["id"])  # close -> next load is frontdoor
+    wire = _emit(reg, *reg.resume_or_start("single"))
+
+    # non-vacuous: the frozen homebase actually rides this load (else the sweep below is trivial)
+    assert wire["kind"] == "frontdoor" and wire.get("houses") and wire.get("terrain")
+
+    # structural: exact L-13-safe key sets — these catch ANY extra field regardless of the token scan
+    for h in wire.get("houses", []):
+        assert set(h) == {"region", "bucket", "height_bucket"}
+        assert isinstance(h["region"], int)
+        assert h["bucket"] in (None, 1, 2, 3)
+        assert h["height_bucket"] in (1, 2, 3)
+    for r in wire.get("terrain", []):
+        assert set(r) <= {"region_id", "render", "vitality", "elevation"}
+    # token scan: the invertible VALUES only (reuse the close sweep's needle set) — NOT dead key-name
+    # strings like "sitting_id"/"experience_id"/"frame_code", which never appear as values.
+    blob = json.dumps(wire)
+    for needle in ("gen:", "veldra:", "embed_credentials_as_a_list"):  # the close sweep's needles
+        assert needle not in blob
+
+
 def test_plateau_adds_no_house(tmp_path, make_fake):
     """A plateaued segment was not built into a house: converge once, plateau the next segment —
     the close still shows exactly ONE house."""
