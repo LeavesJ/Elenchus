@@ -375,3 +375,50 @@ def test_compose_houses_over_a_real_store_groups_mixed_ontology_sittings(tmp_pat
         assert set(h) == {"region", "bucket", "height_bucket"}
     # empty projection -> every house lands region 0 with bucket None (seed) -> height floored to 1
     assert all(h["height_bucket"] == 1 for h in houses)
+
+
+def test_reopen_sitting_flips_closed_to_live_and_stamps_updated_at(tmp_path):
+    store = _store(tmp_path)
+    t0 = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
+    sit = store.create_sitting(t0)
+    store.close_sitting(sit)
+    assert store.live_sitting() is None
+    t1 = datetime(2026, 7, 9, 9, 0, tzinfo=timezone.utc)
+    assert store.reopen_sitting(sit, t1) == sit
+    row = store.live_sitting()
+    assert row is not None and row["id"] == sit
+    # updated_at is stamped NOW: without it, resume_or_start's 18h idle reaper
+    # would close a just-reopened old saga on the very next load.
+    assert row["updated_at"] == t1.isoformat()
+
+
+def test_reopen_sitting_adopts_the_winner_when_another_sitting_is_live(tmp_path):
+    store = _store(tmp_path)
+    t = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
+    old = store.create_sitting(t)
+    store.close_sitting(old)
+    winner = store.create_sitting(t)  # a different LIVE sitting exists
+    # Flipping `old` to live would violate ux_web_sitting_live -> adopt the winner, never raise.
+    assert store.reopen_sitting(old, t) == winner
+    assert store.live_sitting()["id"] == winner
+    # the target stayed closed (no second live row)
+    import sqlite3
+
+    with sqlite3.connect(str(tmp_path / "s.db")) as c:
+        n = c.execute("SELECT COUNT(*) FROM web_sitting WHERE status='live'").fetchone()[0]
+    assert n == 1
+
+
+def test_reopen_sitting_is_a_noop_when_the_target_is_already_live(tmp_path):
+    store = _store(tmp_path)
+    t = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
+    sit = store.create_sitting(t)
+    assert store.reopen_sitting(sit, t) == sit  # already live == success
+    assert store.live_sitting()["id"] == sit
+
+
+def test_reopen_sitting_unknown_id_with_no_live_returns_none(tmp_path):
+    store = _store(tmp_path)
+    t = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
+    assert store.reopen_sitting("nope", t) is None
+    assert store.live_sitting() is None

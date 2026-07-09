@@ -119,6 +119,39 @@ class SittingStore:
         with self._conn() as c:
             c.execute("UPDATE web_sitting SET status='closed' WHERE id=?", (sitting_id,))
 
+    def reopen_sitting(self, sitting_id: str, now: datetime) -> str | None:
+        """Re-entry (world-as-homebase spec §5b): flip a CLOSED sitting back to live — the inverse
+        of the one-way `close_sitting` — atomic and defensive, symmetric to `create_sitting`.
+        The partial unique live index is the real enforcement (a Python-level liveness check is
+        TOCTOU): a collision with an existing live row raises IntegrityError and the caller
+        ADOPTS the winner, never a raw 500. `updated_at` is stamped so a reopened old saga does
+        not instantly trip the 18h idle reaper. Returns whichever id is live after the call
+        (target on success, winner on collision), or None when nothing is live and the target
+        is unknown/unflippable."""
+        if self._inert:
+            return sitting_id
+        try:
+            with self._conn() as c:
+                cur = c.execute(
+                    "UPDATE web_sitting SET status='live', updated_at=? "
+                    "WHERE id=? AND status='closed'",
+                    (now.isoformat(), sitting_id),
+                )
+                flipped = cur.rowcount
+        except sqlite3.IntegrityError:
+            # Another row is live (or won a cross-process race): the loser adopts the winner
+            # (create_sitting's C6 pattern).
+            row = self.live_sitting()
+            if row is not None:
+                return row["id"]
+            raise
+        if flipped == 0:
+            # Nothing changed: the target is already live (fine — report it), some other row is
+            # live (adopt it), or the id is unknown (None).
+            row = self.live_sitting()
+            return row["id"] if row is not None else None
+        return sitting_id
+
     # -- turns (the rendered transcript) -----------------------------------------------------
 
     def append_turn(self, sitting_id: str, kind: str, payload: dict, now: datetime) -> None:
