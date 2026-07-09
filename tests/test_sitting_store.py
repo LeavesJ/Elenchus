@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from retnovation.web.sitting_store import SittingStore
 
 NOW = datetime(2026, 7, 1, 21, 0, 0, tzinfo=timezone.utc)
+LATER = NOW + timedelta(hours=1)
 
 
 def _store(tmp_path, name="s.db"):
@@ -272,6 +273,69 @@ def test_latest_terrain_quotes_the_most_recent_landed_village(tmp_path):
     st.append_turn(sid2, "you", {"text": "bump freshness"}, NOW + timedelta(hours=2))
     assert st.latest_terrain() == [{"render": "rendered"}, {"render": "rendered"}]
     assert SittingStore(":memory:").latest_terrain() is None
+
+
+def test_latest_homebase_returns_terrain_and_houses_from_the_same_record(tmp_path):
+    """The homebase snapshot is the frozen (terrain, houses) pair a close already persisted
+    (session_runner.py:1072-1086) — read BOTH from ONE record so every house.region ordinal
+    indexes into the served terrain (spec §3 consistency)."""
+    store = _store(
+        tmp_path
+    )  # the file's helper: SittingStore(str(tmp_path / name)); NO store.close()
+    sit = store.create_sitting(NOW)  # NOW is the module datetime; create_sitting(now) -> sitting_id
+    terrain = [
+        {"region_id": "r0", "render": "rendered", "vitality": 2, "elevation": 1},
+        {"region_id": "r1", "render": "seed", "vitality": None, "elevation": None},
+    ]
+    houses = [{"region": 0, "bucket": 2, "height_bucket": 2}]
+    # persist a landed record exactly as _serialize_record/_on_done leaves it (terrain+houses keys)
+    store.write_state(sit, record={"terrain": terrain, "houses": houses})
+    home = store.latest_homebase()
+    assert home["terrain"] == terrain
+    assert home["houses"] == houses
+    assert all(0 <= h["region"] < len(home["terrain"]) for h in home["houses"])
+
+
+def test_latest_homebase_is_empty_when_no_landed_record(tmp_path):
+    assert _store(tmp_path).latest_homebase() == {"terrain": [], "houses": []}
+
+
+def test_latest_homebase_pairs_terrain_and_houses_from_the_SAME_newest_record(tmp_path):
+    """The DISCRIMINATING fixture (spec §3 consistency — the red-able test the shared-private
+    refactor exists for): TWO landed sittings with DISTINCT terrain lengths and a house at
+    region>0. latest_homebase MUST return the newer record's terrain AND its houses (never a fresh
+    terrain paired with stale houses), and agree with latest_terrain. Fails if the two reads ever
+    diverge OR if a house mis-indexes a wrong-length terrain (the terrain3d.js:207 silent-drop
+    hazard). A single-record fixture cannot exercise this — it is tautological."""
+    store = _store(tmp_path)
+    # OLDER saga: a 2-region terrain, house at region 1
+    old = store.create_sitting(NOW)
+    store.write_state(
+        old,
+        record={
+            "terrain": [
+                {"region_id": "r0", "render": "rendered", "vitality": 1, "elevation": 1},
+                {"region_id": "r1", "render": "rendered", "vitality": 2, "elevation": 1},
+            ],
+            "houses": [{"region": 1, "bucket": 2, "height_bucket": 1}],
+        },
+    )
+    # NEWER saga: a 3-region terrain, house at region 2 — OUT OF RANGE against the old 2-region
+    # terrain, so a mis-paired read would produce an invalid house. Make this record the newest
+    # (mirror test_latest_terrain_quotes_the_most_recent_landed_village's updated_at ordering).
+    new = store.create_sitting(LATER)  # LATER > NOW — match the existing test's ordering mechanism
+    new_terrain = [
+        {"region_id": "r0", "render": "rendered", "vitality": 1, "elevation": 1},
+        {"region_id": "r1", "render": "rendered", "vitality": 2, "elevation": 1},
+        {"region_id": "r2", "render": "rendered", "vitality": 3, "elevation": 2},
+    ]
+    new_houses = [{"region": 2, "bucket": 3, "height_bucket": 2}]
+    store.write_state(new, record={"terrain": new_terrain, "houses": new_houses})
+    home = store.latest_homebase()
+    assert home["terrain"] == new_terrain  # newest terrain
+    assert home["houses"] == new_houses  # newest houses — from the SAME record
+    assert home["terrain"] == store.latest_terrain()  # both readers pick the same record
+    assert all(0 <= h["region"] < len(home["terrain"]) for h in home["houses"])  # region 2 < 3
 
 
 def test_compose_houses_over_a_real_store_groups_mixed_ontology_sittings(tmp_path):

@@ -270,11 +270,11 @@ class SittingStore:
             ).fetchone()
         return None if row is None else {"experience_id": row[0], "scenario": row[1]}
 
-    def latest_terrain(self) -> list | None:
-        """The frozen learner_view from the most recently updated sitting that landed a record —
-        i.e. the exact village the user last SAW at a close. The return-visit line counts its
-        rendered regions so it can never contradict the close copy (batch-review fold: counting
-        territories as 'regions' diverged from the village's frame-component geometry)."""
+    def _latest_landed_record(self) -> dict | None:
+        """The parsed record of the most-recently-updated sitting that landed a record with a
+        non-empty terrain — i.e. the exact cumulative village the user last SAW at a close. ONE
+        definition of 'latest landed record' shared by latest_terrain and latest_homebase, so the
+        return-line caption and the rendered homebase can never pick different records (spec §3)."""
         if self._inert:
             return None
         with self._conn() as c:
@@ -285,10 +285,30 @@ class SittingStore:
             ).fetchall()
         for (record_j,) in rows:
             record = json.loads(record_j)
-            terrain = record.get("terrain")
-            if terrain:
-                return terrain
+            if record.get("terrain"):
+                return record
         return None
+
+    def latest_terrain(self) -> list | None:
+        """The frozen learner_view from the most recently updated sitting that landed a record —
+        i.e. the exact village the user last SAW at a close. The return-visit line counts its
+        rendered regions so it can never contradict the close copy (batch-review fold: counting
+        territories as 'regions' diverged from the village's frame-component geometry)."""
+        record = self._latest_landed_record()
+        return record.get("terrain") if record is not None else None
+
+    def latest_homebase(self) -> dict:
+        """The homebase load payload (spec §3/§6): the cumulative (terrain, houses) pair a close
+        already froze together from the SAME post-session state (session_runner.py:1072-1086) —
+        returned from ONE record so every house.region ordinal indexes into the served terrain
+        (no fresh-terrain-with-stale-houses drift). Empty pair when nothing has landed / inert.
+        L-13: houses stay {region, bucket, height_bucket}; terrain stays the coarse learner_view;
+        the raw height and sitting_id never appear here (they were never serialized into the
+        record's houses)."""
+        record = self._latest_landed_record()
+        if record is None:
+            return {"terrain": [], "houses": []}
+        return {"terrain": record.get("terrain") or [], "houses": record.get("houses") or []}
 
     def generated_territories(self, sitting_id: str) -> set[str]:
         """Every territory FORGED this sitting, landed or not (batch-review fold: the D1 union
