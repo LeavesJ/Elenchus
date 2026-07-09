@@ -71,6 +71,21 @@ def project_terrain(
     return regions_to_view(regions)
 
 
+def saga_order(rows: list[dict]) -> list[str]:
+    """Distinct `sitting_id`s in FIRST-ARRIVAL order over converged rows (rows arrive
+    `converged_at`-ordered from `converged_log`). The SINGLE index->saga source: `compose_houses`
+    derives its grouping FROM this function, so `houses[i]` is the saga `saga_order(rows)[i]` by
+    construction — the correspondence cannot drift (L-31: one seam, every caller). Server-side
+    only; sitting ids never ride the wire (L-13) — the client clicks an INDEX. Because
+    `web_converged` is append-only (L-3), an index is stable for all time: a saga only grows or
+    gains successors, so the index a FROZEN homebase render shipped keeps resolving to the same
+    saga at click time."""
+    order: dict[str, None] = {}
+    for row in rows:
+        order.setdefault(row["sitting_id"], None)
+    return list(order)
+
+
 def compose_houses(
     regions: list[Region],
     rows: list[dict],
@@ -95,9 +110,9 @@ def compose_houses(
     resolves to its decision_frame's region, else the lowest ordinal. Rows without a territory
     (curated `experience_id=''`) fall back to the region whose `problems` hold the row's ref; a row
     nothing matches lands in region 0 — never dropped, never a crash."""
-    groups: dict[str, list[dict]] = {}
+    groups: dict[str, list[dict]] = {s: [] for s in saga_order(rows)}
     for row in rows:
-        groups.setdefault(row["sitting_id"], []).append(row)
+        groups[row["sitting_id"]].append(row)
     houses: list[dict] = []
     for (
         saga_rows

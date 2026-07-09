@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from retnovation.terrain import compose_houses, project_terrain, region_clears_guard
+from retnovation.terrain import compose_houses, project_terrain, region_clears_guard, saga_order
 from retnovation.types import FrameStrength, LearnerState, RegionRender, Strength, TerrainView
 
 NOW = datetime(2026, 6, 29, tzinfo=timezone.utc)
@@ -380,3 +380,39 @@ def test_house_height_bucket_puts_one_story_on_its_own_floor_tier():
     assert _house_height_bucket(4) == 2
     assert _house_height_bucket(5) == 3
     assert _house_height_bucket(20) == 3
+
+
+# ---- saga_order: the single index->saga source (Phase 3, plan Task 2) ------------------------
+
+
+def test_saga_order_is_distinct_sitting_ids_in_first_arrival_order():
+    rows = [
+        _row("e1", at="t1", sitting_id="s1"),
+        _row("e2", at="t2", sitting_id="s2"),
+        _row("e3", at="t3", sitting_id="s1"),  # s1 grows; its position must NOT move
+        _row("e4", at="t4", sitting_id="s3"),
+    ]
+    assert saga_order(rows) == ["s1", "s2", "s3"]
+    assert saga_order([]) == []
+
+
+def test_compose_houses_index_is_the_saga_order_index():
+    # houses[i] IS saga_order(rows)[i]: same length, and each house's height reflects
+    # exactly its saga's row count (1, 2, 5 rows -> buckets 1, 2, 3 when vitality gates open).
+    rows = (
+        [_row("e", at="t0", sitting_id="a")]
+        + [_row("e", at=f"t{i}", sitting_id="b") for i in range(1, 3)]
+        + [_row("e", at=f"u{i}", sitting_id="c") for i in range(5)]
+    )
+    state = LearnerState(
+        frames={
+            "embed": _fs(Strength.strong, ["P1", "P2"]),
+            "choose_failure": _fs(Strength.forming, ["P1", "P2"]),
+        }
+    )
+    regions = project_terrain(state, NOW).regions  # one rendered region; vitality gate open
+    houses = compose_houses(regions, rows, {})
+    order = saga_order(rows)
+    assert order == ["a", "b", "c"]
+    assert len(houses) == len(order)
+    assert [h["height_bucket"] for h in houses] == [1, 2, 3]
