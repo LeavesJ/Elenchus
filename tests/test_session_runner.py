@@ -3007,3 +3007,31 @@ def test_resume_parked_at_frontdoor_carries_the_homebase(tmp_path, make_fake):
         assert set(h) == {"region", "bucket", "height_bucket"}
     blob = json.dumps(wire["terrain"]) + json.dumps(wire["houses"])
     assert "gen:" not in blob and "veldra:" not in blob and "eid1" not in blob and sit not in blob
+
+
+def test_plateau_only_returning_user_gets_no_homebase_on_either_path(tmp_path, make_fake):
+    """Whole-branch consistency fold: a plateau/budget-only returning user has a NON-EMPTY seed
+    terrain frozen but NO convergences (empty converged_log). The homebase must be absent on BOTH
+    the fresh-frontdoor AND the reload-parked payloads — the two gates must agree (Decision 3)."""
+    from retnovation.web.sitting_store import SittingStore
+    from retnovation.web.session_runner import SessionRegistry
+
+    db = str(tmp_path / "plateau.db")
+    store = SittingStore(db)
+    sit = store.create_sitting(NOW)
+    # a landed PLATEAU record: seed terrain, NO houses, and NO log_converged (converged_log empty)
+    store.write_state(
+        sit,
+        record={
+            "terrain": [{"region_id": "r0", "render": "seed", "vitality": None, "elevation": None}],
+            "houses": [],
+        },
+    )
+    store.close_sitting(sit)
+    reg = SessionRegistry(db, model_factory=make_fake)
+    tag1, data1 = reg.resume_or_start("single")  # 1st: fresh frontdoor (no live sitting)
+    assert data1.get("frontdoor")
+    assert "terrain" not in data1 and "houses" not in data1  # plateau-only: no world on fresh load
+    tag2, data2 = reg.resume_or_start("single")  # 2nd: reload -> resume parked at front door
+    assert tag2 == "resume" and data2.get("frontdoor")
+    assert "terrain" not in data2 and "houses" not in data2  # ...and none on reload either

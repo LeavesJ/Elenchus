@@ -888,8 +888,12 @@ class SessionRegistry:
             # a fresh cold start. Same latest_homebase() bytes as the frontdoor path (L-13-safe); the
             # resume _emit branch spreads **data so terrain/houses reach the wire. A mid-conversation
             # resume (frontdoor_block is None) still defers the homebase (founder scope).
+            # Whole-branch fix: gate MUST match resume_or_start's `if rows:` precondition — a
+            # plateau/budget-only returning user can have a non-empty seed terrain frozen with an
+            # empty converged_log(); without this check the world showed on reload but not on a
+            # fresh load, breaking the "same user, same state, same render" invariant (spec §3).
             home = self._store.latest_homebase()
-            if home["terrain"]:
+            if home["terrain"] and self._store.converged_log():
                 payload["terrain"] = home["terrain"]
                 payload["houses"] = home["houses"]
         return ("resume", payload)
