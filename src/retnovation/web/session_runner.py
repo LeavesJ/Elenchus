@@ -15,7 +15,7 @@ from ..content_loader import load_library, load_progression, load_territory_text
 from ..forge import _FALLBACK_BRIDGE, LEVELS, forge_experience, forge_registry
 from ..orchestration import run_session
 from ..scheduler import propose_open_ended
-from ..terrain import compose_houses, project_terrain
+from ..terrain import compose_houses, project_terrain, saga_order
 from ..types import EntryClass, Outcome, Regime, Selection, Work
 from . import voice
 from .sitting_store import SittingStore
@@ -65,6 +65,17 @@ _STALE_NUDGE = "This room went stale — refresh to pick up where you left off."
 # An errored segment's dead channel: every reply must point at the honest way forward (refresh →
 # durable-sitting resume: transcript + honesty line + working doors), never a bare dead end.
 _DOOR_FAILED_NUDGE = "That door hit an error — refresh to pick up where you left off."
+
+# Re-entry (world-as-homebase §5): the click sends an INDEX; these are the honest refusals.
+_ENTER_UNKNOWN_NUDGE = "That spot isn't one of your houses — try another, or start fresh below."
+_ENTER_FAULT_NUDGE = (
+    "That house's thread couldn't be reopened — its story didn't survive. "
+    "It stays on your land; start something new from the front door."
+)
+_ENTER_BUSY_NUDGE = "One moment — that house is already opening."
+# Cause-NEUTRAL (the C7/C16 rule — never invent a restart): an enter-reached interrupted saga
+# was CLOSED (user End / idle-reap / restart); the copy must not claim a cause.
+_ENTER_REOPEN_HONESTY = "That door closed unfinished — picking it back up where it stopped."
 
 # Worker failures log the traceback SERVER-side (the only durable copy — founder dogfood
 # 2026-07-03: the wire's repr(e) rendered as one transient muted line and the refresh the
@@ -244,6 +255,7 @@ class SessionRegistry:
         # re-typed (no L-14 surface); cleared on consume / any non-steer continue / _end_sitting.
         self._steer_pending: dict[str, tuple[str, str, str]] = {}
         self._steer_consume: dict[str, str] = {}
+        self._entering: set[str] = set()  # per-sid single-flight gate for enter_saga (M1 pattern)
 
     def start(self, session_id: str, now: datetime | None = None) -> tuple[str, dict]:
         now = now or datetime.now(timezone.utc)
@@ -1403,6 +1415,100 @@ class SessionRegistry:
             self._step_end(session_id)
             self._frontdoor_swallow.discard(session_id)
 
+    def _is_virgin_frontdoor(self, sit: str) -> bool:
+        """True when a live sitting is the page-load's UNTOUCHED front door: no landed record,
+        no inflight problem, no forged world, and no `"you"` turn — nothing a close can destroy.
+        EVERY page load creates a live sitting (`_ensure_sitting` via resume_or_start's cold
+        start), so without this discrimination fold (a) would route every homebase click to a
+        resume of the empty front door (plan-review probe B: the feature would be dead in
+        production while the naive tests stay green)."""
+        st = self._store.read_state(sit)
+        if st["record"] is not None or st["inflight"] is not None:
+            return False
+        if self._store.read_world(sit) is not None:
+            return False
+        return not any(t["kind"] == "you" for t in self._store.turns(sit))
+
+    def enter_saga(
+        self, session_id: str, house_index: int, now: datetime | None = None
+    ) -> tuple[str, dict]:
+        """Re-entry (world-as-homebase spec §5): click a house -> reopen that saga's sitting ->
+        continue its next chapter under the SAME `gen:{sitting}` world-ref, so breadth-dedup
+        stays coherent and the house gains a story — zero engine change. Hardened per §5 plus
+        the plan-review amendments (see the plan's Spec deviations):
+        (a) a live sitting WITH CONTENT routes to _resume, never a second reopen; the untouched
+        VIRGIN front-door sitting every page load creates is closed and re-entry proceeds; a
+        live sitting that IS the target resumes NON-destructively (a second click / stale tab
+        must never reap the in-flight chapter — 3 review lenses);
+        (b) the reopen is atomic adopt-the-winner (reopen_sitting);
+        (c) `_rebuild` rehydrates before `continue_session`'s `_last_record` precondition;
+        (d) full per-sid reset before adopting a DIFFERENT sitting (a stale `_forge_n` could
+        upsert-overwrite a prior chapter's instance row — L-3);
+        (e) an interrupted saga resumes its unfinished door honestly (cause-NEUTRAL copy, the
+        C7/C16 rule), and a saga whose thread hit the storage fault is REFUSED, never silently
+        re-forged under its own ref.
+        The whole span is single-flight per sid (`_entering`, the M1 `continued` pattern) — a
+        concurrent double-click would otherwise double-forge with an instance-ref upsert
+        collision (probe E). Every outcome rides an EXISTING wire tag (nudge / resume / say /
+        frontdoor-say / reserve / error)."""
+        now = now or datetime.now(timezone.utc)
+        sagas = saga_order(self._store.converged_log())
+        if (
+            isinstance(house_index, bool)
+            or not isinstance(house_index, int)
+            or not (0 <= house_index < len(sagas))
+        ):
+            # the choose() bounds lesson: -1 must never python-index a saga
+            return ("nudge", {"message": _ENTER_UNKNOWN_NUDGE})
+        target = sagas[house_index]
+        with self._lock:
+            if session_id in self._entering:
+                return ("nudge", {"message": _ENTER_BUSY_NUDGE})
+            self._entering.add(session_id)
+        try:
+            live = self._store.live_sitting()
+            if live is not None and live["id"] == target:
+                # already open (second click / stale tab): resume, never reset-and-reforge
+                return self._resume(session_id, live, now)
+            if live is not None:
+                if self._is_virgin_frontdoor(live["id"]):
+                    # the load-created untouched front door: no content to protect — close it
+                    # and proceed (the documented §5a deviation)
+                    self._store.close_sitting(live["id"])
+                    self._reset_session_state(session_id)
+                else:
+                    return self._resume(session_id, live, now)  # fold (a)
+            st = self._store.read_state(target)
+            if st["record"] is None and st["inflight"] is None:
+                # nothing recoverable (a pre-durable-sittings legacy saga): honest refusal, no flip
+                return ("nudge", {"message": _ENTER_FAULT_NUDGE})
+            if st["inflight"] is None and self._story_ex(target)[1]:
+                return ("nudge", {"message": _ENTER_FAULT_NUDGE})  # §5e-ii, BEFORE the flip
+            got = self._store.reopen_sitting(target, now)  # fold (b)
+            if got != target:
+                winner = self._store.live_sitting()
+                if winner is not None:
+                    return self._resume(session_id, winner, now)  # a race: adopt, never 500
+                return ("nudge", {"message": _ENTER_FAULT_NUDGE})
+            self._reset_session_state(session_id)  # fold (d) — before adopting
+            self._sitting_id[session_id] = target
+            if st["inflight"] is not None:
+                row = self._store.live_sitting()
+                if row is None:  # defensive: the flip above just made it live
+                    return ("nudge", {"message": _ENTER_FAULT_NUDGE})
+                tag, payload = self._resume(session_id, row, now)  # §5e-i: the unfinished door
+                if tag == "resume" and payload.get("honesty"):
+                    # cause-NEUTRAL: the sitting was CLOSED (End / idle / restart) — the
+                    # lost-segment default would invent a restart (C7/C16)
+                    payload = {**payload, "honesty": _ENTER_REOPEN_HONESTY}
+                return (tag, payload)
+            if self._rebuild(session_id) is None:  # fold (c)
+                return ("nudge", {"message": _ENTER_FAULT_NUDGE})
+            return self.continue_session(session_id)
+        finally:
+            with self._lock:
+                self._entering.discard(session_id)
+
     def menu_index(self, session_id: str, ledger_ref: str) -> int:
         return self._ch[session_id].last_menu_refs.index(ledger_ref)
 
@@ -1693,18 +1799,25 @@ class SessionRegistry:
     def _story(self, sit: str | None) -> str | None:
         """The prior chapter's scenario for a sequel forge (spec §2b) — the SINGLE predicate for
         sequel-vs-fresh (the label kind and the wind-down copy read it too, never re-derive it).
-        None when the last landed record is not forged+converged (a correct fresh forge). A
-        forged+converged record whose instance row is MISSING is a storage FAULT (P1 in disguise,
-        cross-write review 2026-07-05 pt 2) — logged LOUDLY, then None (fresh forge, never a
-        crash). Durable read (read_state), restart-safe, no in-memory dependence."""
+        None when the last landed record is not forged+converged (a correct fresh forge) OR on
+        the storage fault (see _story_ex, which discriminates)."""
+        return self._story_ex(sit)[0]
+
+    def _story_ex(self, sit: str | None) -> tuple[str | None, bool]:
+        """(story, fault). fault=True ONLY when a forged+converged record's instance row is
+        MISSING (a storage fault, P1 in disguise — cross-write review 2026-07-05 pt 2): logged
+        LOUDLY, then (None, True). In-sitting callers treat any None as a correct fresh forge;
+        user-initiated RE-ENTRY (§5e-ii) must refuse on fault=True instead — a fresh forge banked
+        under the clicked saga's own gen: ref would be silent identity corruption. All other
+        Nones are (None, False). Durable read (read_state), restart-safe."""
         if sit is None:
-            return None
+            return (None, False)
         rec = self._store.read_state(sit)["record"]
         if rec is None:
-            return None
+            return (None, False)
         ref = rec.get("ledger_ref", "") or ""
         if not (ref.startswith("gen:") and rec.get("stop_reason") == "converged"):
-            return None  # nothing to continue — a correct fresh forge
+            return (None, False)  # nothing to continue — a correct fresh forge
         row = self._store.read_generated_problem(ref)
         if row is None:
             _log.error(
@@ -1713,8 +1826,8 @@ class SessionRegistry:
                 ref,
                 sit,
             )
-            return None
-        return row["scenario"]
+            return (None, True)
+        return (row["scenario"], False)
 
     def _territory_title(self, eid: str) -> str:
         """The target territory's SHORT curated display title (the same label the door shows) —

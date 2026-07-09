@@ -3084,3 +3084,137 @@ def test_reset_session_state_clears_every_per_sid_map_but_not_the_nonce(tmp_path
     assert sid not in reg._frontdoor_swallow
     # deliberately survives: monotonic per process (C18)
     assert reg._menu_nonce.get(sid) == 41
+
+
+# ---- enter_saga: the registry re-entry method (world-as-homebase Phase 3 §5) ------------------
+
+
+def _drive_world_to_done(reg, sid="s1", opening="my company, my hard call"):
+    """Front door -> forge -> press to convergence, offline (the file's established flow)."""
+    tag, data = reg.resume_or_start(sid)
+    assert tag in ("say", "resume") and (data.get("frontdoor") or data.get("mode"))
+    tag, data = reg.step(sid, opening)
+    while tag == "say":
+        tag, data = reg.step(sid, "mechanism")
+    assert tag == "done", (tag, data)
+    return data
+
+
+def test_enter_saga_continues_the_saga_under_the_same_gen_prefix(tmp_path, make_fake):
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg)
+    store = SittingStore(db)
+    sit = {r["sitting_id"] for r in store.converged_log()}.pop()
+    reg.close("s1")
+    assert store.live_sitting() is None
+
+    # a FRESH registry = a fresh process landing on the homebase
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg2.enter_saga("s1", 0)
+    assert tag == "say", (tag, data)  # the next chapter's opening
+    # the reopened sitting is live and it IS the saga's sitting
+    assert store.live_sitting()["id"] == sit
+    # press the new chapter to convergence: it banks under the SAME sitting (breadth coherence)
+    t, d = tag, data
+    while t == "say":
+        t, d = reg2.step("s1", "mechanism")
+    assert t == "done"
+    rows = store.converged_log()
+    assert {r["sitting_id"] for r in rows} == {sit}
+    assert len(rows) == 2  # the house grows: 2 convergences, one saga
+    # every forged ref stays on the saga's own world-grain prefix
+    gen_refs = [r["ref"] for r in rows if r["ref"].startswith("gen:")]
+    assert gen_refs and all(ref.startswith(f"gen:{sit}") for ref in gen_refs)
+
+
+def test_enter_saga_bounds_check_never_indexes_negative(tmp_path, make_fake):
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg)
+    reg.close("s1")
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    for bad in (-1, 1, 99):  # -1 would python-index the LAST saga: the choose() bounds lesson
+        tag, data = reg2.enter_saga("s1", bad)
+        assert tag == "nudge", (bad, tag)
+    assert SittingStore(db).live_sitting() is None  # nothing was reopened
+
+
+def test_enter_saga_with_another_live_sitting_resumes_it_and_never_reopens(tmp_path, make_fake):
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg)
+    store = SittingStore(db)
+    saga_a = {r["sitting_id"] for r in store.converged_log()}.pop()
+    reg.close("s1")
+    # a NEW live sitting B, parked mid-problem
+    tag, data = reg.resume_or_start("s1")
+    assert tag == "say" and data.get("frontdoor")
+    tag, data = reg.step("s1", "a different hard call")
+    assert tag == "say"
+    live_b = store.live_sitting()["id"]
+    assert live_b != saga_a
+    # clicking saga A's house while B is live -> resume B (fold a), A stays closed
+    tag, data = reg.enter_saga("s1", 0)
+    assert tag == "resume"
+    assert store.live_sitting()["id"] == live_b
+    import sqlite3
+
+    with sqlite3.connect(db) as c:
+        status = c.execute("SELECT status FROM web_sitting WHERE id=?", (saga_a,)).fetchone()[0]
+    assert status == "closed"
+
+
+def test_enter_saga_from_a_real_page_load_enters_the_saga_not_the_virgin_front_door(
+    tmp_path, make_fake
+):
+    """THE production shape (plan-review probe B): a page load creates a live VIRGIN front-door
+    sitting before any click. Without the virgin-close deviation, fold (a) routes every click
+    to a resume of that empty sitting and the feature is dead while every other test is green."""
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg)
+    store = SittingStore(db)
+    saga = {r["sitting_id"] for r in store.converged_log()}.pop()
+    reg.close("s1")
+
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg2.resume_or_start("s1")  # the PAGE LOAD: creates the virgin sitting
+    assert tag == "say" and data.get("frontdoor") and data.get("houses")
+    virgin = store.live_sitting()["id"]
+    assert virgin != saga
+    tag, data = reg2.enter_saga("s1", 0)
+    assert tag == "say", (tag, data)  # the saga's next chapter — NOT a resume of the virgin door
+    assert store.live_sitting()["id"] == saga  # the saga is live; the virgin door was closed
+
+
+def test_enter_saga_reopened_sitting_survives_the_idle_reaper_on_the_inflight_path(
+    tmp_path, make_fake
+):
+    """The updated_at stamp's INTEGRATION teeth live on the e(i) path: `_resume` appends no turn,
+    so nothing restamps updated_at after the reopen (on the happy path continue_session's muted
+    turn restamps it anyway — no teeth there; the unit assert in test_sitting_store holds the
+    stamp itself)."""
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _drive_world_to_done(reg)  # chapter 1 converges
+    tag, data = reg.continue_session("s1")
+    assert tag == "say"  # chapter 2 in flight -> durable inflight set
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    store.close_sitting(sit)  # closed mid-problem
+    # backdate 20h: an un-stamped reopen would be idle-reaped on the very next load
+    import sqlite3
+    from datetime import timedelta
+
+    old = (datetime.now(timezone.utc) - timedelta(hours=20)).isoformat()
+    with sqlite3.connect(db) as c:
+        c.execute("UPDATE web_sitting SET updated_at=? WHERE id=?", (old, sit))
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg2.enter_saga("s1", 0)
+    assert tag == "resume"  # e(i): the unfinished door
+    # a reload must RESUME the reopened saga, not idle-close it
+    reg3 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg3.resume_or_start("s1")
+    assert tag == "resume"
+    assert store.live_sitting() is not None and store.live_sitting()["id"] == sit
