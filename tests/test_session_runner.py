@@ -3035,3 +3035,52 @@ def test_plateau_only_returning_user_gets_no_homebase_on_either_path(tmp_path, m
     tag2, data2 = reg.resume_or_start("single")  # 2nd: reload -> resume parked at front door
     assert tag2 == "resume" and data2.get("frontdoor")
     assert "terrain" not in data2 and "houses" not in data2  # ...and none on reload either
+
+
+def test_reset_session_state_clears_every_per_sid_map_but_not_the_nonce(tmp_path, make_fake):
+    reg = SessionRegistry(str(tmp_path / "x.db"), model_factory=make_fake)
+    sid = "s1"
+    # Seed a guard value into every sitting-scoped map _end_sitting clears (the §5d list).
+    reg._sitting_id[sid] = "sitX"
+    reg._last_record[sid] = {"guard": True}
+    reg._fit_variant_idx[sid] = 2
+    reg._sitting_done[sid] = {"ref"}
+    reg._next_pick[sid] = "guard:ref"
+    reg._next_pick_title[sid] = "guard"
+    reg._seam_pending[sid] = "guard"
+    reg._inflight_synced[sid] = True
+    reg._lost_ref[sid] = "guard:ref"
+    reg._lost_exp_id[sid] = "guard"
+    reg._territory_rank[sid] = ["guard"]
+    reg._level_idx[sid] = 1
+    reg._forge_n[sid] = 9
+    reg._frontdoor_swallow.add(sid)
+    reg._steer_pending[sid] = ("t", "p", "w")
+    reg._steer_consume[sid] = ("t", "p")
+    reg._continue_target[sid] = "guard"
+    reg._menu_nonce[sid] = 41
+
+    reg._reset_session_state(sid)
+
+    for m in (
+        reg._sitting_id,
+        reg._last_record,
+        reg._fit_variant_idx,
+        reg._sitting_done,
+        reg._next_pick,
+        reg._next_pick_title,
+        reg._seam_pending,
+        reg._inflight_synced,
+        reg._lost_ref,
+        reg._lost_exp_id,
+        reg._territory_rank,
+        reg._level_idx,
+        reg._forge_n,
+        reg._steer_pending,
+        reg._steer_consume,
+        reg._continue_target,
+    ):
+        assert sid not in m
+    assert sid not in reg._frontdoor_swallow
+    # deliberately survives: monotonic per process (C18)
+    assert reg._menu_nonce.get(sid) == 41

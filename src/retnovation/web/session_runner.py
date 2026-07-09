@@ -1854,19 +1854,24 @@ class SessionRegistry:
         return exps
 
     def _end_sitting(self, session_id: str) -> None:
-        """The sitting is over: mark it closed (rows retained, L-3) and clear the per-sid state —
-        including the CHANNEL (batch-review C1/C14), so a stale post-close request gets the honest
-        refresh nudge instead of hanging on a reaped worker's queue or claiming the sitting 'has
-        not converged'. The menu nonce deliberately survives (monotonic per process, C18): a new
-        sitting's first menu must not reuse a nonce a stale tab still holds."""
-        sit = self._sitting_id.pop(session_id, None)
+        """The sitting is over: mark it closed (rows retained, L-3) and clear the per-sid state
+        via the shared `_reset_session_state` seam (rationale lives there — C1/C14/C18)."""
+        sit = self._sitting_id.get(session_id)
         if sit is not None:
             self._store.close_sitting(sit)
-        # Reap a live worker before dropping its channel (batch-review C1/C2): pill + terminal so
-        # its store closes and any late request short-circuits. SKIPPED while a request is in
-        # flight for this sid (C4): a to_worker pill in that window can be consumed as the
-        # request's expected input, hanging it — a leaked connection beats a hung request (the
-        # known deferred mid-flight ticket).
+        self._reset_session_state(session_id)
+
+    def _reset_session_state(self, session_id: str) -> None:
+        """Clear EVERY sitting-scoped per-sid map — the single seam `_end_sitting` (close) and
+        `enter_saga` (adopt a different sitting, §5d) share, so a future map added here covers
+        both callers (L-31). A stale `_forge_n` surviving an adoption could seed BELOW the target
+        saga's max instance n and upsert-overwrite a prior chapter's scenario row — an L-3
+        violation; the pops below are load-bearing, not hygiene. Reaps a live worker first
+        (pill + terminal, batch-review C1/C2), SKIPPED while a request is in flight for this sid
+        (C4: a to_worker pill in that window can be consumed as the request's expected input,
+        hanging it — a leaked connection beats a hung request). `_menu_nonce` deliberately
+        survives (monotonic per process, C18); `_stepping` is the in-flight counter, not
+        sitting state."""
         ch = self._ch.get(session_id)
         if ch is not None and not ch.terminal:
             with self._lock:
@@ -1875,6 +1880,7 @@ class SessionRegistry:
                 ch.to_worker.put(_ABANDON)
                 ch.terminal = True
         self._ch.pop(session_id, None)
+        self._sitting_id.pop(session_id, None)
         self._last_record.pop(session_id, None)
         self._fit_variant_idx.pop(session_id, None)
         self._sitting_done.pop(session_id, None)
@@ -1884,8 +1890,6 @@ class SessionRegistry:
         self._inflight_synced.pop(session_id, None)
         self._lost_ref.pop(session_id, None)
         self._lost_exp_id.pop(session_id, None)
-        # Living-sitting state is sitting-scoped: a new world opens at base with a fresh rank
-        # and a fresh instance counter (the sitting id changes, so refs cannot collide anyway).
         self._territory_rank.pop(session_id, None)
         self._level_idx.pop(session_id, None)
         self._forge_n.pop(session_id, None)
