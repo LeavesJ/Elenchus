@@ -868,14 +868,16 @@ class SessionRegistry:
             self._next_pick[session_id] = pick[0]
             self._next_pick_title[session_id] = pick[1]
             next_title = pick[1]
-        if rec is not None and self._store.read_world(sit) is not None:
-            # A world sitting's Continue: SHORT title + muted description + kind (§2d); recomputed
-            # here (the window may have moved). next_kind from the ONE _story predicate — a resumed
-            # Continue keeps the right label across a restart with no schema change (review pt 3).
-            target = self._next_territory(session_id, now)
-            next_title = self._territory_title(target) if target else ""
-            next_desc = _territory_subtitle(target) if target else ""
-            next_kind = "chapter" if self._story(sit) is not None else "pressure"
+        if rec is not None:
+            # A world sitting's Continue label via the SHARED helper (§2d), so a pending steer
+            # names its steer here exactly as continue_session will forge it — the button can't
+            # drift from delivery (cross-arc hunt 2026-07-09). A curated sitting -> None -> the
+            # pick-derived next_title above stands.
+            label = self._wind_down_label(session_id, sit, now)
+            if label is not None:
+                next_kind = label["next_kind"]
+                next_title = label["next_title"]
+                next_desc = label["next_desc"]
         payload = {
             "turns": turns,
             "next_title": next_title,
@@ -1889,32 +1891,39 @@ class SessionRegistry:
             with self._lock:
                 self._steer_pending[session_id] = (raw_user_text, next_pressure, eid)
 
-    def _attach_converse_label(
-        self, session_id: str, sit: str | None, now: datetime, data: dict
-    ) -> None:
-        """The wind-down Continue label (§2c). A servable steer pending -> next_kind='steer', the
-        button a fixed short lead, next_desc = HER raw words (never the distillation, L-13/F2).
-        Else on a world sitting -> the recomputed rotation-sequel label (chapter|pressure), so the
-        label tracks the live window; on a curated sitting -> leave the prior label unchanged.
+    def _wind_down_label(self, session_id: str, sit: str | None, now: datetime) -> dict | None:
+        """The SINGLE source of the wind-down Continue label (§2c/§2d), shared by
+        `_attach_converse_label` (converse) AND `_resume` (reload / enter_saga re-entry) so the
+        button can never again drift from what `continue_session` actually forges — the "button
+        names what it delivers" agreement invariant (cross-arc hunt 2026-07-09: _resume recomputed
+        the rotation label while a surviving steer made Continue forge the steered territory).
 
-        The steer label RE-CHECKS the window (adversarial-review fold F2): a steer whose territory
-        windowed AFTER capture must not keep promising "press what you raised" — consume would then
-        fall back to rotation, breaking the agreement invariant. A windowed pending steer shows the
-        rotation label instead; it stays pending (the window is effectively frozen within a
-        wind-down, so it does not spuriously resurrect, but the pending steer is not destroyed by a
-        transient read)."""
+        A servable steer pending -> {'steer', '', HER raw words} (never the distillation, L-13/F2;
+        RE-CHECKS the window per fold F2 — a steer whose territory windowed after capture falls
+        back to rotation, matching consume). Else a world sitting -> the recomputed rotation-sequel
+        label (chapter|pressure). Returns None for a non-world (curated) sitting so the caller
+        leaves the prior label unchanged."""
         with self._lock:
             steer = self._steer_pending.get(session_id)
         if steer is not None and steer[2] not in self._store.territories_within(now):
-            data["next_kind"] = "steer"
-            data["next_title"] = ""
-            data["next_desc"] = _clip80(steer[0])  # HER raw words
-            return
+            return {"next_kind": "steer", "next_title": "", "next_desc": _clip80(steer[0])}
         if sit is not None and self._store.read_world(sit) is not None:
             target = self._next_territory(session_id, now)
-            data["next_title"] = self._territory_title(target) if target else ""
-            data["next_desc"] = _territory_subtitle(target) if target else ""
-            data["next_kind"] = "chapter" if self._story(sit) is not None else "pressure"
+            return {
+                "next_kind": "chapter" if self._story(sit) is not None else "pressure",
+                "next_title": self._territory_title(target) if target else "",
+                "next_desc": _territory_subtitle(target) if target else "",
+            }
+        return None
+
+    def _attach_converse_label(
+        self, session_id: str, sit: str | None, now: datetime, data: dict
+    ) -> None:
+        """Apply the shared wind-down label to a converse say (§2c); a non-world (curated) sitting
+        leaves the prior label unchanged (the helper returns None)."""
+        label = self._wind_down_label(session_id, sit, now)
+        if label is not None:
+            data.update(label)
 
     def _least_recent_territory(self, session_id: str, now: datetime) -> str:
         """work-anyway's target (§2c review P3): the territory converged longest ago — the

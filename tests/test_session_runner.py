@@ -3473,3 +3473,43 @@ def test_reload_after_reentering_an_interrupted_saga_never_invents_a_restart(tmp
     assert reg._ch.get("single") is None  # same-process, no channel — the misread trigger
     assert "restart" not in payload2["honesty"].lower()
     assert payload2["honesty"] == _HONESTY_LOST_LANDED
+
+
+def test_reentering_a_saga_with_a_pending_steer_keeps_the_button_naming_the_steer(
+    tmp_path, make_fake
+):
+    """Cross-arc regression (hunt 2026-07-09): a pending steer (armed at converse) survives an
+    enter_saga live==target re-entry (non-destructive, no reset), but _resume recomputed the
+    wind-down label from _next_territory ALONE — so the Continue button named the ROTATION chapter
+    while continue_session forged the STEERED territory. The button must name what Continue
+    delivers (the agreement invariant). Co-manifests on a plain page-reload; the shared
+    _wind_down_label helper fixes both."""
+    from retnovation.content_loader import load_library, load_territory_text
+
+    briefs = []
+    reg = SessionRegistry(
+        str(tmp_path / "steer_reenter.db"), model_factory=_world_factory(make_fake, briefs=briefs)
+    )
+    _open_world(reg, "s1")
+    assert _drive(reg, "s1", opening="chapter one")[0] == "done"
+    worked = reg._last_record["s1"]["exp"].experience_id
+    rotation = reg._next_territory("s1", NOW)
+    open_eids = [e.experience_id for e in load_library() if e.regime is Regime.open_ended]
+    steer_target = next(e for e in open_eids if e not in (worked, rotation))
+    _arm_steer(reg, "s1", next_pressure="the bridge round vs run lean", ranked_first=steer_target)
+    tag, data = reg.converse("s1", "Do I raise a bridge round or cut to survive?")
+    assert tag == "say" and data["next_kind"] == "steer"
+
+    # Re-enter the SAME live saga (house 0 = the only converged saga): the resume button must
+    # STILL name the steer, not revert to the rotation chapter.
+    etag, ep = reg.enter_saga("s1", 0)
+    assert etag == "resume"
+    assert ep["next_kind"] == "steer"  # not the rotation 'chapter' (the bug)
+    assert ep["next_desc"] == "Do I raise a bridge round or cut to survive?"  # HER raw words
+    assert "s1" in reg._steer_pending  # the steer survived the re-entry
+
+    # label == delivery: Continue forges the STEERED territory the button named, not rotation.
+    briefs.clear()
+    reg.continue_session("s1")
+    assert any(load_territory_text(steer_target) in b[0] for b in briefs)
+    assert not any(load_territory_text(rotation) in b[0] for b in briefs)
