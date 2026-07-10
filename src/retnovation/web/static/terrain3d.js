@@ -29,18 +29,20 @@ window.Terrain3D = (function () {
     return { x: Math.cos(ordinal * golden) * r, z: Math.sin(ordinal * golden) * r };
   }
 
-  function render(container, payload) {
+  function render(container, payload, opts) {
     var THREE = window.THREE;
     var data = normalize(payload);
+    var onHouseClick = opts && typeof opts.onHouseClick === "function" ? opts.onHouseClick : null;
     if (!THREE) { return; } // index.html keeps a text note as the no-WebGL fallback
     if (activeTeardown) { activeTeardown(); activeTeardown = null; } // stop any prior scene first
+    while (container.firstChild) container.removeChild(container.firstChild); // a re-render must not stack a dead canvas under the live one (Phase 2 deferred Minor; re-entry makes re-renders reachable)
 
     var W = container.clientWidth || 680, H = container.clientHeight || 460;
     var cv = document.createElement("canvas");
     container.appendChild(cv);
     var hint = document.createElement("div");
     hint.style.cssText = "position:absolute;left:14px;bottom:11px;font:12px system-ui,sans-serif;color:#e6a860;opacity:.75;pointer-events:none";
-    hint.textContent = "drag to orbit · scroll to zoom · WASD to roam";
+    hint.textContent = "drag to orbit · scroll to zoom · WASD to roam" + (onHouseClick ? " · click a house to continue its saga" : "");
     if (getComputedStyle(container).position === "static") container.style.position = "relative";
     container.appendChild(hint);
 
@@ -178,6 +180,7 @@ window.Terrain3D = (function () {
       var ch = new THREE.Mesh(new THREE.BoxGeometry(0.28 * s, 0.7 * s, 0.28 * s), chimMat);
       ch.position.set(0.5 * s, top + 0.3 * s, 0.3 * s); g.add(ch);  // top+0.3*s -> 1.7*s at floors=1 (exact)
       g.position.set(x, y, z); g.rotation.y = Math.random() * 6.28; world.add(g);
+      return g;
     }
     function houseRing(cx, cz, vb, n, r, localY, s, lit, bright) {
       for (var k = 0; k < n; k++) { var a = k / n * 6.28; house(cx + Math.cos(a) * r + rnd(-1, 1), vb + localY, cz + Math.sin(a) * r + rnd(-1, 1), s, lit, bright); }
@@ -230,12 +233,12 @@ window.Terrain3D = (function () {
     // Earned houses live ON the first terrace (r inside the tier-1 rim, elevated to its
     // surface) — the old ground-level ring OUTSIDE the rim (r=13.4) hid them behind the
     // mound's silhouette from most camera angles (founder dogfood 2026-07-04).
-    var HOUSE_CAP = 9, HOUSE_RING_R = 10.3, litHouses = 0;
+    var HOUSE_CAP = 9, HOUSE_RING_R = 10.3, litHouses = 0, clickableHouses = [];
     var grouped = [];
     for (var hi = 0; hi < data.houses.length; hi++) {
       var hrow = data.houses[hi], hr = hrow && hrow.region;
       if (typeof hr !== "number" || hr < 0 || hr >= data.regions.length) continue; // never invent an anchor
-      (grouped[hr] = grouped[hr] || []).push(hrow);
+      (grouped[hr] = grouped[hr] || []).push({ h: hrow, i: hi });
     }
     for (var gi = 0; gi < data.regions.length; gi++) {
       var hs = grouped[gi]; if (!hs) continue;
@@ -246,13 +249,15 @@ window.Terrain3D = (function () {
         // slots only, no data beyond arrival order.
         var ha = 0.9 - ((shown - 1) / 2 - hk) * (2 * Math.PI / HOUSE_CAP);
         var hx = anchor.x + Math.cos(ha) * HOUSE_RING_R, hz = anchor.z + Math.sin(ha) * HOUSE_RING_R;
-        var hb = Math.max(1, hs[hk].bucket || 1) / 3;
+        var hb = Math.max(1, hs[hk].h.bucket || 1) / 3;
         // The EARNED house (one per convergence): the only lit-window house in the valley,
         // scaled past every ambient shape, with its own hearth glow — countable at a glance
         // (founder dogfood 2026-07-04: the caption's number must be visible on screen).
         var onTerrace = data.regions[gi] && data.regions[gi].render === "rendered";
         var hy = wh(anchor.x, anchor.z) + (onTerrace ? 2.15 : 0);
-        house(hx, hy, hz, 1.45, true, hb, hs[hk].height_bucket);  // Phase 2: saga stories (2d)
+        var hg = house(hx, hy, hz, 1.45, true, hb, hs[hk].h.height_bucket);  // Phase 2: saga stories (2d)
+        hg.userData.houseIndex = hs[hk].i;  // Phase 3: the click's payload index (server maps it to the saga)
+        clickableHouses.push(hg);
         var hearth = new THREE.PointLight(0xffb066, 0.55 + 0.5 * hb, 12, 2.0);
         hearth.position.set(hx, hy + 2.2, hz); world.add(hearth);
         litHouses++;
@@ -309,15 +314,38 @@ window.Terrain3D = (function () {
 
     // controls (no auto-rotate — founder note)
     var keys = {};
+    var downX = 0, downY = 0, ptrMoved = false;
     function kd(e) { keys[e.key.toLowerCase()] = true; }
     function ku(e) { keys[e.key.toLowerCase()] = false; }
     window.addEventListener("keydown", kd); window.addEventListener("keyup", ku);
-    function dn(e) { dragging = true; introActive = false; container.style.cursor = "grabbing"; var t = e.touches ? e.touches[0] : e; lx = t.clientX; ly = t.clientY; }
-    function mv(e) { if (!dragging) return; var t = e.touches ? e.touches[0] : e; az -= (t.clientX - lx) * 0.006; pol -= (t.clientY - ly) * 0.006; pol = Math.max(0.14, Math.min(1.42, pol)); lx = t.clientX; ly = t.clientY; if (e.touches) e.preventDefault(); }
+    function dn(e) { dragging = true; introActive = false; container.style.cursor = "grabbing"; var t = e.touches ? e.touches[0] : e; lx = t.clientX; ly = t.clientY; downX = t.clientX; downY = t.clientY; ptrMoved = false; }
+    function mv(e) { if (!dragging) return; var t = e.touches ? e.touches[0] : e; if (Math.abs(t.clientX - downX) + Math.abs(t.clientY - downY) > 6) ptrMoved = true; az -= (t.clientX - lx) * 0.006; pol -= (t.clientY - ly) * 0.006; pol = Math.max(0.14, Math.min(1.42, pol)); lx = t.clientX; ly = t.clientY; if (e.touches) e.preventDefault(); }
     function up() { dragging = false; container.style.cursor = "grab"; }
     cv.addEventListener("pointerdown", dn); window.addEventListener("pointermove", mv); window.addEventListener("pointerup", up);
     cv.addEventListener("touchstart", dn, { passive: false }); cv.addEventListener("touchmove", mv, { passive: false }); cv.addEventListener("touchend", up);
     cv.addEventListener("wheel", function (e) { rad *= (1 + (e.deltaY > 0 ? 1 : -1) * 0.08); rad = Math.max(14, Math.min(110, rad)); e.preventDefault(); }, { passive: false });
+    // Phase 3: a CLICK (pointerup without a real drag) on an earned house re-enters its saga.
+    // Raycast against the earned houses only — ambient shapes and terrain are not addressable.
+    var raycaster = onHouseClick ? new THREE.Raycaster() : null;
+    function clickAt(e) {
+      // !dragging rejects a gesture that STARTED off-canvas (e.g. a text-selection drag released
+      // over the canvas): dn never ran, so ptrMoved is stale — the canvas-target listener fires
+      // before the window-bubble up() clears dragging, so this check is reliable.
+      if (!onHouseClick || !dragging || ptrMoved || !clickableHouses.length) return;
+      var rect = cv.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      var ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      raycaster.setFromCamera(ndc, camera);
+      var hits = raycaster.intersectObjects(clickableHouses, true);
+      if (!hits.length) return;
+      var o = hits[0].object;
+      while (o && o.userData.houseIndex === undefined) o = o.parent;
+      if (o) onHouseClick(o.userData.houseIndex);
+    }
+    if (onHouseClick) cv.addEventListener("pointerup", clickAt);
     container.style.cursor = "grab";
     var stopped = false;
     activeTeardown = function () { stopped = true; window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku); window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up); };
@@ -364,7 +392,24 @@ window.Terrain3D = (function () {
     })();
     // The described==displayed contract (founder requirement 2026-07-04): the renderer reports
     // how many EARNED lit houses it actually placed, so a harness can assert caption == scene.
-    return { litHouses: litHouses };
+    return {
+      litHouses: litHouses,
+      houseTargets: clickableHouses.length,  // described==displayed: how many are clickable
+      houseScreenXY: function (i) {
+        // test hook: the CURRENT screen position of house payload-index i (for the zero-token
+        // smoke to dispatch a REAL pointer event through the production raycast path)
+        for (var k = 0; k < clickableHouses.length; k++) {
+          if (clickableHouses[k].userData.houseIndex === i) {
+            var v = new THREE.Vector3();
+            clickableHouses[k].getWorldPosition(v);
+            v.project(camera);
+            var rect = cv.getBoundingClientRect();
+            return { x: rect.left + ((v.x + 1) / 2) * rect.width, y: rect.top + ((1 - v.y) / 2) * rect.height };
+          }
+        }
+        return null;
+      },
+    };
   }
 
   // teardown: stop the active scene's loop + listeners (Phase 2: #homebase recedes on saga start).

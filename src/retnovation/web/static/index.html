@@ -139,6 +139,23 @@ async function goContinue(btn,body){
   catch(_){ t.remove(); btn.disabled=false; input.disabled=false; send.disabled=false;
     endBtn.disabled=false; muted('connection lost — try again.'); }
 }
+let entering = false;
+function enterHouse(i){
+  if(entering) return; entering = true;  // double-click guard (client-side; the server's _entering gate is the real teeth)
+  post('/api/session/single/enter',{house_index:i}).then(r=>{
+    entering = false;
+    if(r.kind==='say'||r.kind==='resume'||r.kind==='done'||r.kind==='frontdoor'){
+      // a CONSUMING re-entry replaces the view: clear the load-time thread (a resume
+      // payload replays the saga's transcript — appending would duplicate the front-door
+      // ask + menu already on screen) and recede the world. renderResume/renderFrontdoor
+      // re-render the homebase themselves when their payload carries it.
+      thread.innerHTML = '';
+      hideHomebase();
+    }
+    // nudge/reserve/error leave the world standing (nothing consumed)
+    advance(r);
+  }).catch(()=>{ entering = false; muted('error: could not enter'); });
+}
 let buildStamp='';
 function applyTheme(t){ if(!t || (!t.accent && !t.persona_mark)) return;  // an empty theme (e.g. a
   // menu re-serve) must not wipe the accent (review C19)
@@ -261,7 +278,7 @@ function renderHomebase(regions, houses){
   regions = regions||[]; houses = houses||[];
   if(!regions.length && !houses.length){ homebaseEl.hidden = true; return; }
   homebaseEl.hidden = false;
-  try { if(window.Terrain3D) Terrain3D.render(homebaseEl, {regions: regions, houses: houses}); }
+  try { if(window.Terrain3D) window.__homebase = Terrain3D.render(homebaseEl, {regions: regions, houses: houses}, {onHouseClick: enterHouse}); }  // __homebase: the smoke's described==displayed handle
   catch(_){ /* no-WebGL: the band stays but empty; the front door below still works */ }
 }
 // A saga is starting (front-door submit / door pick): the world recedes to give the session full
