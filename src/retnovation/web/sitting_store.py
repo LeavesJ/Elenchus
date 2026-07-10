@@ -72,6 +72,17 @@ class SittingStore:
                 # bump without a landing — the vanishing-houses bug).
                 try:
                     c.execute("ALTER TABLE web_sitting_state ADD COLUMN landed_at TEXT")
+                    # Backfill legacy landed records to their sitting's updated_at ONCE, at
+                    # migration time — otherwise the fix is inert on an existing (all-NULL) db
+                    # until a fresh landing, so re-entering a pre-fix saga would still hide newer
+                    # houses (whole-branch review, 2 lenses). A frozen migration-time value is
+                    # immune to later reopen/append_turn bumps (they never pass `now`).
+                    c.execute(
+                        "UPDATE web_sitting_state SET landed_at = "
+                        "(SELECT s.updated_at FROM web_sitting s WHERE s.id = "
+                        "web_sitting_state.sitting_id) "
+                        "WHERE landed_at IS NULL AND record_json IS NOT NULL"
+                    )
                 except sqlite3.OperationalError:
                     pass
         except sqlite3.OperationalError:

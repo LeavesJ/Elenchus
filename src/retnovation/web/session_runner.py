@@ -1122,8 +1122,14 @@ class SessionRegistry:
                 # The landed record + cleared inflight marker, one honest boundary (spec §2b).
                 # `now` stamps landed_at: THIS is the genuine terrain-freezing landing that should
                 # promote the saga's record in the homebase selector (a converse rewrite does not).
+                # A STALE landing (superseded flow the user walked away from) writes its inert
+                # record but must NOT promote the homebase — same L-4 "reward arrival" gate as the
+                # log bank above (review NIT): no landed_at stamp.
                 self._store.write_state(
-                    sit, record=_serialize_record(ch.record), inflight=None, now=now
+                    sit,
+                    record=_serialize_record(ch.record),
+                    inflight=None,
+                    now=None if stale else now,
                 )
                 if not stale:
                     self._inflight_synced[session_id] = None
@@ -1898,16 +1904,20 @@ class SessionRegistry:
         names what it delivers" agreement invariant (cross-arc hunt 2026-07-09: _resume recomputed
         the rotation label while a surviving steer made Continue forge the steered territory).
 
-        A servable steer pending -> {'steer', '', HER raw words} (never the distillation, L-13/F2;
-        RE-CHECKS the window per fold F2 — a steer whose territory windowed after capture falls
-        back to rotation, matching consume). Else a world sitting -> the recomputed rotation-sequel
-        label (chapter|pressure). Returns None for a non-world (curated) sitting so the caller
-        leaves the prior label unchanged."""
+        Only on a WORLD sitting: a servable steer pending -> {'steer', '', HER raw words} (never
+        the distillation, L-13/F2; RE-CHECKS the window per fold F2 — a steer whose territory
+        windowed after capture falls back to rotation, matching consume), else the recomputed
+        rotation-sequel label (chapter|pressure). Returns None for a non-world (curated) sitting so
+        the caller leaves the prior label unchanged. The steer branch is world-gated to match
+        `continue_session`'s forge precondition (world is not None) — a curated sitting can never
+        show a steer button `continue_session` would not honor (whole-branch review: the invariant
+        the fix protects must not re-open in the curated cell)."""
+        world = sit is not None and self._store.read_world(sit) is not None
         with self._lock:
             steer = self._steer_pending.get(session_id)
-        if steer is not None and steer[2] not in self._store.territories_within(now):
+        if world and steer is not None and steer[2] not in self._store.territories_within(now):
             return {"next_kind": "steer", "next_title": "", "next_desc": _clip80(steer[0])}
-        if sit is not None and self._store.read_world(sit) is not None:
+        if world:
             target = self._next_territory(session_id, now)
             return {
                 "next_kind": "chapter" if self._story(sit) is not None else "pressure",
