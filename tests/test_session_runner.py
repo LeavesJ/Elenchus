@@ -3286,6 +3286,7 @@ def test_enter_saga_is_single_flight_per_sid(tmp_path, make_fake):
     reg2._entering.discard("s1")
     tag, _data = reg2.enter_saga("s1", 0)
     assert tag == "say"  # and the gate RELEASES (the finally)
+    assert "s1" not in reg2._entering  # the finally discarded the gate on the successful path
 
 
 def test_enter_saga_missing_scenario_row_refuses_and_never_forges(tmp_path, make_fake):

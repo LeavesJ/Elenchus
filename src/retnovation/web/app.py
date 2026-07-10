@@ -202,7 +202,7 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
     def enter(sid: str, body: _Enter) -> dict:
         # Re-entry (world-as-homebase §5): the click sends an INDEX; the server maps it to the
         # saga (saga_order) — no sitting id ever rides the wire (L-13). Every outcome uses an
-        # existing _emit branch (nudge/resume/say/done/error).
+        # existing _emit branch (nudge/resume/say/frontdoor-say/reserve/error; done unreachable).
         return _emit(reg, *reg.enter_saga(_SID, body.house_index))
 
     return app
