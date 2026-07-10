@@ -40,12 +40,16 @@ _SEAM_TEXT = "Same sitting — next door."
 
 # Branch-accurate honesty copy for a lost in-flight segment (spec §2c states 4/6): the engine is
 # not checkpointable (byte-untouched), so a restart loses the segment's grading — never the words.
-_HONESTY_RESTART_LANDED = (
-    "The server restarted mid-problem; that door closed unfinished. Your conversation is saved — "
+# The lost-segment resume honesty. CAUSE-NEUTRAL (C7/C16, mirroring _STATIC_RESTART_CLOSE): the
+# door may have been left unfinished by a server restart OR by re-entry (enter_saga §5e-i reopens
+# an inflight-closed saga, clears the channel, and a subsequent reload lands here with ch=None but
+# NO restart) — the copy must not invent a restart it can't be sure of (cross-arc hunt 2026-07-09).
+_HONESTY_LOST_LANDED = (
+    "That door was left unfinished. Your conversation is saved — "
     "continue to a next door, or end to see what you've built."
 )
-_HONESTY_RESTART_FIRST = (
-    "The server restarted mid-problem. Your words are saved above — pick a door to keep going."
+_HONESTY_LOST_FIRST = (
+    "That door was left unfinished. Your words are saved above — pick a door to keep going."
 )
 _HONESTY_DOOR_FAILED = "That door failed — it reopens fresh."
 
@@ -827,7 +831,7 @@ class SessionRegistry:
                 honesty = (
                     _HONESTY_DOOR_FAILED
                     if died_here
-                    else (_HONESTY_RESTART_LANDED if rec is not None else _HONESTY_RESTART_FIRST)
+                    else (_HONESTY_LOST_LANDED if rec is not None else _HONESTY_LOST_FIRST)
                 )
             mode = "converse" if rec is not None else "engine"
             if rec is None:

@@ -721,7 +721,9 @@ def test_restart_mid_segment_honesty_and_static_close(tmp_path, make_fake):
     reg2 = SessionRegistry(db, model_factory=make_fake)
     tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
     assert tag == "resume"
-    assert "restarted mid-problem" in data["honesty"]
+    # Cause-neutral lost-segment honesty (C7/C16): an honesty line is served, but it does not
+    # assert a specific cause — a genuine restart and a re-entry reload share this branch.
+    assert data["honesty"] == _HONESTY_LOST_LANDED
     assert data["mode"] == "converse"  # a landed record exists beneath the lost segment
     tag_cl, data_cl = reg2.close("s1")
     assert tag_cl == "close"
@@ -740,7 +742,7 @@ def test_restart_mid_first_segment_offers_fresh_menu(tmp_path, make_fake):
     reg2 = SessionRegistry(db, model_factory=make_fake)
     tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
     assert tag == "resume"
-    assert "restarted mid-problem" in data["honesty"]
+    assert data["honesty"] == _HONESTY_LOST_FIRST  # cause-neutral; nothing landed (C7/C16)
     assert data["mode"] == "engine" and data["end_visible"] is False
     assert data["menu"] and data["menu"]["problems"]  # a fresh way forward
     assert "refs" not in data["menu"]  # L-13: the embedded menu is title-only
@@ -1011,6 +1013,8 @@ from retnovation.web.session_runner import (  # noqa: E402
     _ENTER_REOPEN_HONESTY,
     _FRONTDOOR_ASK,
     _HONEST_FIT,
+    _HONESTY_LOST_FIRST,
+    _HONESTY_LOST_LANDED,
     _RESERVE_COPY,
     _STATIC_BRIDGE,
     _territory_subtitle,
@@ -1905,7 +1909,7 @@ def test_reopen_seam_keys_on_experience_id_after_restart(tmp_path, make_fake):
 
     reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
     tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
-    assert tag == "resume" and "restarted mid-problem" in data["honesty"]
+    assert tag == "resume" and data["honesty"] == _HONESTY_LOST_LANDED  # cause-neutral (C7/C16)
     tag, data = reg2.continue_session("s1")
     assert tag == "say" and data["text"] == _SCENARIO
     assert data.get("seam") == _REOPEN_SEAM_TEXT  # re-entering the interrupted TERRITORY
@@ -3421,3 +3425,51 @@ def test_enter_saga_response_wire_sweep(tmp_path, make_fake):
     reg6b = SessionRegistry(db6, model_factory=_world_factory(make_fake))
     reg6b._next_territory = lambda *a, **k: None  # the all-windowed sentinel
     sweep(reg6b, sit6, *reg6b.enter_saga("s1", 0), kinds=("reserve",))
+
+
+def test_reload_after_reentering_an_interrupted_saga_never_invents_a_restart(tmp_path, make_fake):
+    """Cross-arc regression (hunt 2026-07-09): enter_saga §5e-i reopens an inflight-closed saga,
+    _resume serves the cause-neutral _ENTER_REOPEN_HONESTY, but clears the channel. On a
+    subsequent RELOAD, _resume's lost-segment branch computed died_here=(ch is None)=False and
+    served '_HONESTY_RESTART_*' — 'The server restarted mid-problem' — though nothing restarted.
+    The lost-segment copy is now cause-neutral, so neither the re-entry nor the reload lies."""
+    from retnovation.content_loader import load_library
+    from retnovation.types import Regime
+
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=make_fake)
+    store = SittingStore(db)
+    exp = next(e for e in load_library() if e.regime is Regime.open_ended and e.rubric is not None)
+    eid, ref = exp.experience_id, exp.ledger_ref
+    now = datetime(2026, 7, 9, 12, 0, tzinfo=timezone.utc)
+    # Fabricate the reachable state: saga X converged (a house) THEN interrupted mid-next-segment
+    # (durable inflight) THEN End-closed. close() never clears inflight (only convergence does).
+    sit = store.create_sitting(now)
+    store.log_converged(sit, ref, now, eid)
+    store.write_state(
+        sit,
+        record={
+            "experience_id": eid,
+            "ledger_ref": ref,
+            "posture": None,
+            "recent": [["student", "x"], ["Vera", "y"]],
+            "stop_reason": "converged",
+            "terrain": [],
+            "houses": [],
+        },
+        now=now,
+    )
+    store.write_state(sit, inflight={"experience_id": eid, "ledger_ref": ref})
+    store.close_sitting(sit)
+
+    # Click the house: enter_saga §5e-i serves the cause-neutral reopen line (already correct).
+    tag, payload = reg.enter_saga("single", 0, now)
+    assert tag == "resume"
+    assert payload["honesty"] == _ENTER_REOPEN_HONESTY
+
+    # Reload: the lost-segment branch must NOT claim a restart that never happened.
+    tag2, payload2 = reg.resume_or_start("single", now + timedelta(seconds=5))
+    assert tag2 == "resume"
+    assert reg._ch.get("single") is None  # same-process, no channel — the misread trigger
+    assert "restart" not in payload2["honesty"].lower()
+    assert payload2["honesty"] == _HONESTY_LOST_LANDED
