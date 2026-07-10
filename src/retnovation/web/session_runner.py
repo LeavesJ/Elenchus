@@ -1114,7 +1114,11 @@ class SessionRegistry:
                 ch.record.setdefault("houses", [])
             if sit is not None:
                 # The landed record + cleared inflight marker, one honest boundary (spec §2b).
-                self._store.write_state(sit, record=_serialize_record(ch.record), inflight=None)
+                # `now` stamps landed_at: THIS is the genuine terrain-freezing landing that should
+                # promote the saga's record in the homebase selector (a converse rewrite does not).
+                self._store.write_state(
+                    sit, record=_serialize_record(ch.record), inflight=None, now=now
+                )
                 if not stale:
                     self._inflight_synced[session_id] = None
         if stale:

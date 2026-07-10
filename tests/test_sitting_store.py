@@ -422,3 +422,61 @@ def test_reopen_sitting_unknown_id_with_no_live_returns_none(tmp_path):
     t = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
     assert store.reopen_sitting("nope", t) is None
     assert store.live_sitting() is None
+
+
+def test_reopen_or_activity_on_an_older_saga_never_hides_a_newer_sagas_houses(tmp_path):
+    """Cross-arc regression (hunt 2026-07-09): `_latest_landed_record` ordered by
+    web_sitting.updated_at, which reopen_sitting (and every append_turn) bump WITHOUT a new
+    landing. Re-entering (or conversing in) an OLDER saga promoted its stale, smaller frozen
+    record ahead of the true cumulative one, so newer sagas' houses vanished from the homebase.
+    The selector must key on the actual LANDING time (landed_at), immune to updated_at bumps."""
+    store = _store(tmp_path)
+    t1 = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
+    t2 = datetime(2026, 7, 1, 11, 0, tzinfo=timezone.utc)
+    # Saga A landed first: its frozen record saw only A (1 house).
+    a = store.create_sitting(t1)
+    store.write_state(
+        a,
+        record={
+            "terrain": [{"render": "rendered"}],
+            "houses": [{"region": 0, "bucket": 2, "height_bucket": 1}],
+        },
+        now=t1,
+    )
+    store.close_sitting(a)
+    # Saga B landed later: its frozen record is the CUMULATIVE village (2 houses) the user last saw.
+    b = store.create_sitting(t2)
+    store.write_state(
+        b,
+        record={
+            "terrain": [{"render": "rendered"}, {"render": "rendered"}],
+            "houses": [
+                {"region": 0, "bucket": 2, "height_bucket": 1},
+                {"region": 1, "bucket": 2, "height_bucket": 1},
+            ],
+        },
+        now=t2,
+    )
+    store.close_sitting(b)
+    assert len(store.latest_homebase()["houses"]) == 2  # B is the cumulative homebase
+
+    # Re-enter the OLDER saga A: reopen bumps A.updated_at ahead of B (idle-reaper defense) but
+    # lands NO new record. B's 2 houses must NOT vanish.
+    t3 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+    assert store.reopen_sitting(a, t3) == a
+    assert len(store.latest_homebase()["houses"]) == 2  # still B — the fix
+    assert store.latest_terrain() == [{"render": "rendered"}, {"render": "rendered"}]
+
+    # And a plain turn on A (also bumps updated_at) must not regress the homebase either.
+    store.append_turn(a, "you", {"text": "hi"}, t3 + timedelta(minutes=1))
+    assert len(store.latest_homebase()["houses"]) == 2
+
+
+def test_write_state_without_now_leaves_landed_at_null_ordering_falls_back(tmp_path):
+    """Back-compat: a record written WITHOUT `now` (legacy callers / converse rewrites) does not
+    stamp landed_at, so pure-legacy dbs order by updated_at exactly as before."""
+    store = _store(tmp_path)
+    t1 = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
+    a = store.create_sitting(t1)
+    store.write_state(a, record={"terrain": [{"render": "rendered"}], "houses": []})  # no now
+    assert store.latest_terrain() == [{"render": "rendered"}]  # still selectable

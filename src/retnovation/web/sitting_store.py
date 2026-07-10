@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS web_sitting_turn (
   sitting_id TEXT NOT NULL, seq INTEGER NOT NULL, kind TEXT NOT NULL, payload_json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS web_sitting_state (
   sitting_id TEXT PRIMARY KEY, record_json TEXT, next_pick_ref TEXT, next_pick_title TEXT,
-  inflight_json TEXT, theme_json TEXT, territory_rank_json TEXT);
+  inflight_json TEXT, theme_json TEXT, territory_rank_json TEXT, landed_at TEXT);
 CREATE TABLE IF NOT EXISTS web_converged (
   sitting_id TEXT NOT NULL, ref TEXT NOT NULL, converged_at TEXT NOT NULL,
   experience_id TEXT NOT NULL DEFAULT '');
@@ -64,6 +64,14 @@ class SittingStore:
                 # 2026-07-03) lack the column.
                 try:
                     c.execute("ALTER TABLE web_sitting_state ADD COLUMN territory_rank_json TEXT")
+                except sqlite3.OperationalError:
+                    pass
+                # Same pattern: dbs created before the landed_at decoupling (cross-arc fix,
+                # 2026-07-09) lack the column. landed_at stamps the actual LANDING moment so the
+                # homebase selector no longer keys on updated_at (which reopen_sitting/append_turn
+                # bump without a landing — the vanishing-houses bug).
+                try:
+                    c.execute("ALTER TABLE web_sitting_state ADD COLUMN landed_at TEXT")
                 except sqlite3.OperationalError:
                     pass
         except sqlite3.OperationalError:
@@ -189,8 +197,13 @@ class SittingStore:
         inflight: dict | None = _UNSET,  # type: ignore[assignment]
         theme: dict | None = _UNSET,  # type: ignore[assignment]
         territory_rank: list[str] | None = _UNSET,  # type: ignore[assignment]
+        now: datetime | None = None,
     ) -> None:
-        """Sentinel-partial update: only the keyword arguments actually passed are written."""
+        """Sentinel-partial update: only the keyword arguments actually passed are written. When a
+        non-None `record` is written WITH `now`, `landed_at` is stamped — the LANDING moment. The
+        homebase selector orders by landed_at, so only genuine terrain-freezing landings promote a
+        saga's record; a converse rewrite (no `now`) or a reopen/turn (updated_at only) never
+        does. Callers that omit `now` leave landed_at untouched (back-compat / non-landing writes)."""
         if self._inert:
             return
         with self._conn() as c:
@@ -198,10 +211,16 @@ class SittingStore:
                 "INSERT OR IGNORE INTO web_sitting_state (sitting_id) VALUES (?)", (sitting_id,)
             )
             if record is not _UNSET:
-                c.execute(
-                    "UPDATE web_sitting_state SET record_json=? WHERE sitting_id=?",
-                    (None if record is None else json.dumps(record), sitting_id),
-                )
+                if record is not None and now is not None:
+                    c.execute(
+                        "UPDATE web_sitting_state SET record_json=?, landed_at=? WHERE sitting_id=?",
+                        (json.dumps(record), now.isoformat(), sitting_id),
+                    )
+                else:
+                    c.execute(
+                        "UPDATE web_sitting_state SET record_json=? WHERE sitting_id=?",
+                        (None if record is None else json.dumps(record), sitting_id),
+                    )
             if next_pick is not _UNSET:
                 ref, title = (None, None) if next_pick is None else next_pick
                 c.execute(
@@ -304,17 +323,23 @@ class SittingStore:
         return None if row is None else {"experience_id": row[0], "scenario": row[1]}
 
     def _latest_landed_record(self) -> dict | None:
-        """The parsed record of the most-recently-updated sitting that landed a record with a
-        non-empty terrain — i.e. the exact cumulative village the user last SAW at a close. ONE
-        definition of 'latest landed record' shared by latest_terrain and latest_homebase, so the
-        return-line caption and the rendered homebase can never pick different records (spec §3)."""
+        """The parsed record of the most-recently-LANDED sitting that has a non-empty terrain —
+        i.e. the exact cumulative village the user last SAW at a close. ONE definition shared by
+        latest_terrain and latest_homebase, so the return-line caption and the rendered homebase
+        can never pick different records (spec §3). Ordered by `landed_at` (the terrain-freezing
+        moment), NOT web_sitting.updated_at: reopen_sitting and append_turn bump updated_at without
+        a new landing, so keying on it let re-entering/conversing in an OLDER saga promote a stale,
+        smaller record and hide newer sagas' houses (cross-arc hunt 2026-07-09). Non-null landed_at
+        (post-fix landings) always outranks legacy NULL rows, which fall back to updated_at among
+        themselves."""
         if self._inert:
             return None
         with self._conn() as c:
             rows = c.execute(
                 "SELECT st.record_json FROM web_sitting_state st "
                 "JOIN web_sitting s ON s.id = st.sitting_id "
-                "WHERE st.record_json IS NOT NULL ORDER BY s.updated_at DESC"
+                "WHERE st.record_json IS NOT NULL "
+                "ORDER BY st.landed_at IS NULL, st.landed_at DESC, s.updated_at DESC"
             ).fetchall()
         for (record_j,) in rows:
             record = json.loads(record_j)
