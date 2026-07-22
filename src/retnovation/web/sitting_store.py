@@ -353,7 +353,10 @@ class SittingStore:
         L-13: houses stay {region, bucket}; terrain stays the coarse learner_view; `house_refs`
         (the frozen convergence refs behind those houses, Task 2) is returned ONLY in the record
         branch, for SERVER-SIDE callers (the memory click map) — it is never projected to the
-        wire (`_emit` in web/app.py attaches only `terrain`/`houses`, never `house_refs`)."""
+        wire (`_emit` in web/app.py attaches only `terrain`/`houses`, never `house_refs`).
+        `house_at` (the index-parallel converged_at frozen beside house_refs, S1 drift-guard
+        hardening) rides the same record-only branch, same never-on-the-wire guarantee — `_emit`
+        never reads it, and callers here pick explicit keys, never spread this dict."""
         record = self._latest_landed_record()
         if record is None:
             return {"terrain": [], "houses": []}
@@ -361,6 +364,7 @@ class SittingStore:
             "terrain": record.get("terrain") or [],
             "houses": record.get("houses") or [],
             "house_refs": record.get("house_refs") or [],
+            "house_at": record.get("house_at") or [],
         }
 
     def generated_territories(self, sitting_id: str) -> set[str]:

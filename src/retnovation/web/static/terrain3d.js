@@ -211,7 +211,7 @@ window.Terrain3D = (function () {
       else buildEmber(pp.x, pp.z);
     }
 
-    // Saga houses (Model A, Spec-1 §4): one LIT house per convergence (a sitting's forged world),
+    // Per-convergence houses (Model A, Spec-1 §4): one LIT house per convergence (a sitting's forged world),
     // unit height, clustered inside its region's area — the region's ordinal anchors the cluster;
     // houses take deterministic
     // ordinal ring slots (arrival order fixes the angle: no jitter, no data beyond order). Capped
@@ -242,7 +242,7 @@ window.Terrain3D = (function () {
         var onTerrace = data.regions[gi] && data.regions[gi].render === "rendered";
         var hy = wh(anchor.x, anchor.z) + (onTerrace ? 2.15 : 0);
         var hg = house(hx, hy, hz, 1.45, true, hb);  // Model A: one house per convergence, unit height (Spec-1 §4)
-        hg.userData.houseIndex = hs[hk].i;  // Phase 3: the click's payload index (server maps it to the saga)
+        hg.userData.houseIndex = hs[hk].i;  // Phase 3: the click's payload index (the server maps it to that convergence's memory)
         clickableHouses.push(hg);
         var hearth = new THREE.PointLight(0xffb066, 0.55 + 0.5 * hb, 12, 2.0);
         hearth.position.set(hx, hy + 2.2, hz); world.add(hearth);
@@ -310,7 +310,7 @@ window.Terrain3D = (function () {
     cv.addEventListener("pointerdown", dn); window.addEventListener("pointermove", mv); window.addEventListener("pointerup", up);
     cv.addEventListener("touchstart", dn, { passive: false }); cv.addEventListener("touchmove", mv, { passive: false }); cv.addEventListener("touchend", up);
     cv.addEventListener("wheel", function (e) { rad *= (1 + (e.deltaY > 0 ? 1 : -1) * 0.08); rad = Math.max(14, Math.min(110, rad)); e.preventDefault(); }, { passive: false });
-    // Phase 3: a CLICK (pointerup without a real drag) on an earned house re-enters its saga.
+    // Phase 3: a CLICK (pointerup without a real drag) on an earned house opens that judgment's memory.
     // Raycast against the earned houses only — ambient shapes and terrain are not addressable.
     var raycaster = onHouseClick ? new THREE.Raycaster() : null;
     function clickAt(e) {

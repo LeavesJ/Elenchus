@@ -161,6 +161,11 @@ def _serialize_record(rec: dict) -> dict | None:
         "terrain": rec.get("terrain", []),
         "houses": rec.get("houses", []),
         "house_refs": rec.get("house_refs", []),
+        # S1: the index-parallel converged_at frozen beside house_refs — the drift guard's
+        # exact-identity half (a ref string alone can reconverge and reorder; converged_at
+        # pins WHICH convergence). A pre-S1 record rebuilds with no house_at — memory()
+        # degrades to ref-only back-compat, never a crash (self-heals at the next landing).
+        "house_at": rec.get("house_at", []),
     }
 
 
@@ -965,6 +970,9 @@ class SessionRegistry:
                 # The refs behind those houses, same freeze (Task 2): server-side only, never
                 # serialized to the wire — a pre-T2 record rebuilds with an honest empty list.
                 "house_refs": ser.get("house_refs", []),
+                # S1: the index-parallel converged_at, same freeze — a pre-S1 record rebuilds
+                # with an honest empty list (ref-only drift-guard back-compat).
+                "house_at": ser.get("house_at", []),
             }
             self._last_record[session_id] = rec
             return rec
@@ -1133,9 +1141,15 @@ class SessionRegistry:
                 rows = self._store.converged_log()
                 ch.record["houses"] = self._compose_houses(state, now, rows=rows)
                 ch.record["house_refs"] = convergence_order(rows)
+                # S1 drift-guard hardening: index-parallel converged_at, frozen from the SAME
+                # `rows` read as house_refs — house_at[i] names WHEN house i converged, so a
+                # reconverged ref that reorders converged_log (same ref string, different row)
+                # cannot false-pass the drift guard on ref equality alone.
+                ch.record["house_at"] = [r["converged_at"] for r in rows]
             else:
                 ch.record.setdefault("houses", [])
                 ch.record.setdefault("house_refs", [])
+                ch.record.setdefault("house_at", [])
             if sit is not None:
                 # The landed record + cleared inflight marker, one honest boundary (spec §2b).
                 # `now` stamps landed_at: THIS is the genuine terrain-freezing landing that should
@@ -1553,18 +1567,31 @@ class SessionRegistry:
         and when. No model call; recalled, never graded (L-4); no identifier rides out (L-13 —
         the click sends an index; house_refs is the server-side drift guard). A legacy record
         (no house_refs / NULL position / ref drift) degrades to an HONEST unavailable, never a
-        wrong memory (D1: self-heals at the next landing)."""
+        wrong memory (D1: self-heals at the next landing).
+        S1 hardening: a ref STRING alone is not a unique row identity — a curated ref can
+        reconverge after the 24h window, and if the wall clock stepped backwards between the two
+        convergences, `converged_log()` (ORDER BY converged_at, rowid) reorders so the SAME ref
+        string lands back at the old index. `house_at` (converged_at, frozen index-parallel with
+        house_refs) pins WHICH convergence house `index` names; a ref match with a converged_at
+        mismatch is still drift — never a wrong memory. Records frozen before S1 carry no
+        house_at (empty list) and keep the ref-only check (back-compat; self-heals at the next
+        landing, same as any other legacy degrade here)."""
         home = self._store.latest_homebase()
         refs = home.get("house_refs") or []
+        ats = home.get("house_at") or []
         if not refs:
             return ("memory", {"unavailable": True})
         if isinstance(index, bool) or not isinstance(index, int) or not (0 <= index < len(refs)):
             return ("nudge", {"message": _MEMORY_UNKNOWN_NUDGE})
         rows = self._store.converged_log()
-        if index >= len(rows) or rows[index]["ref"] != refs[index]:
+        if index >= len(rows):
             return ("memory", {"unavailable": True})  # drift guard — never a wrong memory
         row = rows[index]
-        situation = self._memory_situation(row["ref"])
+        ref_mismatch = row["ref"] != refs[index]
+        at_mismatch = bool(ats) and index < len(ats) and row["converged_at"] != ats[index]
+        if ref_mismatch or at_mismatch:
+            return ("memory", {"unavailable": True})  # drift guard — never a wrong memory
+        situation = self._memory_situation(row["ref"], row["experience_id"])
         if situation is None:
             return ("memory", {"unavailable": True})
         when = row["converged_at"]
@@ -1581,19 +1608,25 @@ class SessionRegistry:
             },
         )
 
-    def _memory_situation(self, ref: str) -> str | None:
+    def _memory_situation(self, ref: str, experience_id: str = "") -> str | None:
         """The situation text for a convergence ref: the SERVED forged scenario for a gen: ref;
         for a curated ref, `e.prompt` — the frame-blind library scenario prompt (the same field a
         forged opening serves verbatim, session_runner.py:543) — NEVER load_territory_text (S3:
         territory text names the decision CATEGORY, an L-6 leak) and NEVER the model-voiced
-        opening (voice.opening is a MODEL call, unreproducible; review SF1)."""
+        opening (voice.opening is a MODEL call, unreproducible; review SF1).
+        N1: a curated ledger_ref is not unique to one library entry — two rubrics can share a
+        ref with different prompts (`veldra:license_fork_risk`: continuity_lock_in vs
+        license_continuity). Prefer the entry matching BOTH ref and the row's experience_id
+        (which converged); fall back to ref-first-match for legacy rows (experience_id='')."""
         row = self._store.read_generated_problem(ref)
         if row is not None:
             return row["scenario"]
-        for e in load_library():
-            if e.ledger_ref == ref:
-                return e.prompt
-        return None
+        entries = [e for e in load_library() if e.ledger_ref == ref]
+        if experience_id:
+            for e in entries:
+                if e.experience_id == experience_id:
+                    return e.prompt
+        return entries[0].prompt if entries else None
 
     def close(self, session_id: str) -> tuple[str, dict]:
         """User-owned close: author the honest close from the SITTING's last converged record and

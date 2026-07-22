@@ -3313,3 +3313,90 @@ def test_memory_origin_is_a_date_only_handle_and_null_position_is_a_placeholder_
     assert m["position"] is None  # placeholder bubble, never unavailable (N6)
     assert m["origin"] == "2026-07-19"  # POSITIVE derivation pin (N5); differs from when's day
     assert sit not in str(m)  # the raw id never rides (L-13)
+
+
+def test_memory_drift_guard_checks_row_identity_not_ref_alone(tmp_path, make_fake):
+    """S1 (whole-branch review): a ref string alone is not a unique row identity. A CURATED ref
+    can reconverge after the 24h window; if the wall clock stepped backwards between the two
+    convergences, converged_log() (ORDER BY converged_at, rowid) reorders so the SAME ref string
+    lands back at the frozen index — a ref-only drift guard false-passes and serves the WRONG
+    convergence's position. house_at (converged_at, frozen index-parallel with house_refs at the
+    freeze site) pins WHICH convergence house 0 names, so the guard must refuse here."""
+    from retnovation.content_loader import load_library
+    from retnovation.types import Regime
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    exp = next(e for e in load_library() if e.regime is Regime.open_ended)
+    store = SittingStore(db)
+    t2 = datetime(2026, 7, 21, 10, 0, tzinfo=timezone.utc)
+    t1 = datetime(2026, 7, 20, 10, 0, tzinfo=timezone.utc)  # earlier — the backwards clock step
+
+    # Sitting A: the FROZEN convergence — house 0's true position, at the true (later) time.
+    sit_a = store.create_sitting(t2)
+    store.log_converged(sit_a, exp.ledger_ref, t2, exp.experience_id, position="POS-OLD")
+    store.write_state(
+        sit_a,
+        record={
+            "terrain": [{"render": "rendered"}],
+            "houses": [{"region": 0, "bucket": 2}],
+            "house_refs": [exp.ledger_ref],
+            "house_at": [t2.isoformat()],
+        },
+        now=t2,
+    )
+    store.close_sitting(sit_a)
+
+    # Sitting B: the SAME curated ref reconverges with an EARLIER converged_at — reorders the
+    # live log so rows[0] is now B's row, same ref string as the frozen refs[0].
+    sit_b = store.create_sitting(t1)
+    store.log_converged(sit_b, exp.ledger_ref, t1, exp.experience_id, position="POS-NEW")
+
+    tag, m = reg.memory("s1", 0)
+    assert tag == "memory"
+    assert m == {"unavailable": True}  # refuses — never POS-NEW, never B's `when`
+
+
+def test_memory_curated_situation_honors_the_row_experience_id(tmp_path, make_fake):
+    """N1 (whole-branch review): `_memory_situation` must not first-match on ledger_ref alone —
+    two library entries share `veldra:license_fork_risk` (continuity_lock_in, license_continuity)
+    with DIFFERENT prompts. The situation returned must be the prompt of the entry whose
+    experience_id actually converged (the row's), not whichever entry sorts first."""
+    from retnovation.content_loader import load_library
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    library = load_library()
+    continuity_lock_in = next(e for e in library if e.experience_id == "continuity_lock_in")
+    license_continuity = next(e for e in library if e.experience_id == "license_continuity")
+    assert continuity_lock_in.ledger_ref == license_continuity.ledger_ref
+    assert continuity_lock_in.ledger_ref == "veldra:license_fork_risk"
+    assert continuity_lock_in.prompt != license_continuity.prompt
+
+    store = SittingStore(db)
+    t = datetime(2026, 7, 21, 10, 0, tzinfo=timezone.utc)
+    sit = store.create_sitting(t)
+    store.log_converged(
+        sit,
+        license_continuity.ledger_ref,
+        t,
+        license_continuity.experience_id,
+        position="my call",
+    )
+    store.write_state(
+        sit,
+        record={
+            "terrain": [{"render": "rendered"}],
+            "houses": [{"region": 0, "bucket": 2}],
+            "house_refs": [license_continuity.ledger_ref],
+            "house_at": [t.isoformat()],
+        },
+        now=t,
+    )
+    store.close_sitting(sit)
+    tag, m = reg.memory("s1", 0)
+    assert tag == "memory"
+    assert m["situation"] == license_continuity.prompt  # matches the row's experience_id
+    assert m["situation"] != continuity_lock_in.prompt  # never the other entry sharing the ref
