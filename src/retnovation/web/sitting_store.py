@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS web_sitting_state (
   inflight_json TEXT, theme_json TEXT, territory_rank_json TEXT, landed_at TEXT);
 CREATE TABLE IF NOT EXISTS web_converged (
   sitting_id TEXT NOT NULL, ref TEXT NOT NULL, converged_at TEXT NOT NULL,
-  experience_id TEXT NOT NULL DEFAULT '');
+  experience_id TEXT NOT NULL DEFAULT '', position TEXT);
 CREATE TABLE IF NOT EXISTS web_world (
   sitting_id TEXT PRIMARY KEY, situation TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS web_generated_problem (
@@ -83,6 +83,14 @@ class SittingStore:
                         "web_sitting_state.sitting_id) "
                         "WHERE landed_at IS NULL AND record_json IS NOT NULL"
                     )
+                except sqlite3.OperationalError:
+                    pass
+                # Same pattern: dbs created before the memory capture (Spec 1, 2026-07-21) lack
+                # the column. position = the convergence's committed final student turn, captured
+                # at log time (only genuine convergences log -> capture unambiguous; L-4: recalled,
+                # never graded). Legacy rows stay NULL -> the bubble shows a placeholder.
+                try:
+                    c.execute("ALTER TABLE web_converged ADD COLUMN position TEXT")
                 except sqlite3.OperationalError:
                     pass
         except sqlite3.OperationalError:
@@ -395,15 +403,20 @@ class SittingStore:
     # -- converged log (the rolling repeat guard) --------------------------------------------
 
     def log_converged(
-        self, sitting_id: str, ref: str, now: datetime, experience_id: str = ""
+        self,
+        sitting_id: str,
+        ref: str,
+        now: datetime,
+        experience_id: str = "",
+        position: str | None = None,
     ) -> None:
         if self._inert:
             return
         with self._conn() as c:
             c.execute(
-                "INSERT INTO web_converged (sitting_id, ref, converged_at, experience_id) "
-                "VALUES (?, ?, ?, ?)",
-                (sitting_id, ref, now.isoformat(), experience_id),
+                "INSERT INTO web_converged (sitting_id, ref, converged_at, experience_id, "
+                "position) VALUES (?, ?, ?, ?, ?)",
+                (sitting_id, ref, now.isoformat(), experience_id, position),
             )
 
     def converged_within(self, now: datetime, hours: int = 24) -> set[str]:
@@ -428,12 +441,18 @@ class SittingStore:
             return []
         with self._conn() as c:
             rows = c.execute(
-                "SELECT sitting_id, ref, converged_at, experience_id FROM web_converged "
+                "SELECT sitting_id, ref, converged_at, experience_id, position FROM web_converged "
                 "ORDER BY converged_at, rowid"
             ).fetchall()
         return [
-            {"sitting_id": s, "ref": r, "converged_at": at, "experience_id": eid}
-            for s, r, at, eid in rows
+            {
+                "sitting_id": s,
+                "ref": r,
+                "converged_at": at,
+                "experience_id": eid,
+                "position": position,
+            }
+            for s, r, at, eid, position in rows
         ]
 
     def max_generated_n(self, sitting_id: str) -> int:

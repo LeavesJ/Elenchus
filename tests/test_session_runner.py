@@ -2410,6 +2410,13 @@ def test_late_emission_after_close_writes_to_its_own_sitting_never_the_new_one(t
     con.close()
     assert homes <= {sit_a}  # instance rows never mint under the new sitting
 
+    # Spec-1 5a: a STALE converged flow logs no row -> captures no position; every captured
+    # position belongs to a genuine convergence and is one of ITS OWN sitting's "you" turns.
+    for r in store.converged_log():
+        assert r["position"] is not None
+        you = {t["payload"]["text"] for t in store.turns(r["sitting_id"]) if t["kind"] == "you"}
+        assert r["position"] in you
+
 
 def test_stale_done_never_hijacks_the_new_sittings_session_state(tmp_path, make_fake):
     """The class's in-memory half: a done dequeued from a REPLACED channel must not overwrite
@@ -3513,3 +3520,47 @@ def test_reentering_a_saga_with_a_pending_steer_keeps_the_button_naming_the_stee
     reg.continue_session("s1")
     assert any(load_territory_text(steer_target) in b[0] for b in briefs)
     assert not any(load_territory_text(rotation) in b[0] for b in briefs)
+
+
+def test_convergence_captures_the_final_you_turn_never_a_vera_push(tmp_path, make_fake):
+    """Spec 5a: the position is captured AT log_converged from the last persisted "you" turn —
+    the _positions selection (kind=="you" only), never a vera push, and the landing turn is not
+    yet appended at capture time. Stale/superseded flows never log -> never capture."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg.resume_or_start("s1")
+    assert tag == "say" and data.get("frontdoor")
+    tag, data = reg.step("s1", "my company, my hard call")
+    last_you = None
+    while tag == "say":
+        last_you = "mechanism " + str(id(tag))  # unique final reply text
+        tag, data = reg.step("s1", last_you)
+    assert tag == "done"
+    rows = SittingStore(db).converged_log()
+    assert len(rows) == 1
+    assert rows[0]["position"] == last_you  # her verbatim final substantive turn
+    # and it is a "you" turn's text, not any vera-authored push
+    turns = SittingStore(db).turns(rows[0]["sitting_id"])
+    you_texts = [t["payload"]["text"] for t in turns if t["kind"] == "you"]
+    assert rows[0]["position"] == you_texts[-1]
+
+    # (3f, review N4/SF2): a SECOND convergence in the same sitting captures ITS OWN final "you"
+    # turn — never chapter 1's, never a converse turn — and agrees with the shared _positions
+    # selection (the seam pin: capture at log_converged ≡ _positions' per-landing selection).
+    tag, data = reg.continue_session("s1")
+    assert tag == "say"
+    last_you_2 = None
+    while tag == "say":
+        last_you_2 = "chapter2 " + str(id(data))
+        tag, data = reg.step("s1", last_you_2)
+    assert tag == "done"
+    assert last_you_2 != last_you
+    rows = SittingStore(db).converged_log()
+    assert len(rows) == 2
+    assert rows[0]["position"] == last_you  # chapter 1's row is untouched by chapter 2
+    assert rows[1]["position"] == last_you_2  # chapter 2 captured its OWN final turn
+    sit = rows[1]["sitting_id"]
+    assert sit == rows[0]["sitting_id"]  # same sitting, two convergences
+    assert rows[-1]["position"] == reg._positions(sit)[-1]  # capture ≡ _positions — the seam pin

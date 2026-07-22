@@ -480,3 +480,14 @@ def test_write_state_without_now_leaves_landed_at_null_ordering_falls_back(tmp_p
     a = store.create_sitting(t1)
     store.write_state(a, record={"terrain": [{"render": "rendered"}], "houses": []})  # no now
     assert store.latest_terrain() == [{"render": "rendered"}]  # still selectable
+
+
+def test_log_converged_stores_the_position_and_legacy_rows_read_null(tmp_path):
+    store = _store(tmp_path)
+    t = datetime(2026, 7, 21, 10, 0, tzinfo=timezone.utc)
+    sit = store.create_sitting(t)
+    store.log_converged(sit, "gen:s:1", t, "exp_a", position="I hold the 60/40 split.")
+    store.log_converged(sit, "gen:s:2", t + timedelta(minutes=5), "exp_b")  # legacy shape
+    rows = store.converged_log()
+    assert rows[0]["position"] == "I hold the 60/40 split."
+    assert rows[1]["position"] is None

@@ -1105,7 +1105,17 @@ class SessionRegistry:
             if ch.record.get("stop_reason") == "converged" and not stale:
                 self._sitting_done.setdefault(session_id, set()).add(rec_ref)
                 if sit is not None:
-                    self._store.log_converged(sit, rec_ref, now, ch.record["exp"].experience_id)
+                    # Spec-1 5a: capture the committed position AT the converging moment via the
+                    # shared _last_you_turn seam (the landing turn is appended below, after this
+                    # call). Only genuine convergences reach here (stale/superseded flows skip
+                    # the whole branch), so capture is unambiguous.
+                    self._store.log_converged(
+                        sit,
+                        rec_ref,
+                        now,
+                        ch.record["exp"].experience_id,
+                        position=self._last_you_turn(sit),
+                    )
             # Houses are converged segments (living sitting §2f, L5): compose the cumulative
             # village HERE — beside the frozen terrain, from the SAME post-session state — so
             # the close payload's terrain and houses can never disagree (the log is read AFTER
@@ -1699,6 +1709,19 @@ class SessionRegistry:
             frames_of = {}
         return compose_houses(
             project_terrain(state, now).regions, self._store.converged_log(), frames_of
+        )
+
+    def _last_you_turn(self, sit: str) -> str | None:
+        """The last persisted substantive "you" (student) turn — THE selection seam shared by the
+        capture-at-log (Spec-1 5a) and `_positions` (which applies it per landing boundary):
+        kind=="you" only, never a vera push / bridge / seam / muted turn."""
+        return next(
+            (
+                t["payload"].get("text", "")
+                for t in reversed(self._store.turns(sit))
+                if t["kind"] == "you"
+            ),
+            None,
         )
 
     def _positions(self, sit: str | None) -> list[str]:
