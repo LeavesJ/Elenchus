@@ -2,8 +2,8 @@
  * Terrain3D.render(container, payload) builds a WebGL valley from the L-13 wire payload:
  *   each rendered region -> a village (elevation bucket -> terraces, vitality bucket -> brightness);
  *   each seed region     -> a dark ember waiting to be kindled;
- *   each saga HOUSE -> a lit house on a deterministic ring inside its region's cluster; its
- *   height_bucket (1..3) stacks stories (Phase 2), ordinal-only wire, +N many-cue past 9.
+ *   each saga HOUSE -> one lit house per convergence (Model A: unit height, Spec-1 §4), placed on
+ *   a deterministic ring inside its region's cluster; ordinal-only wire, +N many-cue past 9.
  * Village POSITIONS are a function of the public ordinal ONLY (never frame identity). Requires the
  * vendored global THREE (+ optional EffectComposer/UnrealBloomPass for bloom); degrades to a note if absent.
  * Served at the close AND as the homebase on load (Phase 2). No frame_code / veldra: ref is ever consumed.
@@ -42,7 +42,7 @@ window.Terrain3D = (function () {
     container.appendChild(cv);
     var hint = document.createElement("div");
     hint.style.cssText = "position:absolute;left:14px;bottom:11px;font:12px system-ui,sans-serif;color:#e6a860;opacity:.75;pointer-events:none";
-    hint.textContent = "drag to orbit · scroll to zoom · WASD to roam" + (onHouseClick ? " · click a house to continue its saga" : "");
+    hint.textContent = "drag to orbit · scroll to zoom · WASD to roam" + (onHouseClick ? " · click a house to remember" : "");
     if (getComputedStyle(container).position === "static") container.style.position = "relative";
     container.appendChild(hint);
 
@@ -157,10 +157,9 @@ window.Terrain3D = (function () {
       g.position.set(cx, vb + localCy, cz); g.rotation.y = rot; world.add(g);
     }
 
-    // A house is a SAGA (Phase 1/2): `stories` (its height_bucket, 1..3) stacks that many floors,
-    // a PER-HOUSE vertical axis distinct from a region's concentric terraces (reg.elevation). One
-    // story = the floor tier; a multi-story house reads as a saga you kept building. `s`=scale,
-    // `bright`=vitality glow. Default stories=1 keeps the ambient houseRing houses one story.
+    // A house is a SAGA: `stories` stacks that many floors, a PER-HOUSE vertical axis distinct
+    // from a region's concentric terraces (reg.elevation). Model A (Spec-1 §4) calls this with
+    // unit height only — one convergence, one story. `s`=scale, `bright`=vitality glow.
     function house(x, y, z, s, lit, bright, stories) {
       var g = new THREE.Group();
       var floors = Math.max(1, Math.min(3, stories || 1)), fh = 1.4 * s;
@@ -182,23 +181,11 @@ window.Terrain3D = (function () {
       g.position.set(x, y, z); g.rotation.y = Math.random() * 6.28; world.add(g);
       return g;
     }
-    function houseRing(cx, cz, vb, n, r, localY, s, lit, bright) {
-      for (var k = 0; k < n; k++) { var a = k / n * 6.28; house(cx + Math.cos(a) * r + rnd(-1, 1), vb + localY, cz + Math.sin(a) * r + rnd(-1, 1), s, lit, bright); }
-    }
-
     // A village: elevation bucket (1..3) -> number of rising terraces; vitality bucket (1..3) -> brightness.
     function buildVillage(cx, cz, elev, vit) {
       var vb = wh(cx, cz), bright = Math.max(1, vit) / 3, tiers = Math.max(1, Math.min(3, elev));
       var rTs = [11.6, 8.0, 4.9], rBs = [12.8, 9.0, 5.7], cy = [0.9, 2.75, 4.7], rots = [0, 0.52, 0.2];
       for (var k = 0; k < tiers; k++) gTier(cx, cz, vb, rTs[k], rBs[k], 1.85, cy[k], rots[k], bright);
-      // Ambient structure rings are UNLIT (founder dogfood 2026-07-04: "described must match
-      // displayed" — a LIT house means exactly one convergence, everywhere; the dark shapes
-      // are the ember-vocabulary potential fabric). Village life reads through the terrace
-      // glow + beacon, whose brightness stays vitality-driven.
-      houseRing(cx, cz, vb, 6, 9.7, 2.15, 1.05, false, bright);
-      if (tiers >= 2) houseRing(cx, cz, vb, 4, 6.3, 4.0, 0.95, false, bright);
-      if (tiers >= 3) houseRing(cx, cz, vb, 2, 2.7, 6.0, 0.8, false, bright);
-      houseRing(cx, cz, vb, 6, 15.6, 0.5, 1.0, false, bright);
       // beacon on the top built terrace
       var by = vb + (tiers >= 3 ? 6.0 : tiers === 2 ? 4.1 : 2.3);
       var post = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.5, 4.6, 8), new THREE.MeshStandardMaterial({ color: 0x2a2016, roughness: 0.7 })); post.position.set(cx, by + 2.3, cz); world.add(post);
@@ -213,7 +200,6 @@ window.Terrain3D = (function () {
 
     function buildEmber(cx, cz) {
       var vb = wh(cx, cz);
-      house(cx + 1.2, vb, cz, 0.9, false, 0); house(cx - 1.4, vb, cz + 1.6, 0.85, false, 0);
       sprite(emberTex, 2.6, cx, vb + 1.1, cz, 0.3);
       var pl = new THREE.PointLight(0xff8a4a, 0.22, 16); pl.position.set(cx, vb + 1.4, cz); world.add(pl);
     }
@@ -225,8 +211,8 @@ window.Terrain3D = (function () {
       else buildEmber(pp.x, pp.z);
     }
 
-    // Saga houses (Phase 1/2): one LIT house per saga (a sitting's forged world), height_bucket ->
-    // stacked stories, clustered inside its region's area — the region's ordinal anchors the cluster;
+    // Saga houses (Model A, Spec-1 §4): one LIT house per convergence (a sitting's forged world),
+    // unit height, clustered inside its region's area — the region's ordinal anchors the cluster;
     // houses take deterministic
     // ordinal ring slots (arrival order fixes the angle: no jitter, no data beyond order). Capped
     // at HOUSE_CAP per region with a many-cue: one brighter, larger beacon over the cluster.
@@ -255,7 +241,7 @@ window.Terrain3D = (function () {
         // (founder dogfood 2026-07-04: the caption's number must be visible on screen).
         var onTerrace = data.regions[gi] && data.regions[gi].render === "rendered";
         var hy = wh(anchor.x, anchor.z) + (onTerrace ? 2.15 : 0);
-        var hg = house(hx, hy, hz, 1.45, true, hb, hs[hk].h.height_bucket);  // Phase 2: saga stories (2d)
+        var hg = house(hx, hy, hz, 1.45, true, hb);  // Model A: one house per convergence, unit height (Spec-1 §4)
         hg.userData.houseIndex = hs[hk].i;  // Phase 3: the click's payload index (server maps it to the saga)
         clickableHouses.push(hg);
         var hearth = new THREE.PointLight(0xffb066, 0.55 + 0.5 * hb, 12, 2.0);

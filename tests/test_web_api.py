@@ -956,3 +956,29 @@ def test_memory_route_serves_the_bubble_and_422s_bad_types(tmp_path, make_fake):
     blob = json.dumps(r)
     assert "gen:" not in blob and "veldra:" not in blob and "house_refs" not in blob
     assert client.post("/api/session/single/memory", json={"index": "zero"}).status_code == 422
+
+
+def test_memory_chrome_is_recollective_never_evaluative():
+    """Spec-1 5c (L-4): the memory surface's static strings recall, never grade."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "src" / "retnovation" / "web" / "static"
+    html = (root / "index.html").read_text()
+    start = html.index("function showMemory")
+    block = html[start : html.index("function hideMemory")]
+    js = (root / "terrain3d.js").read_text()
+    hint = next(line for line in js.splitlines() if "click a house" in line)  # the hover hint too
+    for banned in (
+        "solved",
+        "resolved",
+        "mastered",
+        "correct",
+        "well done",
+        "better",
+        "improve",
+        "try again",
+        "score",
+        "✓",
+    ):
+        assert banned not in block.lower(), banned
+        assert banned not in hint.lower(), banned
