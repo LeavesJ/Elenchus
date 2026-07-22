@@ -321,8 +321,8 @@ function renderTerrain(regions, houses){
   host.style.cssText='align-self:stretch;flex:none;width:100%;height:460px;border-radius:16px;'
     +'overflow:hidden;margin:10px 0 2px;background:#04060c;position:relative';
   thread.appendChild(host);
-  // The close copy counts HOUSES = SAGAS (Phase 1): one house per sitting (a forged world),
-  // its height = the sitting's convergence count. house.length is the already-aggregated array.
+  // The close copy counts houses: one house per convergence (Model A). house.length is the
+  // already-per-convergence array.
   const word = n => ['zero','one','two','three','four','five','six','seven','eight','nine'][n]||String(n);
   if(houses.length){
     const hw = word(houses.length);

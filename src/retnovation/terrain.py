@@ -71,21 +71,6 @@ def project_terrain(
     return regions_to_view(regions)
 
 
-def saga_order(rows: list[dict]) -> list[str]:
-    """Distinct `sitting_id`s in FIRST-ARRIVAL order over converged rows (rows arrive
-    `converged_at`-ordered from `converged_log`). The SINGLE index->saga source: `compose_houses`
-    derives its grouping FROM this function, so `houses[i]` is the saga `saga_order(rows)[i]` by
-    construction — the correspondence cannot drift (L-31: one seam, every caller). Server-side
-    only; sitting ids never ride the wire (L-13) — the client clicks an INDEX. Because
-    `web_converged` is append-only (L-3), an index is stable for all time: a saga only grows or
-    gains successors, so the index a FROZEN homebase render shipped keeps resolving to the same
-    saga at click time."""
-    order: dict[str, None] = {}
-    for row in rows:
-        order.setdefault(row["sitting_id"], None)
-    return list(order)
-
-
 def convergence_order(rows: list[dict]) -> list[str]:
     """The convergence refs in canonical `converged_log()` order (`ORDER BY converged_at, rowid`
     — append-only, L-3; assumes `now` monotonicity, carried from Phase-3). THE single seam

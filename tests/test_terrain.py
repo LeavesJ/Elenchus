@@ -5,7 +5,6 @@ from retnovation.terrain import (
     convergence_order,
     project_terrain,
     region_clears_guard,
-    saga_order,
 )
 from retnovation.types import FrameStrength, LearnerState, RegionRender, Strength, TerrainView
 
@@ -374,23 +373,9 @@ def test_elevation_is_rename_invariant():
     )
 
 
-# ---- saga_order: the single index->saga source (Phase 3, plan Task 2) ------------------------
-
-
-def test_saga_order_is_distinct_sitting_ids_in_first_arrival_order():
-    rows = [
-        _row("e1", at="t1", sitting_id="s1"),
-        _row("e2", at="t2", sitting_id="s2"),
-        _row("e3", at="t3", sitting_id="s1"),  # s1 grows; its position must NOT move
-        _row("e4", at="t4", sitting_id="s3"),
-    ]
-    assert saga_order(rows) == ["s1", "s2", "s3"]
-    assert saga_order([]) == []
-
-
 def test_compose_houses_index_is_the_convergence_order_index():
     # houses[i] is convergence i's house (Model A: one house per row) — the saga-grouping index
-    # this test used to check (houses[i] <-> saga_order(rows)[i]) no longer applies to houses;
+    # this test used to check (houses[i] <-> the arrival-order index) no longer applies to houses;
     # re-pointed to the seam that DOES: convergence_order.
     rows = (
         [_row("e", at="t0", sitting_id="a")]

@@ -68,8 +68,9 @@ class SittingStore:
                     pass
                 # Same pattern: dbs created before the landed_at decoupling (cross-arc fix,
                 # 2026-07-09) lack the column. landed_at stamps the actual LANDING moment so the
-                # homebase selector no longer keys on updated_at (which reopen_sitting/append_turn
-                # bump without a landing — the vanishing-houses bug).
+                # homebase selector no longer keys on updated_at (which append_turn — and, in the
+                # since-removed re-entry path, a sitting reopen — bump without a landing, the
+                # vanishing-houses bug).
                 try:
                     c.execute("ALTER TABLE web_sitting_state ADD COLUMN landed_at TEXT")
                     # Backfill legacy landed records to their sitting's updated_at ONCE, at
@@ -145,39 +146,6 @@ class SittingStore:
             return
         with self._conn() as c:
             c.execute("UPDATE web_sitting SET status='closed' WHERE id=?", (sitting_id,))
-
-    def reopen_sitting(self, sitting_id: str, now: datetime) -> str | None:
-        """Re-entry (world-as-homebase spec §5b): flip a CLOSED sitting back to live — the inverse
-        of the one-way `close_sitting` — atomic and defensive, symmetric to `create_sitting`.
-        The partial unique live index is the real enforcement (a Python-level liveness check is
-        TOCTOU): a collision with an existing live row raises IntegrityError and the caller
-        ADOPTS the winner, never a raw 500. `updated_at` is stamped so a reopened old saga does
-        not instantly trip the 18h idle reaper. Returns whichever id is live after the call
-        (target on success, winner on collision), or None when nothing is live and the target
-        is unknown/unflippable."""
-        if self._inert:
-            return sitting_id
-        try:
-            with self._conn() as c:
-                cur = c.execute(
-                    "UPDATE web_sitting SET status='live', updated_at=? "
-                    "WHERE id=? AND status='closed'",
-                    (now.isoformat(), sitting_id),
-                )
-                flipped = cur.rowcount
-        except sqlite3.IntegrityError:
-            # Another row is live (or won a cross-process race): the loser adopts the winner
-            # (create_sitting's C6 pattern).
-            row = self.live_sitting()
-            if row is not None:
-                return row["id"]
-            raise
-        if flipped == 0:
-            # Nothing changed: the target is already live (fine — report it), some other row is
-            # live (adopt it), or the id is unknown (None).
-            row = self.live_sitting()
-            return row["id"] if row is not None else None
-        return sitting_id
 
     # -- turns (the rendered transcript) -----------------------------------------------------
 
@@ -346,9 +314,10 @@ class SittingStore:
         i.e. the exact cumulative village the user last SAW at a close. ONE definition shared by
         latest_terrain and latest_homebase, so the return-line caption and the rendered homebase
         can never pick different records (spec §3). Ordered by `landed_at` (the terrain-freezing
-        moment), NOT web_sitting.updated_at: reopen_sitting and append_turn bump updated_at without
-        a new landing, so keying on it let re-entering/conversing in an OLDER saga promote a stale,
-        smaller record and hide newer sagas' houses (cross-arc hunt 2026-07-09). Non-null landed_at
+        moment), NOT web_sitting.updated_at: append_turn (and, in the since-removed re-entry path,
+        a sitting reopen) bump updated_at without a new landing, so keying on it let
+        re-entering/conversing in an OLDER saga promote a stale, smaller record and hide newer
+        sagas' houses (cross-arc hunt 2026-07-09). Non-null landed_at
         (post-fix landings) always outranks legacy NULL rows, which fall back to updated_at among
         themselves."""
         if self._inert:

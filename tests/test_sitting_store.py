@@ -385,59 +385,13 @@ def test_compose_houses_over_a_real_store_is_one_house_per_convergence_row(tmp_p
     assert all(h["bucket"] is None for h in houses)
 
 
-def test_reopen_sitting_flips_closed_to_live_and_stamps_updated_at(tmp_path):
-    store = _store(tmp_path)
-    t0 = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
-    sit = store.create_sitting(t0)
-    store.close_sitting(sit)
-    assert store.live_sitting() is None
-    t1 = datetime(2026, 7, 9, 9, 0, tzinfo=timezone.utc)
-    assert store.reopen_sitting(sit, t1) == sit
-    row = store.live_sitting()
-    assert row is not None and row["id"] == sit
-    # updated_at is stamped NOW: without it, resume_or_start's 18h idle reaper
-    # would close a just-reopened old saga on the very next load.
-    assert row["updated_at"] == t1.isoformat()
-
-
-def test_reopen_sitting_adopts_the_winner_when_another_sitting_is_live(tmp_path):
-    store = _store(tmp_path)
-    t = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
-    old = store.create_sitting(t)
-    store.close_sitting(old)
-    winner = store.create_sitting(t)  # a different LIVE sitting exists
-    # Flipping `old` to live would violate ux_web_sitting_live -> adopt the winner, never raise.
-    assert store.reopen_sitting(old, t) == winner
-    assert store.live_sitting()["id"] == winner
-    # the target stayed closed (no second live row)
-    import sqlite3
-
-    with sqlite3.connect(str(tmp_path / "s.db")) as c:
-        n = c.execute("SELECT COUNT(*) FROM web_sitting WHERE status='live'").fetchone()[0]
-    assert n == 1
-
-
-def test_reopen_sitting_is_a_noop_when_the_target_is_already_live(tmp_path):
-    store = _store(tmp_path)
-    t = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
-    sit = store.create_sitting(t)
-    assert store.reopen_sitting(sit, t) == sit  # already live == success
-    assert store.live_sitting()["id"] == sit
-
-
-def test_reopen_sitting_unknown_id_with_no_live_returns_none(tmp_path):
-    store = _store(tmp_path)
-    t = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
-    assert store.reopen_sitting("nope", t) is None
-    assert store.live_sitting() is None
-
-
-def test_reopen_or_activity_on_an_older_saga_never_hides_a_newer_sagas_houses(tmp_path):
+def test_activity_on_an_older_saga_never_hides_a_newer_sagas_houses(tmp_path):
     """Cross-arc regression (hunt 2026-07-09): `_latest_landed_record` ordered by
-    web_sitting.updated_at, which reopen_sitting (and every append_turn) bump WITHOUT a new
-    landing. Re-entering (or conversing in) an OLDER saga promoted its stale, smaller frozen
-    record ahead of the true cumulative one, so newer sagas' houses vanished from the homebase.
-    The selector must key on the actual LANDING time (landed_at), immune to updated_at bumps."""
+    web_sitting.updated_at, which every append_turn (and, in the since-removed re-entry path, a
+    sitting reopen) bump WITHOUT a new landing. Activity on an OLDER saga promoted its stale,
+    smaller frozen record ahead of the true cumulative one, so newer sagas' houses vanished from
+    the homebase. The selector must key on the actual LANDING time (landed_at), immune to
+    updated_at bumps."""
     store = _store(tmp_path)
     t1 = datetime(2026, 7, 1, 10, 0, tzinfo=timezone.utc)
     t2 = datetime(2026, 7, 1, 11, 0, tzinfo=timezone.utc)
@@ -468,16 +422,12 @@ def test_reopen_or_activity_on_an_older_saga_never_hides_a_newer_sagas_houses(tm
     store.close_sitting(b)
     assert len(store.latest_homebase()["houses"]) == 2  # B is the cumulative homebase
 
-    # Re-enter the OLDER saga A: reopen bumps A.updated_at ahead of B (idle-reaper defense) but
-    # lands NO new record. B's 2 houses must NOT vanish.
+    # A plain turn on the OLDER saga A (bumps A.updated_at ahead of B, with NO landing) must not
+    # regress the homebase — B's 2 houses must NOT vanish.
     t3 = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
-    assert store.reopen_sitting(a, t3) == a
-    assert len(store.latest_homebase()["houses"]) == 2  # still B — the fix
+    store.append_turn(a, "you", {"text": "hi"}, t3)  # bumps A.updated_at with NO landing
+    assert len(store.latest_homebase()["houses"]) == 2  # landed_at ordering holds
     assert store.latest_terrain() == [{"render": "rendered"}, {"render": "rendered"}]
-
-    # And a plain turn on A (also bumps updated_at) must not regress the homebase either.
-    store.append_turn(a, "you", {"text": "hi"}, t3 + timedelta(minutes=1))
-    assert len(store.latest_homebase()["houses"]) == 2
 
 
 def test_write_state_without_now_leaves_landed_at_null_ordering_falls_back(tmp_path):

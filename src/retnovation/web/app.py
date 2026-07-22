@@ -38,10 +38,6 @@ class _Cont(BaseModel):
     work_anyway: bool = False  # the informed re-serve's first choice (living sitting §2c)
 
 
-class _Enter(BaseModel):
-    house_index: int
-
-
 class _Memory(BaseModel):
     index: int
 
@@ -96,7 +92,7 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
             out["returning"] = data["returning"]
         # Phase 2 (spec §6): the world is the first screen. The frozen cumulative homebase rides
         # the load payload behind the SAME allowlist the close payload uses — positional/bucketed
-        # only (terrain = coarse learner_view; houses = {region, bucket, height_bucket}); no refs,
+        # only (terrain = coarse learner_view; houses = {region, bucket}); no refs,
         # no sitting_id, no raw count (L-13). Attached only when non-empty (first visit = no world).
         if data.get("terrain"):
             out["terrain"] = data["terrain"]
@@ -211,13 +207,6 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
     @app.post("/api/session/{sid}/close")
     def close_session(sid: str):
         return _emit(reg, *reg.close(_SID))
-
-    @app.post("/api/session/{sid}/enter")
-    def enter(sid: str, body: _Enter) -> dict:
-        # Re-entry (world-as-homebase §5): the click sends an INDEX; the server maps it to the
-        # saga (saga_order) — no sitting id ever rides the wire (L-13). Every outcome uses an
-        # existing _emit branch (nudge/resume/say/frontdoor-say/reserve/error; done unreachable).
-        return _emit(reg, *reg.enter_saga(_SID, body.house_index))
 
     @app.post("/api/session/{sid}/memory")
     def memory(sid: str, body: _Memory) -> dict:

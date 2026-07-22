@@ -915,34 +915,9 @@ def test_emit_say_without_a_label_is_unchanged():
     assert out == {"kind": "say", "text": "reply"}
 
 
-def test_enter_route_continues_a_closed_saga_after_a_real_page_load(tmp_path, make_fake):
-    import json
-
-    client = _world_client(tmp_path, make_fake)  # the file's world-factory TestClient builder
-    client.post("/api/session")  # the session must exist before _drive_to_done's first /say
-    _drive_to_done(client)
-    client.post("/api/session/single/close")
-    # the PRODUCTION shape: a page load (which creates the virgin front-door sitting) precedes
-    # every click — this exercises the virgin-close deviation over HTTP
-    r = client.post("/api/session").json()
-    assert r["kind"] == "frontdoor" and r.get("houses")
-    r = client.post("/api/session/single/enter", json={"house_index": 0}).json()
-    assert r["kind"] in ("say", "frontdoor"), r
-    blob = json.dumps(r)
-    assert "gen:" not in blob and "veldra:" not in blob
-
-
-def test_enter_route_bounds_and_types(tmp_path, make_fake):
+def test_enter_route_is_gone(tmp_path, make_fake):
     client = _world_client(tmp_path, make_fake)
-    client.post("/api/session")
-    _drive_to_done(client)
-    client.post("/api/session/single/close")
-    r = client.post("/api/session/single/enter", json={"house_index": -1}).json()
-    assert r["kind"] == "nudge"
-    r = client.post("/api/session/single/enter", json={"house_index": 99}).json()
-    assert r["kind"] == "nudge"
-    resp = client.post("/api/session/single/enter", json={"house_index": "zero"})
-    assert resp.status_code == 422  # pydantic holds the type boundary
+    assert client.post("/api/session/single/enter", json={"house_index": 0}).status_code == 404
 
 
 def test_memory_route_serves_the_bubble_and_422s_bad_types(tmp_path, make_fake):
