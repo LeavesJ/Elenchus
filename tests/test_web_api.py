@@ -943,3 +943,16 @@ def test_enter_route_bounds_and_types(tmp_path, make_fake):
     assert r["kind"] == "nudge"
     resp = client.post("/api/session/single/enter", json={"house_index": "zero"})
     assert resp.status_code == 422  # pydantic holds the type boundary
+
+
+def test_memory_route_serves_the_bubble_and_422s_bad_types(tmp_path, make_fake):
+    import json
+
+    client = _world_client(tmp_path, make_fake)
+    client.post("/api/session")
+    _drive_to_done(client)
+    r = client.post("/api/session/single/memory", json={"index": 0}).json()
+    assert r["kind"] == "memory" and r.get("situation") and r.get("position")
+    blob = json.dumps(r)
+    assert "gen:" not in blob and "veldra:" not in blob and "house_refs" not in blob
+    assert client.post("/api/session/single/memory", json={"index": "zero"}).status_code == 422

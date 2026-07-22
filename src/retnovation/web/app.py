@@ -42,6 +42,10 @@ class _Enter(BaseModel):
     house_index: int
 
 
+class _Memory(BaseModel):
+    index: int
+
+
 def _default_model():
     from ..model import AnthropicModel
 
@@ -132,6 +136,16 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
             "next_desc": data.get("next_desc", ""),
             "next_kind": data.get("next_kind", "pressure"),
         }
+    if tag == "memory":  # the memory bubble (Spec-1 5b/5d): a by-ref pure read, no identifiers
+        if data.get("unavailable"):
+            return {"kind": "memory", "unavailable": True}
+        return {
+            "kind": "memory",
+            "situation": data["situation"],
+            "position": data["position"],
+            "when": data["when"],
+            "origin": data.get("origin", ""),
+        }
     if tag == "close":  # user-driven end: the honest close + the frozen-at-convergence village —
         # terrain regions plus one house per convergence (living sitting §2f; ordinal-only, L-13)
         return {
@@ -204,5 +218,10 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
         # saga (saga_order) — no sitting id ever rides the wire (L-13). Every outcome uses an
         # existing _emit branch (nudge/resume/say/frontdoor-say/reserve/error; done unreachable).
         return _emit(reg, *reg.enter_saga(_SID, body.house_index))
+
+    @app.post("/api/session/{sid}/memory")
+    def memory(sid: str, body: _Memory) -> dict:
+        # Spec-1 5d: the click sends an INDEX; the server resolves it by-ref (L-13).
+        return _emit(reg, *reg.memory(_SID, body.index))
 
     return app

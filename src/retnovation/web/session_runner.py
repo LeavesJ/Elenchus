@@ -70,6 +70,10 @@ _STALE_NUDGE = "This room went stale — refresh to pick up where you left off."
 # durable-sitting resume: transcript + honesty line + working doors), never a bare dead end.
 _DOOR_FAILED_NUDGE = "That door hit an error — refresh to pick up where you left off."
 
+# The memory bubble (Spec-1 5b/5d): the click sends an INDEX into house_refs; an out-of-range or
+# non-int index (bool included — isinstance(True, int) is True in Python) is the honest refusal.
+_MEMORY_UNKNOWN_NUDGE = "That spot isn't one of your houses — try another."
+
 # Re-entry (world-as-homebase §5): the click sends an INDEX; these are the honest refusals.
 _ENTER_UNKNOWN_NUDGE = "That spot isn't one of your houses — try another, or start fresh below."
 _ENTER_FAULT_NUDGE = (
@@ -1653,6 +1657,54 @@ class SessionRegistry:
         data = {"text": reply}
         self._attach_converse_label(session_id, sit, now, data)
         return ("say", data)
+
+    def memory(self, session_id: str, index: int) -> tuple[str, dict]:
+        """The memory bubble (Spec-1 5b): a BY-REF pure read of one convergence — the situation
+        (the served, gated scenario), her committed position VERBATIM (captured at log time, 5a),
+        and when. No model call; recalled, never graded (L-4); no identifier rides out (L-13 —
+        the click sends an index; house_refs is the server-side drift guard). A legacy record
+        (no house_refs / NULL position / ref drift) degrades to an HONEST unavailable, never a
+        wrong memory (D1: self-heals at the next landing)."""
+        home = self._store.latest_homebase()
+        refs = home.get("house_refs") or []
+        if not refs:
+            return ("memory", {"unavailable": True})
+        if isinstance(index, bool) or not isinstance(index, int) or not (0 <= index < len(refs)):
+            return ("nudge", {"message": _MEMORY_UNKNOWN_NUDGE})
+        rows = self._store.converged_log()
+        if index >= len(rows) or rows[index]["ref"] != refs[index]:
+            return ("memory", {"unavailable": True})  # drift guard — never a wrong memory
+        row = rows[index]
+        situation = self._memory_situation(row["ref"])
+        if situation is None:
+            return ("memory", {"unavailable": True})
+        when = row["converged_at"]
+        origin = f"{row['sitting_id'][:4]}-{row['sitting_id'][4:6]}-{row['sitting_id'][6:8]}"
+        if origin == when[:10]:
+            origin = ""  # duplicate of `when` — omit (D4)
+        return (
+            "memory",
+            {
+                "situation": situation,
+                "position": row["position"],  # None for legacy rows -> chrome placeholder
+                "when": when,
+                "origin": origin,
+            },
+        )
+
+    def _memory_situation(self, ref: str) -> str | None:
+        """The situation text for a convergence ref: the SERVED forged scenario for a gen: ref;
+        for a curated ref, `e.prompt` — the frame-blind library scenario prompt (the same field a
+        forged opening serves verbatim, session_runner.py:543) — NEVER load_territory_text (S3:
+        territory text names the decision CATEGORY, an L-6 leak) and NEVER the model-voiced
+        opening (voice.opening is a MODEL call, unreproducible; review SF1)."""
+        row = self._store.read_generated_problem(ref)
+        if row is not None:
+            return row["scenario"]
+        for e in load_library():
+            if e.ledger_ref == ref:
+                return e.prompt
+        return None
 
     def close(self, session_id: str) -> tuple[str, dict]:
         """User-owned close: author the honest close from the SITTING's last converged record and

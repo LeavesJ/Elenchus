@@ -3572,3 +3572,140 @@ def test_convergence_captures_the_final_you_turn_never_a_vera_push(tmp_path, mak
     sit = rows[1]["sitting_id"]
     assert sit == rows[0]["sitting_id"]  # same sitting, two convergences
     assert rows[-1]["position"] == reg._positions(sit)[-1]  # capture ≡ _positions — the seam pin
+
+
+# ---- The memory bubble (Spec-1 5b/5d, plan Task 3): a BY-REF pure read of one convergence -----
+
+
+def test_memory_returns_situation_position_when_for_each_convergence(tmp_path, make_fake):
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg.resume_or_start("s1")
+    tag, data = reg.step("s1", "my company, my hard call")
+    final = None
+    while tag == "say":
+        final = "I commit: hold the line on the exclusivity clause."
+        tag, data = reg.step("s1", final)
+    assert tag == "done"
+    rows = SittingStore(db).converged_log()
+    tag, m = reg.memory("s1", 0)
+    assert tag == "memory"
+    assert m["position"] == final  # verbatim her words (L-4: recalled)
+    assert m["situation"] == _SCENARIO  # the SERVED forged scenario, byte-equal
+    assert m["when"] == rows[0]["converged_at"]
+    # L-13: no identifiers in the payload
+    import json
+
+    blob = json.dumps(m)
+    for needle in ("gen:", "veldra:", rows[0]["sitting_id"], "experience_id", "ledger_ref"):
+        assert needle not in blob, needle
+
+
+def test_memory_bounds_and_legacy_are_honest(tmp_path, make_fake):
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _ = reg.resume_or_start("s1")
+    tag, m = reg.memory("s1", 0)  # nothing converged yet -> no house_refs -> unavailable
+    assert tag == "memory" and m.get("unavailable") is True
+    # bounds (review SF4: converge FIRST so refs is non-empty and the bounds branch — not the
+    # empty short-circuit — is what fires; -1 must never python-index)
+    tag, data = reg.step("s1", "my company, my hard call")
+    while tag == "say":
+        tag, data = reg.step("s1", "mechanism")
+    assert tag == "done"
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    for bad in (-1, 1, 99):
+        tag, m = reg2.memory("s1", bad)
+        assert tag == "nudge", (bad, tag)  # the _MEMORY_UNKNOWN_NUDGE branch, genuinely exercised
+    tag, m = reg2.memory("s1", 0)
+    assert tag == "memory" and m.get("position")  # and index 0 still resolves correctly
+
+
+def test_memory_drift_guard_returns_unavailable_on_ref_mismatch(tmp_path, make_fake):
+    """house_refs[i] is the drift guard: if the frozen refs and the live log ever disagree
+    (a legacy or corrupted record), the bubble refuses rather than serving a WRONG memory."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg.resume_or_start("s1")
+    tag, data = reg.step("s1", "opening")
+    while tag == "say":
+        tag, data = reg.step("s1", "mechanism")
+    store = SittingStore(db)
+    sit = store.converged_log()[0]["sitting_id"]
+    rec = store.read_state(sit)["record"]
+    rec["house_refs"] = ["gen:WRONG:9"]
+    store.write_state(sit, record=rec)
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, m = reg2.memory("s1", 0)
+    assert tag == "memory" and m.get("unavailable") is True
+
+
+def test_memory_curated_situation_is_the_gated_prompt_never_territory_text(tmp_path, make_fake):
+    from retnovation.content_loader import load_library, load_territory_text
+    from retnovation.types import Regime
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    exp = next(e for e in load_library() if e.regime is Regime.open_ended)
+    t = datetime(2026, 7, 21, 10, 0, tzinfo=timezone.utc)
+    store = SittingStore(db)
+    sit = store.create_sitting(t)
+    store.log_converged(sit, exp.ledger_ref, t, exp.experience_id, position="my call")
+    store.write_state(
+        sit,
+        record={
+            "terrain": [{"render": "rendered"}],
+            "houses": [{"region": 0, "bucket": 2}],
+            "house_refs": [exp.ledger_ref],
+        },
+        now=t,
+    )
+    store.close_sitting(sit)
+    tag, m = reg.memory("s1", 0)
+    assert tag == "memory"
+    assert m["situation"] == exp.prompt  # POSITIVE pin: the gated frame-blind prompt (review SF1)
+    assert m["situation"] != load_territory_text(exp.experience_id)  # NEVER the category text (S3)
+    assert m["position"] == "my call"
+    # origin (D4): sitting created 2026-07-21 but... use a differing converged_at to pin the format
+    assert m["when"] == t.isoformat()
+
+
+def test_memory_origin_is_a_date_only_handle_and_null_position_is_a_placeholder_bubble(
+    tmp_path, make_fake
+):
+    """D4: origin = YYYY-MM-DD from the sitting id, shown only when it differs from `when`'s day;
+    the raw sitting_id NEVER rides (positive derivation assert — spec §8/review N5). A legacy row
+    (position=NULL) still gets a BUBBLE with position None (the chrome placeholder), NOT
+    unavailable (spec §5a; review N6)."""
+    from retnovation.content_loader import load_library
+    from retnovation.types import Regime
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "x.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    exp = next(e for e in load_library() if e.regime is Regime.open_ended)
+    t0 = datetime(2026, 7, 19, 10, 0, tzinfo=timezone.utc)  # sitting born day 19
+    t1 = datetime(2026, 7, 21, 10, 0, tzinfo=timezone.utc)  # converged day 21 (differs)
+    store = SittingStore(db)
+    sit = store.create_sitting(t0)
+    store.log_converged(sit, exp.ledger_ref, t1, exp.experience_id)  # legacy: NO position
+    store.write_state(
+        sit,
+        record={
+            "terrain": [{"render": "rendered"}],
+            "houses": [{"region": 0, "bucket": 2}],
+            "house_refs": [exp.ledger_ref],
+        },
+        now=t1,
+    )
+    store.close_sitting(sit)
+    tag, m = reg.memory("s1", 0)
+    assert tag == "memory" and not m.get("unavailable")
+    assert m["position"] is None  # placeholder bubble, never unavailable (N6)
+    assert m["origin"] == "2026-07-19"  # POSITIVE derivation pin (N5); differs from when's day
+    assert sit not in str(m)  # the raw id never rides (L-13)
