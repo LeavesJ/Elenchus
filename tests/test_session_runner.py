@@ -2410,18 +2410,13 @@ def test_late_emission_after_close_writes_to_its_own_sitting_never_the_new_one(t
     con.close()
     assert homes <= {sit_a}  # instance rows never mint under the new sitting
 
-    # Spec-1 5a: a STALE converged flow logs no row -> captures no position; every captured
-    # position belongs to a genuine convergence and is one of ITS OWN sitting's "you" turns.
-    for r in store.converged_log():
-        assert r["position"] is not None
-        you = {t["payload"]["text"] for t in store.turns(r["sitting_id"]) if t["kind"] == "you"}
-        assert r["position"] in you
-
 
 def test_stale_done_never_hijacks_the_new_sittings_session_state(tmp_path, make_fake):
     """The class's in-memory half: a done dequeued from a REPLACED channel must not overwrite
     the session's record/pick/dedupe maps (they belong to the new sitting's flow); its durable
-    writes go to the channel's own sitting."""
+    writes go to the channel's own sitting. Spec-1 5a: the stale converged flow above also
+    captures no position — every row that DOES exist (the genuine convergence from sitting A)
+    carries a position that is one of ITS OWN sitting's "you" turns."""
     db = str(tmp_path / "stale-done.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
     store = SittingStore(db)
@@ -2459,6 +2454,14 @@ def test_stale_done_never_hijacks_the_new_sittings_session_state(tmp_path, make_
     assert reg._next_pick_title["s1"] == "Guard title"
     assert reg._lost_ref["s1"] == "guard:lost"
     assert reg._lost_exp_id["s1"] == "guard:lost_eid"
+    # Spec-1 5a: the stale converged flow above logged no row -> captured no position; every row
+    # that DOES exist (sitting A's genuine convergence) carries a position that is one of ITS OWN
+    # sitting's "you" turns.
+    assert store.converged_log()  # non-vacuous: sitting A's genuine convergence is in the log
+    for r in store.converged_log():
+        assert r["position"] is not None
+        you = {t["payload"]["text"] for t in store.turns(r["sitting_id"]) if t["kind"] == "you"}
+        assert r["position"] in you
 
 
 def test_stale_say_persists_to_own_sitting_but_leaves_the_new_flows_maps(tmp_path, make_fake):
