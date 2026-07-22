@@ -378,14 +378,21 @@ class SittingStore:
         """The homebase load payload (spec §3/§6): the cumulative (terrain, houses) pair a close
         already froze together from the SAME post-session state (session_runner.py:1072-1086) —
         returned from ONE record so every house.region ordinal indexes into the served terrain
-        (no fresh-terrain-with-stale-houses drift). Empty pair when nothing has landed / inert.
-        L-13: houses stay {region, bucket, height_bucket}; terrain stays the coarse learner_view;
-        the raw height and sitting_id never appear here (they were never serialized into the
-        record's houses)."""
+        (no fresh-terrain-with-stale-houses drift). Empty pair when nothing has landed / inert —
+        `{"terrain": [], "houses": []}` EXACTLY (tests/test_sitting_store.py:300 asserts this by
+        equality; no `house_refs` key on the empty shape).
+        L-13: houses stay {region, bucket}; terrain stays the coarse learner_view; `house_refs`
+        (the frozen convergence refs behind those houses, Task 2) is returned ONLY in the record
+        branch, for SERVER-SIDE callers (the memory click map) — it is never projected to the
+        wire (`_emit` in web/app.py attaches only `terrain`/`houses`, never `house_refs`)."""
         record = self._latest_landed_record()
         if record is None:
             return {"terrain": [], "houses": []}
-        return {"terrain": record.get("terrain") or [], "houses": record.get("houses") or []}
+        return {
+            "terrain": record.get("terrain") or [],
+            "houses": record.get("houses") or [],
+            "house_refs": record.get("house_refs") or [],
+        }
 
     def generated_territories(self, sitting_id: str) -> set[str]:
         """Every territory FORGED this sitting, landed or not (batch-review fold: the D1 union

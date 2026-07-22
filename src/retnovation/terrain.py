@@ -86,56 +86,39 @@ def saga_order(rows: list[dict]) -> list[str]:
     return list(order)
 
 
+def convergence_order(rows: list[dict]) -> list[str]:
+    """The convergence refs in canonical `converged_log()` order (`ORDER BY converged_at, rowid`
+    — append-only, L-3; assumes `now` monotonicity, carried from Phase-3). THE single seam
+    (L-31): `compose_houses` and the memory click map both derive from this, so houses[i] ↔ the
+    i-th convergence by construction. Server-side only — refs never ride the wire (L-13)."""
+    return [row["ref"] for row in rows]
+
+
 def compose_houses(
     regions: list[Region],
     rows: list[dict],
     territory_frames: dict[str, tuple[list[str], str | None]],
 ) -> list[dict]:
-    """Houses are SAGAS (a saga = one sitting's forged world). One house per distinct `sitting_id`,
-    in FIRST-ARRIVAL order (rows arrive `converged_at`-ordered from `converged_log`), so a saga's
-    position is stable as it grows. A saga's HEIGHT = its convergence count; its REGION = its
-    MOST-RECENTLY-converged row's region (the last row in arrival order).
+    """Houses are CONVERGENCES (Model A): one house per `converged_log()` row, in arrival order —
+    `compose_houses(...)[i]` is row `i`'s house by construction, the same order `convergence_order`
+    returns (L-31: the single index seam). No grouping, no aggregation: a saga's Nth convergence is
+    its own house, not a story added to a prior one.
 
     Wire shape per house: ``{"region": <ordinal into the ORDERED regions>, "bucket": <that region's
-    public vitality bucket>, "height_bucket": <coarse 1|2|3 saga-height tier>}`` — no refs, no codes,
-    no sitting_id, no raw count (L-13: houses are positional; the raw height stays server-side and is
-    used here only to derive the bucket). Grouping is by `sitting_id` ALONE — a sitting is one saga
-    regardless of what mix of curated/`gen:` refs its rows carry.
+    public vitality bucket>}`` — no refs, no codes, no sitting_id, no raw count, no height (L-13:
+    houses are positional only).
 
-    height_bucket is FLOORED to 1 on a seed region (`bucket is None`) — the same non-invertibility
-    gate the region vitality/elevation axes clear (`region_clears_guard`).
-
-    Region membership per representative row: the row's territory (`experience_id`) -> its rubric's
-    frame codes (from `territory_frames`) -> the region containing them; a territory spanning regions
-    resolves to its decision_frame's region, else the lowest ordinal. Rows without a territory
-    (curated `experience_id=''`) fall back to the region whose `problems` hold the row's ref; a row
-    nothing matches lands in region 0 — never dropped, never a crash."""
-    groups: dict[str, list[dict]] = {s: [] for s in saga_order(rows)}
-    for row in rows:
-        groups[row["sitting_id"]].append(row)
+    Region membership per row: the row's territory (`experience_id`) -> its rubric's frame codes
+    (from `territory_frames`) -> the region containing them; a territory spanning regions resolves
+    to its decision_frame's region, else the lowest ordinal. Rows without a territory (curated
+    `experience_id=''`) fall back to the region whose `problems` hold the row's ref; a row nothing
+    matches lands in region 0 — never dropped, never a crash."""
     houses: list[dict] = []
-    for (
-        saga_rows
-    ) in groups.values():  # insertion order == first-arrival order (rows are time-ordered)
-        idx = _house_region(
-            regions, saga_rows[-1], territory_frames
-        )  # the most-recent row's region
+    for row in rows:  # ONE house per convergence row (Model A) — order == convergence_order(rows)
+        idx = _house_region(regions, row, territory_frames)
         bucket = _vitality_bucket(regions[idx].vitality) if regions else None
-        height_bucket = _house_height_bucket(len(saga_rows)) if bucket is not None else 1
-        houses.append({"region": idx, "bucket": bucket, "height_bucket": height_bucket})
+        houses.append({"region": idx, "bucket": bucket})
     return houses
-
-
-def _house_height_bucket(stories: int) -> int:
-    """A saga-height bucket (1 story / a few / many). DIFFERS from `_elevation_bucket` (which buckets
-    region breadth-count with `<=2 -> 1`): a saga's FIRST growth (1 -> 2 stories) must cross a tier so
-    the "watch my saga grow" payoff registers, so 1 story is its OWN floor tier. Coarse 3-tier only —
-    the raw count stays server-side (L-13); only this bucket rides the wire."""
-    if stories <= 1:
-        return 1
-    if stories <= 4:
-        return 2
-    return 3
 
 
 def _house_region(

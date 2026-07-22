@@ -278,7 +278,8 @@ def test_latest_terrain_quotes_the_most_recent_landed_village(tmp_path):
 def test_latest_homebase_returns_terrain_and_houses_from_the_same_record(tmp_path):
     """The homebase snapshot is the frozen (terrain, houses) pair a close already persisted
     (session_runner.py:1072-1086) — read BOTH from ONE record so every house.region ordinal
-    indexes into the served terrain (spec §3 consistency)."""
+    indexes into the served terrain (spec §3 consistency). The record branch also returns the
+    frozen `house_refs` (Task 2) — server-side only, indexed the same as `houses`."""
     store = _store(
         tmp_path
     )  # the file's helper: SittingStore(str(tmp_path / name)); NO store.close()
@@ -287,12 +288,14 @@ def test_latest_homebase_returns_terrain_and_houses_from_the_same_record(tmp_pat
         {"region_id": "r0", "render": "rendered", "vitality": 2, "elevation": 1},
         {"region_id": "r1", "render": "seed", "vitality": None, "elevation": None},
     ]
-    houses = [{"region": 0, "bucket": 2, "height_bucket": 2}]
+    houses = [{"region": 0, "bucket": 2}]
+    house_refs = ["gen:s:1"]
     # persist a landed record exactly as _serialize_record/_on_done leaves it (terrain+houses keys)
-    store.write_state(sit, record={"terrain": terrain, "houses": houses})
+    store.write_state(sit, record={"terrain": terrain, "houses": houses, "house_refs": house_refs})
     home = store.latest_homebase()
     assert home["terrain"] == terrain
     assert home["houses"] == houses
+    assert home["house_refs"] == house_refs
     assert all(0 <= h["region"] < len(home["terrain"]) for h in home["houses"])
 
 
@@ -306,7 +309,8 @@ def test_latest_homebase_pairs_terrain_and_houses_from_the_SAME_newest_record(tm
     region>0. latest_homebase MUST return the newer record's terrain AND its houses (never a fresh
     terrain paired with stale houses), and agree with latest_terrain. Fails if the two reads ever
     diverge OR if a house mis-indexes a wrong-length terrain (the terrain3d.js:207 silent-drop
-    hazard). A single-record fixture cannot exercise this — it is tautological."""
+    hazard). A single-record fixture cannot exercise this — it is tautological. Extends to
+    `house_refs` (Task 2): the newest record's refs must ride too, never the stale ones."""
     store = _store(tmp_path)
     # OLDER saga: a 2-region terrain, house at region 1
     old = store.create_sitting(NOW)
@@ -318,6 +322,7 @@ def test_latest_homebase_pairs_terrain_and_houses_from_the_SAME_newest_record(tm
                 {"region_id": "r1", "render": "rendered", "vitality": 2, "elevation": 1},
             ],
             "houses": [{"region": 1, "bucket": 2, "height_bucket": 1}],
+            "house_refs": ["gen:old:1"],
         },
     )
     # NEWER saga: a 3-region terrain, house at region 2 — OUT OF RANGE against the old 2-region
@@ -330,19 +335,24 @@ def test_latest_homebase_pairs_terrain_and_houses_from_the_SAME_newest_record(tm
         {"region_id": "r2", "render": "rendered", "vitality": 3, "elevation": 2},
     ]
     new_houses = [{"region": 2, "bucket": 3, "height_bucket": 2}]
-    store.write_state(new, record={"terrain": new_terrain, "houses": new_houses})
+    new_house_refs = ["gen:new:1"]
+    store.write_state(
+        new, record={"terrain": new_terrain, "houses": new_houses, "house_refs": new_house_refs}
+    )
     home = store.latest_homebase()
     assert home["terrain"] == new_terrain  # newest terrain
     assert home["houses"] == new_houses  # newest houses — from the SAME record
+    assert home["house_refs"] == new_house_refs  # newest refs — never the stale "gen:old:1"
     assert home["terrain"] == store.latest_terrain()  # both readers pick the same record
     assert all(0 <= h["region"] < len(home["terrain"]) for h in home["houses"])  # region 2 < 3
 
 
-def test_compose_houses_over_a_real_store_groups_mixed_ontology_sittings(tmp_path):
-    """Retrofit gate (spec §7/§9): over a REAL SittingStore, compose_houses must yield ONE house per
-    SITTING — (a) a sitting mixing a curated ref and a forged gen: ref stays ONE house (never split by
-    ref-prefix), (b) a multi-chapter forged saga is ONE house, (c) a legacy curated-only sitting is ONE
-    house — in first-arrival order, NEVER one house per row (the '6 for 3' bug)."""
+def test_compose_houses_over_a_real_store_is_one_house_per_convergence_row(tmp_path):
+    """Model A gate (spec §7/§9 revert, plan Task 2): over a REAL SittingStore, compose_houses
+    yields ONE house per CONVERGENCE ROW — never grouped by sitting. A sitting mixing a curated
+    ref and a forged gen: ref, a multi-chapter forged saga, and a legacy curated-only sitting all
+    contribute one house PER ROW, in first-arrival order — the honest count, not the old '3 for 6'
+    saga-grouping collapse."""
     from datetime import datetime, timedelta, timezone
 
     from retnovation.terrain import compose_houses, project_terrain
@@ -351,16 +361,16 @@ def test_compose_houses_over_a_real_store_groups_mixed_ontology_sittings(tmp_pat
 
     store = SittingStore(str(tmp_path / "retrofit.db"))
     wall = datetime.now(timezone.utc)
-    # sitting "mix": curated + forged rows in ONE sitting -> must stay ONE house (not split)
+    # sitting "mix": curated + forged rows in ONE sitting -> two rows -> two houses
     store.log_converged(
         "mix", "veldra:license_fork_risk", wall - timedelta(hours=6), "license_continuity"
     )
     store.log_converged("mix", "gen:mix:1", wall - timedelta(hours=5), "license_continuity")
-    # sitting "saga": three forged chapters -> ONE house
+    # sitting "saga": three forged chapters -> three rows -> three houses
     store.log_converged("saga", "gen:saga:1", wall - timedelta(hours=4), "irreversible_anchor")
     store.log_converged("saga", "gen:saga:2", wall - timedelta(hours=3), "irreversible_anchor")
     store.log_converged("saga", "gen:saga:3", wall - timedelta(hours=2), "irreversible_anchor")
-    # sitting "legacy": curated-only -> ONE house
+    # sitting "legacy": curated-only -> one row -> one house
     store.log_converged(
         "legacy", "veldra:proof_before_promise", wall - timedelta(hours=1), "proof_before_promise"
     )
@@ -368,13 +378,11 @@ def test_compose_houses_over_a_real_store_groups_mixed_ontology_sittings(tmp_pat
     rows = store.converged_log()
     assert len(rows) == 6  # six convergence rows across three sittings
     houses = compose_houses(project_terrain(LearnerState(frames={}), wall).regions, rows, {})
-    assert (
-        len(houses) == 3
-    )  # THREE sagas -> THREE houses (NOT six) — mixed sitting NOT split, saga NOT fragmented
+    assert len(houses) == 6  # ONE house per row — the honest count (Model A)
     for h in houses:
-        assert set(h) == {"region", "bucket", "height_bucket"}
-    # empty projection -> every house lands region 0 with bucket None (seed) -> height floored to 1
-    assert all(h["height_bucket"] == 1 for h in houses)
+        assert set(h) == {"region", "bucket"}
+    # empty projection -> every house lands region 0 with bucket None (seed)
+    assert all(h["bucket"] is None for h in houses)
 
 
 def test_reopen_sitting_flips_closed_to_live_and_stamps_updated_at(tmp_path):

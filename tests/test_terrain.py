@@ -1,6 +1,12 @@
 from datetime import datetime, timezone
 
-from retnovation.terrain import compose_houses, project_terrain, region_clears_guard, saga_order
+from retnovation.terrain import (
+    compose_houses,
+    convergence_order,
+    project_terrain,
+    region_clears_guard,
+    saga_order,
+)
 from retnovation.types import FrameStrength, LearnerState, RegionRender, Strength, TerrainView
 
 NOW = datetime(2026, 6, 29, tzinfo=timezone.utc)
@@ -199,9 +205,10 @@ def _two_region_view():
     return project_terrain(state, NOW)
 
 
-def test_houses_founder_regression_two_convergences_one_saga_two_stories():
-    # The 2026-07-02 dogfood collapse is mended by HEIGHT now: two convergences in one sitting =
-    # ONE saga = one house whose height is 2 stories (not two separate houses).
+def test_houses_founder_regression_two_convergences_land_two_houses():
+    # Model A (the revert): houses are convergences, not sagas. Two convergences in ONE sitting are
+    # TWO houses — never grouped into one saga with a height — each carrying the same region's
+    # public vitality.
     state = LearnerState(
         frames={
             "embed": _fs(Strength.strong, ["P1", "P2"]),
@@ -216,17 +223,17 @@ def test_houses_founder_regression_two_convergences_one_saga_two_stories():
     rows = [
         _row("anchor", ref="P1", at="t1"),
         _row("stakes", ref="P2", at="t2"),
-    ]  # same sitting "s"
+    ]  # same sitting "s" — no longer grouped
     houses = compose_houses(view.regions, rows, membership)
-    assert len(houses) == 1  # one saga -> one house
-    assert houses[0]["region"] == 0
-    assert houses[0]["bucket"] == view.learner_view()[0]["vitality"]  # region's public vitality
-    assert houses[0]["height_bucket"] == 2  # two stories (region rendered, so the gate is open)
+    assert len(houses) == 2  # one house PER CONVERGENCE — the honest count
+    assert houses[0]["region"] == 0 and houses[1]["region"] == 0
+    bucket = view.learner_view()[0]["vitality"]  # region's public vitality
+    assert houses[0]["bucket"] == bucket and houses[1]["bucket"] == bucket
 
 
 def test_house_order_follows_converged_arrival_not_region_order():
-    # Arrival order carries time: a saga in the DIMMER region (r1) that converged first stays first.
-    # DISTINCT sittings -> two sagas -> two houses (one convergence each).
+    # Arrival order carries time: a convergence in the DIMMER region (r1) that landed first stays
+    # first. One house PER CONVERGENCE ROW (Model A) — two rows here, two distinct sittings.
     view = _two_region_view()
     membership = {"dim_t": (["a_weak_a"], None), "bright_t": (["z_strong_a"], None)}
     rows = [
@@ -236,7 +243,6 @@ def test_house_order_follows_converged_arrival_not_region_order():
     houses = compose_houses(view.regions, rows, membership)
     assert [h["region"] for h in houses] == [1, 0]
     assert houses[0]["bucket"] == 1 and houses[1]["bucket"] == 3
-    assert houses[0]["height_bucket"] == 1 and houses[1]["height_bucket"] == 1  # one story each
 
 
 def test_spanning_territory_resolves_to_its_decision_frame_region():
@@ -264,7 +270,7 @@ def test_curated_and_unknown_rows_fall_back_to_ref_then_region_zero():
 
 def test_first_convergence_house_sits_in_a_seed_region_with_no_bucket():
     # One forged convergence in a still-seed region: the house renders anyway, carrying the seed's
-    # public bucket (None) and a floored height_bucket (1 — the gate is closed on a seed).
+    # public bucket (None) — the gate is closed on a seed.
     state = LearnerState(
         frames={
             "embed": _fs(Strength.forming, ["G1"]),
@@ -275,19 +281,17 @@ def test_first_convergence_house_sits_in_a_seed_region_with_no_bucket():
     assert view.regions[0].render is RegionRender.seed
     rows = [_row("anchor", ref="G1")]
     houses = compose_houses(view.regions, rows, {"anchor": (["embed", "choose_failure"], None)})
-    assert houses == [{"region": 0, "bucket": None, "height_bucket": 1}]
+    assert houses == [{"region": 0, "bucket": None}]
 
 
 def test_houses_with_no_regions_default_safely():
-    # A converged row over an empty projection: region 0, bucket None, height 1 — never crashes.
-    assert compose_houses([], [_row("", ref="veldra:x")], {}) == [
-        {"region": 0, "bucket": None, "height_bucket": 1}
-    ]
+    # A converged row over an empty projection: region 0, bucket None — never crashes.
+    assert compose_houses([], [_row("", ref="veldra:x")], {}) == [{"region": 0, "bucket": None}]
 
 
 def test_houses_payload_is_rename_invariant():
     # Renaming a frame consistently leaves the houses byte-identical — the wire carries region
-    # ordinals + public buckets only, never frame identity. (height_bucket is a count, rename-invariant.)
+    # ordinals + public buckets only, never frame identity.
     state = LearnerState(
         frames={
             "embed": _fs(Strength.strong, ["P1", "P2"]),
@@ -312,18 +316,18 @@ def test_houses_payload_is_rename_invariant():
         {"anchor": (["zzz_other", "aaa_renamed"], "aaa_renamed")},
     )
     assert h1 == h2  # rename invariant -> non-invertible wire
-    assert len(h1) == 1  # one sitting -> one saga -> one house (two stories)
+    assert len(h1) == 2  # two convergence rows -> two houses (Model A, the honest count)
     for h in h1:
-        assert set(h) == {"region", "bucket", "height_bucket"}  # exactly the L-13-safe keys
+        assert set(h) == {"region", "bucket"}  # exactly the L-13-safe keys
         assert isinstance(h["region"], int)
         assert h["bucket"] in (None, 1, 2, 3)
-        assert h["height_bucket"] in (1, 2, 3)
 
 
-def test_cross_sitting_convergences_are_distinct_sagas_not_one_pile():
-    # THE "6 houses for 3 convergences" REGRESSION: six convergences across three sittings (2+2+2)
-    # must render as THREE houses (three sagas), each two stories — not six houses. This is the
-    # dogfood bug, fixed by construction. (L-25: earlier tests never crossed sittings.)
+def test_cross_sitting_convergences_are_distinct_sagas():
+    # Model A (the revert): houses are convergences, not sagas. Six convergences across three
+    # sittings (2+2+2) render as SIX houses — the honest count. (Under the old saga-grouping model
+    # these six rows collapsed to three; that grouping — and the "6 houses for 3 convergences"
+    # regression it was guarding against — is gone. L-25: earlier tests never crossed sittings.)
     view = _two_region_view()
     membership = {"dim_t": (["a_weak_a"], None)}
     rows = []
@@ -331,24 +335,24 @@ def test_cross_sitting_convergences_are_distinct_sagas_not_one_pile():
         rows.append(_row("dim_t", ref="P8", at=f"{s}a", sitting_id=s))
         rows.append(_row("dim_t", ref="P8", at=f"{s}b", sitting_id=s))
     houses = compose_houses(view.regions, rows, membership)
-    assert len(houses) == 3  # three sagas, NOT six houses
+    assert len(houses) == 6  # one house per convergence row — six rows, six houses
     assert all(h["region"] == 1 for h in houses)
-    assert all(h["height_bucket"] == 2 for h in houses)  # each saga is two stories
 
 
-def test_saga_region_follows_its_most_recent_convergence():
-    # A saga spanning territories/regions across chapters takes the region of its MOST-RECENT
-    # converged row (the last in arrival order), deterministically.
+def test_each_house_sits_in_its_own_rows_region():
+    # Model A dissolves saga-level region inheritance ("a saga takes its most-recent chapter's
+    # region" no longer applies — there is no saga grouping left to inherit into). Two chapters of
+    # the SAME sitting, one per region, are now TWO houses, each sitting in its OWN row's region.
     view = _two_region_view()
     membership = {"dim_t": (["a_weak_a"], None), "bright_t": (["z_strong_a"], None)}
-    rows = [  # same sitting: chapter 1 in the dim region, chapter 2 (latest) in the bright region
+    rows = [  # same sitting: chapter 1 in the dim region, chapter 2 in the bright region
         _row("dim_t", ref="P8", at="t1", sitting_id="s1"),
         _row("bright_t", ref="P1", at="t2", sitting_id="s1"),
     ]
     houses = compose_houses(view.regions, rows, membership)
-    assert len(houses) == 1
-    assert houses[0]["region"] == 0  # the bright region (r0) — the most-recent chapter's region
-    assert houses[0]["height_bucket"] == 2
+    assert len(houses) == 2
+    assert houses[0]["region"] == 1  # chapter 1's own region (dim, r1)
+    assert houses[1]["region"] == 0  # chapter 2's own region (bright, r0)
 
 
 def test_elevation_is_rename_invariant():
@@ -370,18 +374,6 @@ def test_elevation_is_rename_invariant():
     )
 
 
-def test_house_height_bucket_puts_one_story_on_its_own_floor_tier():
-    from retnovation.terrain import _house_height_bucket
-
-    # 1 story = tier 1; "a few" (2-4) = tier 2; "many" (5+) = tier 3. The 1->2 growth MUST cross a
-    # tier (unlike _elevation_bucket's <=2 -> 1) so the "watch my saga grow" payoff registers.
-    assert _house_height_bucket(1) == 1
-    assert _house_height_bucket(2) == 2
-    assert _house_height_bucket(4) == 2
-    assert _house_height_bucket(5) == 3
-    assert _house_height_bucket(20) == 3
-
-
 # ---- saga_order: the single index->saga source (Phase 3, plan Task 2) ------------------------
 
 
@@ -396,9 +388,10 @@ def test_saga_order_is_distinct_sitting_ids_in_first_arrival_order():
     assert saga_order([]) == []
 
 
-def test_compose_houses_index_is_the_saga_order_index():
-    # houses[i] IS saga_order(rows)[i]: same length, and each house's height reflects
-    # exactly its saga's row count (1, 2, 5 rows -> buckets 1, 2, 3 when vitality gates open).
+def test_compose_houses_index_is_the_convergence_order_index():
+    # houses[i] is convergence i's house (Model A: one house per row) — the saga-grouping index
+    # this test used to check (houses[i] <-> saga_order(rows)[i]) no longer applies to houses;
+    # re-pointed to the seam that DOES: convergence_order.
     rows = (
         [_row("e", at="t0", sitting_id="a")]
         + [_row("e", at=f"t{i}", sitting_id="b") for i in range(1, 3)]
@@ -412,7 +405,52 @@ def test_compose_houses_index_is_the_saga_order_index():
     )
     regions = project_terrain(state, NOW).regions  # one rendered region; vitality gate open
     houses = compose_houses(regions, rows, {})
-    order = saga_order(rows)
-    assert order == ["a", "b", "c"]
-    assert len(houses) == len(order)
-    assert [h["height_bucket"] for h in houses] == [1, 2, 3]
+    order = convergence_order(rows)
+    assert len(houses) == len(order) == len(rows) == 8
+
+
+# ---- convergence_order: the single index->convergence seam (Phase 3, plan Task 2) -------------
+
+
+def test_convergence_order_is_refs_in_arrival_order():
+    rows = [
+        _row("e1", ref="P1", at="t1", sitting_id="s1"),
+        _row("e2", ref="gen:s1:1", at="t2", sitting_id="s1"),
+        _row("e1", ref="P1", at="t3", sitting_id="s2"),
+    ]  # duplicate ref = two rows, kept
+    assert convergence_order(rows) == ["P1", "gen:s1:1", "P1"]
+    assert convergence_order([]) == []
+
+
+def test_compose_houses_is_one_house_per_convergence_row():
+    rows = [
+        _row("e", at="t0", sitting_id="a"),
+        _row("e", at="t1", sitting_id="a"),
+        _row("e", at="t2", sitting_id="b"),
+    ]
+    houses = compose_houses([], rows, {})
+    assert len(houses) == 3  # one per row — 6 convergences would be 6 houses (the honest count)
+    assert all(set(h) == {"region", "bucket"} for h in houses)  # height_bucket GONE from the wire
+    assert len(houses) == len(convergence_order(rows))  # the single seam (L-31)
+
+
+def test_compose_houses_over_six_convergences_matches_house_region_element_wise():
+    # The founder's headline count, now correct: six convergences (mixed sittings) -> six houses,
+    # each one's region computed via the SAME _house_region function compose_houses delegates to.
+    from retnovation.terrain import _house_region
+
+    view = _two_region_view()
+    territory_frames = {"dim_t": (["a_weak_a"], None), "bright_t": (["z_strong_a"], None)}
+    rows = [
+        _row("dim_t", ref="P8", at="t1", sitting_id="s1"),
+        _row("bright_t", ref="P1", at="t2", sitting_id="s1"),
+        _row("dim_t", ref="P8", at="t3", sitting_id="s2"),
+        _row("dim_t", ref="P8", at="t4", sitting_id="s2"),
+        _row("bright_t", ref="P1", at="t5", sitting_id="s3"),
+        _row("", ref="GONE", at="t6", sitting_id="s3"),
+    ]
+    houses = compose_houses(view.regions, rows, territory_frames)
+    assert len(houses) == 6  # the founder's headline count, now correct
+    assert [h["region"] for h in houses] == [
+        _house_region(view.regions, r, territory_frames) for r in rows
+    ]

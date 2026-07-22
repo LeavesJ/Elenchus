@@ -1921,26 +1921,28 @@ _REOPEN_SEAM_TEXT = (
 
 
 def _expected_return_line(db: str) -> str:
-    """The invariant, computed the honest way: houses from the converged log; 'regions alight'
-    QUOTES the rendered count of the frozen village the user last saw (never a territory count —
-    batch-review fold: the two can diverge and the line must never contradict the close copy)."""
+    """The invariant, computed the honest way: the caption counts convergence ROWS (Model A: house
+    = one convergence, plan Task 2 — pinned copy "N judgment(s) across your domains"); 'regions
+    alight' QUOTES the rendered count of the frozen village the user last saw (never a territory
+    count — batch-review fold: the two can diverge and the line must never contradict the close
+    copy)."""
     store = SittingStore(db)
     n = len(store.converged_log())
-    houses = "house" if n == 1 else "houses"
-    line = f"Your world so far: {n} {houses}."
+    line = f"{n} judgment{'s' if n != 1 else ''} across your domains."
     terrain = store.latest_terrain()
     if terrain:
         m = sum(1 for r in terrain if r.get("render") == "rendered")
         if m:
             regions = "region" if m == 1 else "regions"
-            line = f"Your world so far: {n} {houses}, {m} {regions} alight."
+            line = f"{n} judgment{'s' if n != 1 else ''} across your domains, {m} {regions} alight."
     return line
 
 
 def test_return_visit_line_rides_the_cold_front_door(tmp_path, make_fake):
     """Review P10: a cold start with closed worlds is not amnesiac — one muted line above the
     ask. Pinned as the INVARIANT (the line quotes the frozen village + the converged log — it can
-    never contradict the close copy), plus both plural branches ('1 house' / '2 houses')."""
+    never contradict the close copy), plus both plural branches ('1 judgment' / '2 judgments';
+    Model A pins each convergence as its own judgment, plan Task 2 review code-truth 5)."""
     db = str(tmp_path / "fd-return.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
     _open_world(reg, "s1")
@@ -1951,10 +1953,10 @@ def test_return_visit_line_rides_the_cold_front_door(tmp_path, make_fake):
     tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
     assert tag == "say" and data.get("frontdoor")
     assert data["returning"] == _expected_return_line(db)
-    assert data["returning"].startswith("Your world so far: 1 house")  # singular branch
+    assert data["returning"].startswith("1 judgment across your domains")  # singular branch
 
     # A second sitting converges the SAME territory (the free-text map ignores the window):
-    # the house count grows; the regions clause keeps quoting the frozen village.
+    # the judgment count grows; the regions clause keeps quoting the frozen village.
     tag, data = reg2.step("s1", _SITUATION)
     assert tag == "say"
     tag, _ = _drive(reg2, "s1", opening="p2")
@@ -1965,7 +1967,7 @@ def test_return_visit_line_rides_the_cold_front_door(tmp_path, make_fake):
     tag, data = reg3.resume_or_start("s1", now=datetime.now(timezone.utc))
     assert tag == "say" and data.get("frontdoor")
     assert data["returning"] == _expected_return_line(db)
-    assert data["returning"].startswith("Your world so far: 2 houses")  # plural branch
+    assert data["returning"].startswith("2 judgments across your domains")  # plural branch
 
 
 def test_forge_brief_positions_exclude_non_converged_landings(tmp_path, make_fake):
@@ -2932,22 +2934,25 @@ def test_distilled_pressure_never_reaches_the_projected_wire(tmp_path, make_fake
     assert "DISTILLED_SECRET_CLAUSE" not in str(_emit(reg, ctag, cdata))  # nor the continue wire
 
 
-def test_returning_line_counts_distinct_sagas_not_rows(tmp_path, make_fake):
-    """The 'Your world so far' line must count SAGAS (distinct sitting_ids), not raw convergence
-    rows — else a saga of N chapters inflates it (the second '6 houses' count-bug site)."""
+def test_returning_line_counts_convergence_rows(tmp_path, make_fake):
+    """Model A (the revert, plan Task 2): the returning caption counts CONVERGENCE ROWS — a saga
+    of N chapters now contributes N to the count, matching len(houses) (the old 'group by
+    sitting_id' premise — and the '6 houses' count-bug fix it guarded — is gone; the honest count
+    is the point). Pinned copy asserted literally: 'N judgment(s) across your domains'
+    (review code-truth 5)."""
     from retnovation.web.sitting_store import SittingStore
 
     db = str(tmp_path / "saga_count.db")
     store = SittingStore(db)
     wall = datetime.now(timezone.utc)
-    # two sagas: sitting A converged twice, sitting B once -> 2 houses, NOT 3 rows
+    # sitting A converges twice, sitting B once -> THREE rows -> three houses -> "3 judgments"
     store.log_converged("A", "gen:A:1", wall - timedelta(hours=3), "eid1")
     store.log_converged("A", "gen:A:2", wall - timedelta(hours=2), "eid1")
     store.log_converged("B", "gen:B:1", wall - timedelta(hours=1), "eid2")
     reg = SessionRegistry(db, model_factory=make_fake)
     tag, data = reg.resume_or_start("single")
-    assert "2 houses" in data["returning"]  # 2 sagas, NOT "3 houses"
-    assert "3 houses" not in data["returning"]
+    assert "3 judgments across your domains" in data["returning"]  # 3 rows, NOT "2 judgments"
+    assert "2 judgments" not in data["returning"]
 
 
 def test_frontdoor_load_payload_carries_homebase_terrain_and_houses(tmp_path, make_fake):
@@ -2965,7 +2970,7 @@ def test_frontdoor_load_payload_carries_homebase_terrain_and_houses(tmp_path, ma
         sit, "gen:x:1", NOW, "eid1"
     )  # (sit, ref, now, eid) — matches _on_done's call
     terrain = [{"region_id": "r0", "render": "rendered", "vitality": 2, "elevation": 1}]
-    houses = [{"region": 0, "bucket": 2, "height_bucket": 1}]
+    houses = [{"region": 0, "bucket": 2}]
     store.write_state(sit, record={"terrain": terrain, "houses": houses})
     store.close_sitting(sit)  # no live sitting -> resume_or_start -> frontdoor branch
     reg = SessionRegistry(db, model_factory=make_fake)  # ...read via a registry on the SAME db PATH
@@ -3005,7 +3010,7 @@ def test_resume_parked_at_frontdoor_carries_the_homebase(tmp_path, make_fake):
     sit = store.create_sitting(NOW)
     store.log_converged(sit, "gen:x:1", NOW, "eid1")
     terrain = [{"region_id": "r0", "render": "rendered", "vitality": 2, "elevation": 1}]
-    houses = [{"region": 0, "bucket": 2, "height_bucket": 1}]
+    houses = [{"region": 0, "bucket": 2}]
     store.write_state(sit, record={"terrain": terrain, "houses": houses})
     store.close_sitting(sit)  # a PRIOR landed saga (the cumulative world so far)
     reg = SessionRegistry(db, model_factory=make_fake)
@@ -3020,7 +3025,7 @@ def test_resume_parked_at_frontdoor_carries_the_homebase(tmp_path, make_fake):
     assert wire["terrain"] == terrain and wire["houses"] == houses
     # L-13 on the resume passthrough: house keys safe, no ref/id/sitting_id token
     for h in wire["houses"]:
-        assert set(h) == {"region", "bucket", "height_bucket"}
+        assert set(h) == {"region", "bucket"}
     blob = json.dumps(wire["terrain"]) + json.dumps(wire["houses"])
     assert "gen:" not in blob and "veldra:" not in blob and "eid1" not in blob and sit not in blob
 

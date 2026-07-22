@@ -15,7 +15,7 @@ from ..content_loader import load_library, load_progression, load_territory_text
 from ..forge import _FALLBACK_BRIDGE, LEVELS, forge_experience, forge_registry
 from ..orchestration import run_session
 from ..scheduler import propose_open_ended
-from ..terrain import compose_houses, project_terrain, saga_order
+from ..terrain import compose_houses, convergence_order, project_terrain, saga_order
 from ..types import EntryClass, Outcome, Regime, Selection, Work
 from . import voice
 from .sitting_store import SittingStore
@@ -167,6 +167,7 @@ def _serialize_record(rec: dict) -> dict | None:
         "stop_reason": rec.get("stop_reason", "converged"),
         "terrain": rec.get("terrain", []),
         "houses": rec.get("houses", []),
+        "house_refs": rec.get("house_refs", []),
     }
 
 
@@ -755,25 +756,31 @@ class SessionRegistry:
             tag, data = self.start(session_id, now=now)
             if tag == "say" and data.get("frontdoor"):
                 # The return visit is not amnesiac (§2f review P10): one muted line above the
-                # ask. Houses = the all-time converged log; "regions alight" quotes the RENDERED
-                # count of the village she last SAW (the frozen learner_view — batch-review fold:
-                # counting territories here could contradict the close copy). No terrain yet, or
-                # nothing rendered → houses only; a seed-stage world is not "alight".
+                # ask. "regions alight" quotes the RENDERED count of the village she last SAW (the
+                # frozen learner_view — batch-review fold: counting territories here could
+                # contradict the close copy). No terrain yet, or nothing rendered → the count only;
+                # a seed-stage world is not "alight".
                 rows = self._store.converged_log()
                 if rows:
-                    n = len({r["sitting_id"] for r in rows})  # distinct SAGAS, not raw rows
-                    houses = "house" if n == 1 else "houses"
-                    line = f"Your world so far: {n} {houses}."
                     # Phase 2: the world is the first screen (spec §6). Read the frozen cumulative
-                    # (terrain, houses) ONCE — the same record feeds the caption's rendered-region
-                    # count AND the render payload, so they can never disagree (spec §3).
+                    # (terrain, houses) ONCE — the same record feeds the caption's count AND the
+                    # render payload, so they can never disagree (spec §3/SF5, even in the D1
+                    # self-heal window). The caption counts the FROZEN houses (one per convergence,
+                    # Model A) when a homebase attaches — equals len(rows) post-heal; on a legacy
+                    # record it honestly matches the old-grain render until the next landing
+                    # re-freezes. With no homebase yet, it falls back to the live log count.
                     home = self._store.latest_homebase()
                     terrain = home["terrain"]
+                    n = len(home["houses"]) if terrain else len(rows)
+                    line = f"{n} judgment{'s' if n != 1 else ''} across your domains."
                     if terrain:
                         m = sum(1 for r in terrain if r.get("render") == "rendered")
                         if m:
                             regions = "region" if m == 1 else "regions"
-                            line = f"Your world so far: {n} {houses}, {m} {regions} alight."
+                            line = (
+                                f"{n} judgment{'s' if n != 1 else ''} across your domains, "
+                                f"{m} {regions} alight."
+                            )
                         data["terrain"] = terrain
                         data["houses"] = home["houses"]
                     data["returning"] = line
@@ -963,6 +970,9 @@ class SessionRegistry:
                 # Frozen beside the terrain at the landing (L5); pre-L5 records rebuild with
                 # no houses — the shell's zero-house copy owns that state honestly.
                 "houses": ser.get("houses", []),
+                # The refs behind those houses, same freeze (Task 2): server-side only, never
+                # serialized to the wire — a pre-T2 record rebuilds with an honest empty list.
+                "house_refs": ser.get("house_refs", []),
             }
             self._last_record[session_id] = rec
             return rec
@@ -1116,18 +1126,24 @@ class SessionRegistry:
                         ch.record["exp"].experience_id,
                         position=self._last_you_turn(sit),
                     )
-            # Houses are converged segments (living sitting §2f, L5): compose the cumulative
-            # village HERE — beside the frozen terrain, from the SAME post-session state — so
-            # the close payload's terrain and houses can never disagree (the log is read AFTER
-            # the just-converged row lands; a plateau recomposes over an unchanged log and adds
-            # none). Frozen into the record, so a restarted registry serves the same houses in
-            # the same order. A drift emission without a state (the defensive _drain path)
-            # leaves the record's houses alone — never a degraded recompose over nothing.
+            # Houses are convergences (Model A, plan Task 2): compose the cumulative village HERE
+            # — beside the frozen terrain, from the SAME post-session state — so the close
+            # payload's terrain and houses can never disagree (the log is read AFTER the
+            # just-converged row lands; a plateau recomposes over an unchanged log and adds none).
+            # Frozen into the record, so a restarted registry serves the same houses in the same
+            # order. ONE `converged_log()` read shared by both consumers (review SF4/L-31):
+            # `_compose_houses` and `convergence_order` derive from the SAME `rows` so
+            # `house_refs[i]` names house `i` by construction — they cannot drift apart. A drift
+            # emission without a state (the defensive _drain path) leaves the record alone —
+            # never a degraded recompose over nothing.
             state = data.get("state")
             if state is not None:
-                ch.record["houses"] = self._compose_houses(state, now)
+                rows = self._store.converged_log()
+                ch.record["houses"] = self._compose_houses(state, now, rows=rows)
+                ch.record["house_refs"] = convergence_order(rows)
             else:
                 ch.record.setdefault("houses", [])
+                ch.record.setdefault("house_refs", [])
             if sit is not None:
                 # The landed record + cleared inflight marker, one honest boundary (spec §2b).
                 # `now` stamps landed_at: THIS is the genuine terrain-freezing landing that should
@@ -1687,15 +1703,17 @@ class SessionRegistry:
 
     # ---- Living-sitting helpers (spec §2c/§2e/§2f): durable-history readers ------------------
 
-    def _compose_houses(self, state, now: datetime) -> list[dict]:
-        """The cumulative village (§2f, L5): one house per SITTING (a saga = one sitting's forged
-        world; height = its convergence count) — every sitting's, the village is as cumulative as
-        the terrain's own engine state — with region membership
-        computed against the SAME projection that freezes the record's terrain, so house region
-        ordinals and the terrain wire can never disagree. Territory membership comes from the
-        L-1 content library (experience_id -> rubric frame codes + decision_frame); an unreadable
-        library degrades to compose_houses' ref/region-0 fallbacks, never a die. Inert stores
-        have an empty log -> no houses (the `:memory:` shell tests stay untouched)."""
+    def _compose_houses(self, state, now: datetime, rows: list[dict]) -> list[dict]:
+        """The cumulative village (Model A, plan Task 2): one house per CONVERGENCE row — the
+        village is as cumulative as the converged log itself — with region membership computed
+        against the SAME projection that freezes the record's terrain, so house region ordinals
+        and the terrain wire can never disagree. `rows` is the caller's OWN `converged_log()`
+        read (review SF4/L-31): the freeze site reads the log ONCE and passes it here AND into
+        `convergence_order`, so `house_refs[i]` names house `i` by construction — never a second,
+        possibly-drifted read. Territory membership comes from the L-1 content library
+        (experience_id -> rubric frame codes + decision_frame); an unreadable library degrades to
+        compose_houses' ref/region-0 fallbacks, never a die. An empty `rows` -> no houses (the
+        `:memory:` shell tests stay untouched)."""
         try:
             frames_of = {
                 e.experience_id: (
@@ -1707,9 +1725,7 @@ class SessionRegistry:
             }
         except Exception:
             frames_of = {}
-        return compose_houses(
-            project_terrain(state, now).regions, self._store.converged_log(), frames_of
-        )
+        return compose_houses(project_terrain(state, now).regions, rows, frames_of)
 
     def _last_you_turn(self, sit: str) -> str | None:
         """The last persisted substantive "you" (student) turn — THE selection seam shared by the

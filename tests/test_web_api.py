@@ -608,10 +608,10 @@ def test_front_door_free_text_flow_over_http(tmp_path, make_fake):
     assert "gen:" not in _json.dumps(blobs)  # L-13: the instance/world grain stays server-side
 
 
-def test_close_payload_shows_one_saga_for_two_same_sitting_convergences(tmp_path, make_fake):
-    """The founder regression (spec §0 defect 2, review P12): two convergences in ONE sitting =
-    ONE house (a saga; its height is the story count) — never two houses. Each house is
-    ordinal-only ({region, bucket, height_bucket}); no gen: ref, no frame code in the payload."""
+def test_close_payload_shows_one_house_per_convergence(tmp_path, make_fake):
+    """Model A (the revert, plan Task 2): houses are convergences. Two convergences in ONE sitting
+    are TWO houses — never grouped into a saga. Each house is ordinal-only ({region, bucket}); no
+    gen: ref, no frame code in the payload."""
     import json as _json
 
     app = create_app(db_path=str(tmp_path / "h2.db"), model_factory=_world_factory(make_fake))
@@ -627,14 +627,11 @@ def test_close_payload_shows_one_saga_for_two_same_sitting_convergences(tmp_path
     cl = client.post("/api/session/s/close").json()
     assert cl["kind"] == "close"
     houses = cl["houses"]
-    assert (
-        len(houses) == 1
-    )  # two convergences in one sitting = ONE saga (not two houses) — the bug fix
-    h = houses[0]
-    assert set(h) == {"region", "bucket", "height_bucket"}  # additive L-13-safe wire
-    assert isinstance(h["region"], int) and 0 <= h["region"] < len(cl["terrain"])
-    assert h["bucket"] in (None, 1, 2, 3)
-    assert h["height_bucket"] in (1, 2, 3)
+    assert len(houses) == 2  # two convergences in one sitting = TWO houses — Model A
+    for h in houses:
+        assert set(h) == {"region", "bucket"}  # additive L-13-safe wire
+        assert isinstance(h["region"], int) and 0 <= h["region"] < len(cl["terrain"])
+        assert h["bucket"] in (None, 1, 2, 3)
     blob = _json.dumps(cl)
     assert "gen:" not in blob and "veldra:" not in blob
     assert "embed_credentials_as_a_list" not in blob
@@ -682,10 +679,9 @@ def test_load_payload_wire_sweep_over_engine_composed_bytes(tmp_path, make_fake)
 
     # structural: exact L-13-safe key sets — these catch ANY extra field regardless of the token scan
     for h in wire.get("houses", []):
-        assert set(h) == {"region", "bucket", "height_bucket"}
+        assert set(h) == {"region", "bucket"}
         assert isinstance(h["region"], int)
         assert h["bucket"] in (None, 1, 2, 3)
-        assert h["height_bucket"] in (1, 2, 3)
     for r in wire.get("terrain", []):
         assert set(r) <= {"region_id", "render", "vitality", "elevation"}
     # token scan: the invertible VALUES only (reuse the close sweep's needle set) — NOT dead key-name
@@ -726,10 +722,10 @@ def test_plateau_adds_no_house(tmp_path, make_fake):
     assert len(cl["houses"]) == 1
 
 
-def test_reserve_convergence_grows_a_saga_not_a_new_house(tmp_path, make_fake):
-    """An informed re-serve (work_anyway) convergence on an ALREADY-worked territory in the SAME
-    sitting adds a STORY to that saga's house, never a new house; a separate sitting is a separate
-    house."""
+def test_reserve_convergence_adds_a_new_house(tmp_path, make_fake):
+    """Model A (the revert): an informed re-serve (work_anyway) convergence on an ALREADY-worked
+    territory in the SAME sitting adds a NEW house — every convergence is its own house, sagas no
+    longer group them."""
     from datetime import datetime, timedelta, timezone
 
     from retnovation.web.sitting_store import SittingStore
@@ -752,16 +748,16 @@ def test_reserve_convergence_grows_a_saga_not_a_new_house(tmp_path, make_fake):
     assert client.post("/api/session").json()["kind"] == "frontdoor"
     r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
     assert r["kind"] == "say"
-    _drive_to_done(client)  # the fifth territory converges: story 1 of the live sitting's saga
+    _drive_to_done(client)  # the fifth territory converges: house 5
     rv = client.post("/api/session/s/continue", json={}).json()
     assert rv["kind"] == "reserve"
     r2 = client.post("/api/session/s/continue", json={"work_anyway": True}).json()
     assert r2["kind"] == "say"
-    _drive_to_done(client)  # re-serve convergence: another STORY on the SAME saga, not a new house
+    _drive_to_done(client)  # re-serve convergence: a NEW house, not a story on a prior one
 
     cl = client.post("/api/session/s/close").json()
     assert cl["kind"] == "close"
-    assert len(cl["houses"]) == 2  # prior sitting (4 stories) + live sitting (2 stories) = 2 sagas
+    assert len(cl["houses"]) == 6  # prior sitting's 4 rows + live sitting's 2 rows = 6 houses
 
 
 def test_houses_are_stable_across_a_restart(tmp_path, make_fake):
@@ -782,7 +778,7 @@ def test_houses_are_stable_across_a_restart(tmp_path, make_fake):
 
     store = SittingStore(db)
     frozen = store.read_state(store.live_sitting()["id"])["record"]["houses"]
-    assert len(frozen) == 1  # one saga (two stories)
+    assert len(frozen) == 2  # two convergences -> two houses (Model A)
 
     app2 = create_app(db_path=db, model_factory=_world_factory(make_fake))  # the restart
     c2 = TestClient(app2)
@@ -815,7 +811,7 @@ def test_preexisting_curated_rows_do_not_crash_the_house_composition(tmp_path, m
     assert cl["kind"] == "close"
     assert len(cl["houses"]) == 2  # the old curated row + the new convergence
     for h in cl["houses"]:
-        assert set(h) == {"region", "bucket", "height_bucket"}
+        assert set(h) == {"region", "bucket"}
 
 
 def test_shell_close_copy_counts_houses():
