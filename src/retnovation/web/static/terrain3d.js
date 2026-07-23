@@ -18,11 +18,11 @@ window.Terrain3D = (function () {
   // indexed from here, including dim/patina states, so hue/saturation never drifts outside the
   // band — no desaturated grey-family entry (equal R/G/B channels) is allowed into this list.
   var DUSK_BAND = [
-    0x0d0a1c, // 0  sky zenith — deep violet-black
-    0x2a1a3c, // 1  sky upper — violet
-    0x5c2d52, // 2  sky mid — mauve-rose
-    0xb8586a, // 3  sky horizon — warm rose
-    0xffb27a, // 4  sun-glow / warm horizon light
+    0x241b3a, // 0  sky zenith — pinned stop (plan-ratified)
+    0x3a2c5c, // 1  sky upper — pinned stop (plan-ratified)
+    0x6b4a7a, // 2  sky mid — pinned stop (plan-ratified)
+    0xc98a8a, // 3  sky horizon — pinned stop (plan-ratified)
+    0xe6b58a, // 4  sun-glow / warm horizon light — pinned stop (plan-ratified)
     0x4a2f52, // 5  isle & dock rock — lit dusk-violet stone
     0x1c1226, // 6  isle & dock rock — dark underside
     0x3a2440, // 7  jetty stone / lantern post
@@ -166,9 +166,9 @@ window.Terrain3D = (function () {
 
     // --- the dock: constant geometry, never grows (Spec-2 §6) ---
     var HOME_R = 6.2;
-    var jettyMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[7], roughness: 0.9 });
-    var lampMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[8], emissive: DUSK_BAND[8], emissiveIntensity: 1.5 });
-    var doorMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[9], emissive: DUSK_BAND[9], emissiveIntensity: 1.05, side: THREE.DoubleSide });
+    var jettyMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[7], roughness: 0.9, flatShading: true });
+    var lampMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[8], emissive: DUSK_BAND[8], emissiveIntensity: 1.5, flatShading: true });
+    var doorMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[9], emissive: DUSK_BAND[9], emissiveIntensity: 1.05, side: THREE.DoubleSide, flatShading: true });
     var homeGeoms = rockGeoms(HOME_R, 2.6, 3.4);
     placeRock(homeGeoms, rockLitMat, rockDarkMat, 0, 0, 1); // the home rock: a squat 8-sided double cone, dusk-violet stone
 
