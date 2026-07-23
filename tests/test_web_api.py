@@ -633,6 +633,17 @@ def test_close_payload_shows_one_house_per_convergence(tmp_path, make_fake):
         assert set(h) == {"region", "bucket", "slot"}  # additive L-13-safe wire
         assert isinstance(h["region"], int) and 0 <= h["region"] < len(cl["terrain"])
         assert h["bucket"] in (None, 1, 2, 3)
+    # Phase-A T5: slots are bare ints and never strings (a frame code planted as a slot value
+    # must be caught); int|None tolerated ONLY for the log-loud exhaustion edge.
+    assert all(isinstance(r["slot"], (int, type(None))) for r in cl.get("terrain", []))
+    assert all(isinstance(h.get("slot"), (int, type(None))) for h in houses)
+    # confluence, when present, is exactly two public ints:
+    if "confluence" in cl:
+        assert set(cl["confluence"]) == {"from_slot", "to_slot"}
+        assert all(isinstance(v, int) for v in cl["confluence"].values())
+    # vessels is exactly a bare count:
+    if "vessels" in cl:
+        assert set(cl["vessels"]) == {"count"}
     blob = _json.dumps(cl)
     assert "gen:" not in blob and "veldra:" not in blob
     assert "embed_credentials_as_a_list" not in blob
@@ -654,7 +665,13 @@ def test_load_payload_wire_sweep_over_engine_composed_bytes(tmp_path, make_fake)
     LOAD-path twin of test_close_payload_shows_one_saga_for_two_same_sitting_convergences — same
     real-convergence seeding, but assert on the bytes the homebase load serves. Catches a leak in
     EITHER the composition path (compose_houses/learner_view) or the _emit/resume_or_start
-    passthrough that a close-only sweep would not cover."""
+    passthrough that a close-only sweep would not cover.
+
+    Phase-A T5 (Spec-2 §10.7/§13): extended with slot/confluence/vessels wire assertions.
+    Plant-and-catch verified (not committed): temporarily setting
+    `wire["terrain"][0]["slot"] = "veldra:x"` right before the assertions below turns BOTH the
+    slot isinstance check and the closing blob-leak grep red; reverted before commit — this sweep
+    has teeth on the new fields, not just the old ones."""
     import json
 
     from retnovation.web.app import _emit
@@ -685,8 +702,24 @@ def test_load_payload_wire_sweep_over_engine_composed_bytes(tmp_path, make_fake)
         assert h["bucket"] in (None, 1, 2, 3)
     for r in wire.get("terrain", []):
         assert set(r) <= {"region_id", "render", "vitality", "elevation", "slot"}
+
+    # slots are bare ints and never strings (a frame code planted as a slot value must be caught);
+    # int|None tolerated ONLY for the log-loud exhaustion edge (this sweep exercises landed payloads
+    # only — the defensive-drain slotless-terrain residual is named in Task 3):
+    assert all(isinstance(r["slot"], (int, type(None))) for r in wire.get("terrain", []))
+    assert all(isinstance(h.get("slot"), (int, type(None))) for h in wire.get("houses", []))
+    # confluence, when present, is exactly two public ints:
+    if "confluence" in wire:
+        assert set(wire["confluence"]) == {"from_slot", "to_slot"}
+        assert all(isinstance(v, int) for v in wire["confluence"].values())
+    # vessels is exactly a bare count:
+    if "vessels" in wire:
+        assert set(wire["vessels"]) == {"count"}
+
     # token scan: the invertible VALUES only (reuse the close sweep's needle set) — NOT dead key-name
     # strings like "sitting_id"/"experience_id"/"frame_code", which never appear as values.
+    # (Whole-blob leak grep still holds over the ENLARGED payload — slot/confluence/vessels
+    # included, since blob is dumped AFTER the fields above are read.)
     blob = json.dumps(wire)
     for needle in ("gen:", "veldra:", "embed_credentials_as_a_list"):  # the close sweep's needles
         assert needle not in blob
