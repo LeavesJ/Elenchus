@@ -122,7 +122,7 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
         }
     if tag == "done":  # the engine converged — the SESSION does not end; the user owns closure. The
         # felt landing rides the payload; the guarded next door (chained sittings) rides with it.
-        return {
+        out = {
             "kind": "done",
             "terminal": True,
             "landing": data.get("landing", ""),
@@ -132,6 +132,12 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
             "next_desc": data.get("next_desc", ""),
             "next_kind": data.get("next_kind", "pressure"),
         }
+        if data.get("confluence"):  # transient (Spec-2 §5): attach-only-when-present, two ints
+            out["confluence"] = {
+                "from_slot": data["confluence"]["from_slot"],
+                "to_slot": data["confluence"]["to_slot"],
+            }
+        return out
     if tag == "memory":  # the memory bubble (Spec-1 5b/5d): a by-ref pure read, no identifiers
         if data.get("unavailable"):
             return {"kind": "memory", "unavailable": True}
@@ -144,12 +150,18 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
         }
     if tag == "close":  # user-driven end: the honest close + the frozen-at-convergence village —
         # terrain regions plus one house per convergence (living sitting §2f; ordinal-only, L-13)
-        return {
+        out = {
             "kind": "close",
             "close": data.get("close", ""),
             "terrain": data.get("terrain", []),
             "houses": data.get("houses", []),
         }
+        if data.get("confluence"):  # transient (Spec-2 §5): attach-only-when-present, two ints
+            out["confluence"] = {
+                "from_slot": data["confluence"]["from_slot"],
+                "to_slot": data["confluence"]["to_slot"],
+            }
+        return out
     return {"kind": "error", "message": data.get("message", "")}
 
 

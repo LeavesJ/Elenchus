@@ -186,7 +186,8 @@ def test_converse_and_close_endpoints(tmp_path, make_fake):
             "render",
             "vitality",
             "elevation",
-        }  # L-13-safe two-axis wire shape
+            "slot",
+        }  # L-13-safe two-axis wire shape (Phase A T3: + the domain-identity slot)
         assert "embed_credentials_as_a_list" not in str(row)
 
 
@@ -629,7 +630,7 @@ def test_close_payload_shows_one_house_per_convergence(tmp_path, make_fake):
     houses = cl["houses"]
     assert len(houses) == 2  # two convergences in one sitting = TWO houses — Model A
     for h in houses:
-        assert set(h) == {"region", "bucket"}  # additive L-13-safe wire
+        assert set(h) == {"region", "bucket", "slot"}  # additive L-13-safe wire
         assert isinstance(h["region"], int) and 0 <= h["region"] < len(cl["terrain"])
         assert h["bucket"] in (None, 1, 2, 3)
     blob = _json.dumps(cl)
@@ -679,11 +680,11 @@ def test_load_payload_wire_sweep_over_engine_composed_bytes(tmp_path, make_fake)
 
     # structural: exact L-13-safe key sets — these catch ANY extra field regardless of the token scan
     for h in wire.get("houses", []):
-        assert set(h) == {"region", "bucket"}
+        assert set(h) == {"region", "bucket", "slot"}
         assert isinstance(h["region"], int)
         assert h["bucket"] in (None, 1, 2, 3)
     for r in wire.get("terrain", []):
-        assert set(r) <= {"region_id", "render", "vitality", "elevation"}
+        assert set(r) <= {"region_id", "render", "vitality", "elevation", "slot"}
     # token scan: the invertible VALUES only (reuse the close sweep's needle set) — NOT dead key-name
     # strings like "sitting_id"/"experience_id"/"frame_code", which never appear as values.
     blob = json.dumps(wire)
@@ -811,7 +812,7 @@ def test_preexisting_curated_rows_do_not_crash_the_house_composition(tmp_path, m
     assert cl["kind"] == "close"
     assert len(cl["houses"]) == 2  # the old curated row + the new convergence
     for h in cl["houses"]:
-        assert set(h) == {"region", "bucket"}
+        assert set(h) == {"region", "bucket", "slot"}
 
 
 def test_shell_close_copy_counts_houses():
@@ -957,3 +958,74 @@ def test_memory_chrome_is_recollective_never_evaluative():
     ):
         assert banned not in block.lower(), banned
         assert banned not in hint.lower(), banned
+
+
+# ---- Phase A T3: the confluence event's wire carrier (review MUST-FIX) ------------------------
+
+# continuity_lock_in and license_continuity share ONE ledger_ref ("veldra:license_fork_risk",
+# a pre-existing content coincidence, out of this task's scope): `display_titles()` keys by that
+# ref, so the front-door slot for it shows license_continuity's title even on the fresh, empty
+# state where the RANKING (a separate, score-based dedup — `problem_menu()`) actually resolves
+# that slot to continuity_lock_in (verified directly: a fresh SessionRegistry's
+# `ch.inflight_exp` reads `('continuity_lock_in', 'veldra:license_fork_risk')` after choosing
+# this exact slot). The label is misleading; the underlying door is the one the P1 recipe needs.
+_CONTINUITY_TITLE = "A contract ambiguity mid-rollout"  # -> continuity_lock_in (see above)
+_STAKES_TITLE = "Pricing power in a concentrated market"  # decision_under_stakes
+
+
+def _choose_by_title(frontdoor, client, title):
+    """Pick a curated door by its DISPLAY TITLE from a frontdoor payload's embedded menu (the
+    same mechanism _choose_anchor uses, generalized to any of the 5 curated doors)."""
+    menu = frontdoor["menu"]
+    idx = menu["problems"].index(title)
+    choice = {"index": idx, "nonce": menu.get("nonce")}
+    return client.post("/api/session/s/choose", json=choice).json()
+
+
+@pytest.fixture
+def world_cross_domain_client(tmp_path, make_fake):
+    """The P1 trio's HTTP twin: `_SID` is fixed ("single") over HTTP, so the three landings must
+    chain in ONE session via `/continue` with `menu=True` (re-enters the front door instead of
+    the scheduler's auto-pick) — `_world_factory` closes every frame of whichever door is chosen,
+    so continuity_lock_in -> decision_under_stakes -> irreversible_anchor converges exactly like
+    the registry-level P1 fixture."""
+    return _world_client(tmp_path, make_fake)
+
+
+def test_confluence_rides_done_and_close_payloads_and_not_the_reload(world_cross_domain_client):
+    # Drive the P1 trio over HTTP (the _world_client pattern, test_web_api.py): the landing's
+    # done payload and the close payload carry exactly {"from_slot": 1, "to_slot": 0}; a fresh
+    # page load after close carries NO confluence key (the record never persisted it).
+    client = world_cross_domain_client
+
+    fd = client.post("/api/session").json()
+    assert fd["kind"] == "frontdoor"
+    r = _choose_by_title(fd, client, _CONTINUITY_TITLE)
+    assert r["kind"] == "say"
+    d1 = _drive_to_done(client)
+    assert "confluence" not in d1  # domain A alone: no cross-domain judgment yet
+
+    fd2 = client.post("/api/session/s/continue", json={"menu": True}).json()
+    assert fd2["kind"] == "frontdoor"
+    r2 = _choose_by_title(fd2, client, _STAKES_TITLE)
+    assert r2["kind"] == "say"
+    d2 = _drive_to_done(client)
+    assert "confluence" not in d2  # domain B alone: still no merge
+
+    fd3 = client.post("/api/session/s/continue", json={"menu": True}).json()
+    assert fd3["kind"] == "frontdoor"
+    r3 = _choose_by_title(fd3, client, _ANCHOR_TITLE)  # irreversible_anchor: closes BOTH domains
+    assert r3["kind"] == "say"
+    d3 = _drive_to_done(client)
+    assert d3["kind"] == "done"
+    assert set(d3["confluence"]) == {"from_slot", "to_slot"}
+    assert d3["confluence"] == {"from_slot": 1, "to_slot": 0}
+
+    cl = client.post("/api/session/s/close").json()
+    assert cl["kind"] == "close"
+    assert set(cl["confluence"]) == {"from_slot", "to_slot"}
+    assert cl["confluence"] == {"from_slot": 1, "to_slot": 0}
+
+    # A fresh page load after close: the sitting is over, the record never persisted the event.
+    reload = client.post("/api/session").json()
+    assert "confluence" not in reload

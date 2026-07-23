@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from retnovation.aim import aim, derive_core
 from retnovation.cli import build_store
 from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
@@ -3400,3 +3402,216 @@ def test_memory_curated_situation_honors_the_row_experience_id(tmp_path, make_fa
     assert tag == "memory"
     assert m["situation"] == license_continuity.prompt  # matches the row's experience_id
     assert m["situation"] != continuity_lock_in.prompt  # never the other entry sharing the ref
+
+
+# ---- Phase A T3: the _on_done identity seam — slot match/commit/freeze, per-house prefix
+# copy-forward, and the transient confluence event (Spec-2 §4/§5) ------------------------------
+#
+# Every world_* fixture below drives GENUINE landings through the real registry path (L-9: no
+# hand-built records) — a fresh session_id per segment (sharing ONE SessionRegistry/db: the
+# engine's LearnerState and the web_converged/web_domain_slot registries are both global to the
+# db, never sitting-scoped, so separate session_ids simply accrete onto the same state) using the
+# file's own `_agnostic`/`_drive` drive helpers and `menu_index` door-picking (the same mechanics
+# `test_runner_assessment_equals_direct_run_session` already exercises).
+
+_CONTINUITY_REF = "veldra:license_fork_risk"  # continuity_lock_in: 1 frame (embed...)
+_STAKES_REF = "veldra:concentrated_market_pricing_power"  # decision_under_stakes: 2 frames
+_PROOF_REF = "veldra:first_customer_proof_loop"  # proof_before_promise: protect + choose
+
+
+def _landed_record(reg, sid):
+    return reg._last_record[sid]
+
+
+def _land(reg, sid, ref, *, now=NOW):
+    """Drive ONE genuine segment (fresh session_id, curated door by ledger_ref) to its `done`
+    emission through the real `_on_done` seam."""
+    tag, _data = reg.start(sid, now=now)
+    assert tag == "say"  # front door (curated doors embedded)
+    idx = reg.menu_index(sid, ref)
+    tag, _data = reg.step(sid, idx)
+    assert tag == "say"  # scenario + invite
+    tag, data = _drive(reg, sid)
+    assert tag == "done"
+    return data
+
+
+@pytest.fixture
+def world_registry(tmp_path, make_fake):
+    """ONE genuine convergence (continuity_lock_in): the minimal slotted terrain+house fixture."""
+    reg = SessionRegistry(
+        str(tmp_path / "wreg.db"), model_factory=lambda: _agnostic(make_fake, "closed")
+    )
+    _land(reg, "s1", _CONTINUITY_REF)
+    return reg, "s1"
+
+
+@pytest.fixture
+def world_registry_two_domains(tmp_path, make_fake):
+    """P2/P3: domain A (continuity_lock_in alone — a permanent seed, 1 frame/1 problem) then
+    domain B built across TWO landings (decision_under_stakes, then proof_before_promise — merged
+    via the shared choose_the_failure_default_deliberately frame code into a 2-frame/2-problem
+    region that CLEARS the render guard) so B outranks seed-A on the positional sort and the
+    terrain reorders — while each house's SLOT stays frozen regardless."""
+    reg = SessionRegistry(
+        str(tmp_path / "w2d.db"), model_factory=lambda: _agnostic(make_fake, "closed")
+    )
+    _land(reg, "s1", _CONTINUITY_REF)
+    first_rec = _landed_record(reg, "s1")
+    _land(reg, "s2", _STAKES_REF)
+    _land(reg, "s3", _PROOF_REF)  # merges into domain B, clears the guard -> reorder
+    second_rec = _landed_record(reg, "s3")
+    return reg, "s3", first_rec, second_rec
+
+
+@pytest.fixture
+def world_cross_domain(tmp_path, make_fake):
+    """P1 (probe-verified recipe): continuity_lock_in -> decision_under_stakes ->
+    irreversible_anchor. The third landing closes BOTH of irreversible_anchor's frames, merging
+    the two prior slots into one: Confluence(from_slot=1, to_slot=0)."""
+    reg = SessionRegistry(
+        str(tmp_path / "wcd.db"), model_factory=lambda: _agnostic(make_fake, "closed")
+    )
+    _land(reg, "s1", _CONTINUITY_REF)
+    _land(reg, "s2", _STAKES_REF)
+    _land(reg, "s3", _ANCHOR)
+    return reg, "s3", reg._store
+
+
+@pytest.fixture
+def world_with_deflection(tmp_path, make_fake):
+    """P4: one real domain lands first (n_slots_before), then a SEPARATE segment whose pushes all
+    deflect (frames seen, none closed) — no new registry rows, no confluence, and the deflected
+    (houseless) components are absent from the frozen terrain."""
+    reg = SessionRegistry(
+        str(tmp_path / "wdef.db"), model_factory=lambda: _agnostic(make_fake, "closed")
+    )
+    _land(reg, "s1", _CONTINUITY_REF)
+    n_slots_before = len(reg._store.domain_slots())
+    reg._model_factory = lambda: _agnostic(make_fake, "unchanged")  # every push deflects
+    _land(reg, "s2", _STAKES_REF)
+    return reg, "s2", reg._store, n_slots_before
+
+
+@pytest.fixture
+def world_legacy_record(tmp_path, make_fake):
+    """A prior record WITHOUT slots (pre-Phase-A freeze): a durable convergence + a persisted
+    record whose house carries no "slot" key at all (the pre-freeze shape). The next genuine
+    landing (adopting the SAME live sitting) must self-heal — stamp a slot on EVERY house,
+    including this pre-existing one, from current components — and never crash on the missing
+    key (D1/L-32)."""
+    from retnovation.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "wlegacy.db")
+    store = SittingStore(db)
+    sit = store.create_sitting(NOW)
+    store.log_converged(sit, _CONTINUITY_REF, NOW, "continuity_lock_in", position="old call")
+    store.write_state(
+        sit,
+        record={
+            "experience_id": "continuity_lock_in",
+            "ledger_ref": _CONTINUITY_REF,
+            "posture": None,
+            "recent": [],
+            "stop_reason": "converged",
+            "terrain": [{"region_id": "r0", "render": "seed", "vitality": None, "elevation": None}],
+            "houses": [{"region": 0, "bucket": None}],  # no "slot" — pre-Phase-A shape
+            "house_refs": [_CONTINUITY_REF],
+            "house_at": [NOW.isoformat()],
+        },
+        now=NOW,
+    )
+    reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
+    # The next genuine landing adopts the SAME live sitting (only one may be live) and engages the
+    # SAME frame — self-healing both the pre-existing house's slot and the new one's, in one pass.
+    _land(reg, "s1", _CONTINUITY_REF)
+    return reg, "s1"
+
+
+@pytest.fixture
+def world_bulk_assignment(tmp_path, make_fake):
+    """The founder's real-db day-one path (review SHOULD-FIX): two domains land BEFORE any
+    registry exists (`web_domain_slot` wiped after they land, simulating a pre-Phase-A db) — the
+    first post-Phase-A landing assigns ALL qualifying components in one pass, in the projection's
+    positional order. The trigger segment (irreversible_anchor, deflected on both its
+    already-existing frames) introduces no new component and converges nothing new — it only
+    exercises the mechanics fresh over the two pre-existing, now-unslotted domains."""
+    import sqlite3
+
+    db = str(tmp_path / "wbulk.db")
+    reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
+    _land(reg, "s1", _CONTINUITY_REF)
+    _land(reg, "s2", _STAKES_REF)
+    conn = sqlite3.connect(db)
+    conn.execute("DELETE FROM web_domain_slot")
+    conn.commit()
+    conn.close()
+    reg._model_factory = lambda: _agnostic(make_fake, "unchanged")
+    _land(reg, "s3", _ANCHOR)
+    return reg, "s3", reg._store
+
+
+def test_slots_appear_on_frozen_terrain_and_houses_after_a_landing(world_registry):
+    reg, sid = world_registry  # fixture: drive one sitting to a genuine convergence
+    rec = _landed_record(reg, sid)
+    assert all(isinstance(r.get("slot"), int) for r in rec["terrain"])
+    assert all("slot" in h for h in rec["houses"])
+    # regions carry the standard keys PLUS slot — nothing else new
+    assert set(rec["terrain"][0]) == {"region_id", "render", "vitality", "elevation", "slot"}
+
+
+def test_slots_stable_under_vitality_shuffle_between_landings(world_registry_two_domains):
+    # P2/P3: land in domain A, then land in domain B (B stronger -> positional sort DOES
+    # reorder). The SLOT is the frozen field; region ordinal and bucket legitimately refresh
+    # each landing (review MUST-FIX: byte-prefix equality fails a CORRECT implementation).
+    reg, sid, first_rec, second_rec = world_registry_two_domains
+    a_slot_first = first_rec["terrain"][0]["slot"]
+    n = len(first_rec["houses"])
+    assert [h["slot"] for h in second_rec["houses"][:n]] == [
+        h["slot"] for h in first_rec["houses"]
+    ]  # per-house slot copy-forward: frozen forever
+    assert any(r["slot"] == a_slot_first for r in second_rec["terrain"])  # A's slot survives
+    # And PROVE the shuffle happened (the regression has no teeth otherwise): A's positional
+    # ordinal moved while its slot did not.
+    a_row_second = [r for r in second_rec["terrain"] if r["slot"] == a_slot_first][0]
+    assert second_rec["terrain"].index(a_row_second) != 0
+
+
+def test_cross_domain_judgment_fires_confluence_and_retires_young_slot(world_cross_domain):
+    # P1: two slotted domains, then one convergence engaging frames of both.
+    reg, sid, store = world_cross_domain
+    rec = _landed_record(reg, sid)
+    assert rec["confluence"] == {"from_slot": 1, "to_slot": 0}
+    rows = store.domain_slots()
+    assert rows[1]["status"] == "confluent-into:0"
+    # And the serialized record NEVER carries the event:
+    from retnovation.web.session_runner import _serialize_record
+
+    assert "confluence" not in (_serialize_record(rec) or {})
+
+
+def test_deflected_push_claims_no_slot_and_fires_no_confluence(world_with_deflection):
+    # P4: a sitting whose pushes deflect (frames seen, none closed) -> no new registry rows,
+    # no confluence, and the deflected singleton is ABSENT from the frozen terrain.
+    reg, sid, store, n_slots_before = world_with_deflection
+    rec = _landed_record(reg, sid)
+    assert len(store.domain_slots()) == n_slots_before
+    assert "confluence" not in rec
+
+
+def test_legacy_record_backfills_slots_at_next_landing(world_legacy_record):
+    # A prior record WITHOUT slots (pre-Phase-A freeze): the next landing stamps every house
+    # from current components (the D1/L-32 self-heal), never crashes on the missing keys.
+    reg, sid = world_legacy_record
+    rec = _landed_record(reg, sid)
+    assert all("slot" in h for h in rec["houses"])
+
+
+def test_bulk_first_assignment_on_a_multi_domain_db(world_bulk_assignment):
+    # Several domains landed BEFORE any registry exists (state accreted pre-Phase-A); the
+    # first post-Phase-A landing assigns ALL qualifying components in one pass, in the
+    # projection's positional order, and freezes them.
+    reg, sid, store = world_bulk_assignment
+    rec = reg._last_record[sid]
+    slots = [r["slot"] for r in rec["terrain"]]
+    assert slots == sorted(slots) and len(store.domain_slots()) == len(slots)

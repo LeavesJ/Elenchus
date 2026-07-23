@@ -19,6 +19,7 @@ from ..terrain import compose_houses, convergence_order, project_terrain
 from ..types import EntryClass, Outcome, Regime, Selection, Work
 from . import voice
 from .sitting_store import SittingStore
+from .slots import resolve_slots
 
 # Liveness bound: after this many consecutive non-substantive door turns, stop re-collecting and
 # fall through — treat the latest text as the RAW opening and enter the engine. Without it, a user
@@ -1139,13 +1140,71 @@ class SessionRegistry:
             state = data.get("state")
             if state is not None:
                 rows = self._store.converged_log()
-                ch.record["houses"] = self._compose_houses(state, now, rows=rows)
-                ch.record["house_refs"] = convergence_order(rows)
+                view = project_terrain(state, now)  # ONE projection, pre-strip regions
+                houses = self._compose_houses(view.regions, rows)
+                # --- slot resolution (the ONE registry seam, Spec-2 §4) ---
+                components = [
+                    {
+                        "frames": list(r.frame_codes),
+                        "refs": sorted(
+                            {ref for c in r.frame_codes for ref in state.frames[c].breadth}
+                        ),
+                    }
+                    for r in view.regions
+                ]
+                housed = {h["region"] for h in houses}
+                res = resolve_slots(components, housed, self._store.domain_slots(), now.isoformat())
+                self._store.write_domain_slots(res.claims, res.retire)
+                # --- decorate + filter the frozen terrain (types.py untouched; spec §10.1) ---
+                # Review MUST-FIX: filtering shifts indices, and houses carry region ORDINALS into
+                # the unfiltered projection — build the old->new remap while filtering and
+                # re-stamp BOTH the houses' region ordinals AND the positional region_id strings,
+                # so id == index == the houses' join key over the FILTERED set (the invariant
+                # test_web_api asserts: 0 <= h["region"] < len(terrain)). A housed region is
+                # always slotted except the log-loud exhaustion edge — keep an exhausted-but-
+                # housed row (slot None) rather than strand its houses; the sweep tolerates
+                # int|None for exactly this edge.
+                lv = view.learner_view()
+                terrain, remap = [], {}
+                for idx, row_dict in enumerate(lv):
+                    slot = res.slot_of_component.get(idx)
+                    if slot is None and idx not in housed:
+                        continue  # earned existence: houseless -> absent
+                    remap[idx] = len(terrain)
+                    terrain.append({**row_dict, "region_id": f"r{len(terrain)}", "slot": slot})
+                ch.record["terrain"] = terrain
+                for h in houses:
+                    h["region"] = remap[h["region"]]  # housed => always in remap
+                # --- per-house slot: prefix copy-forward (append-only log; Spec-2 §5) ---
+                prior_refs = ch.record.get("house_refs", [])
+                prior_houses = ch.record.get("houses", [])
+                new_refs = convergence_order(rows)
+                for i, h in enumerate(houses):
+                    if (
+                        i < len(prior_refs)
+                        and i < len(prior_houses)
+                        and prior_refs[i] == new_refs[i]
+                        and "slot" in prior_houses[i]
+                    ):
+                        h["slot"] = prior_houses[i]["slot"]  # frozen forever, never re-derived
+                    else:
+                        h["slot"] = res.slot_of_component.get(h["region"])
+                ch.record["houses"] = houses
+                ch.record["house_refs"] = new_refs
                 # S1 drift-guard hardening: index-parallel converged_at, frozen from the SAME
                 # `rows` read as house_refs — house_at[i] names WHEN house i converged, so a
                 # reconverged ref that reorders converged_log (same ref string, different row)
                 # cannot false-pass the drift guard on ref equality alone.
                 ch.record["house_at"] = [r["converged_at"] for r in rows]
+                # --- the confluence event: transient, payload-only (reload skips the ceremony) --
+                ch.record.pop("confluence", None)
+                if res.confluences:
+                    ch.record["confluence"] = {
+                        "from_slot": res.confluences[0].from_slot,
+                        "to_slot": res.confluences[0].to_slot,
+                    }
+                if ch.record.get("confluence"):
+                    data["confluence"] = ch.record["confluence"]
             else:
                 ch.record.setdefault("houses", [])
                 ch.record.setdefault("house_refs", [])
@@ -1643,7 +1702,14 @@ class SessionRegistry:
         ch = self._ch.get(session_id)
         # The village payload (living sitting §2f, L5): the frozen terrain + its houses — both
         # composed at the SAME landing (_on_done), so they can never disagree at the close.
-        village = {"terrain": rec["terrain"], "houses": rec.get("houses", [])}
+        # "confluence" rides transient (Spec-2 §5): present only when THIS record still carries
+        # the just-landed event (_emit attaches it only when non-None; a rebuilt/reloaded record
+        # never has the key at all, per _serialize_record's allowlist).
+        village = {
+            "terrain": rec["terrain"],
+            "houses": rec.get("houses", []),
+            "confluence": rec.get("confluence"),
+        }
         if ch is not None and not ch.terminal and ch.record is None:
             # An in-flight segment past the last convergence: the static sign-off (MF-5). The
             # worker reap itself happens in _end_sitting (guarded against in-flight requests).
@@ -1677,17 +1743,19 @@ class SessionRegistry:
 
     # ---- Living-sitting helpers (spec §2c/§2e/§2f): durable-history readers ------------------
 
-    def _compose_houses(self, state, now: datetime, rows: list[dict]) -> list[dict]:
+    def _compose_houses(self, regions: list, rows: list[dict]) -> list[dict]:
         """The cumulative village (Model A, plan Task 2): one house per CONVERGENCE row — the
         village is as cumulative as the converged log itself — with region membership computed
         against the SAME projection that freezes the record's terrain, so house region ordinals
-        and the terrain wire can never disagree. `rows` is the caller's OWN `converged_log()`
-        read (review SF4/L-31): the freeze site reads the log ONCE and passes it here AND into
-        `convergence_order`, so `house_refs[i]` names house `i` by construction — never a second,
-        possibly-drifted read. Territory membership comes from the L-1 content library
-        (experience_id -> rubric frame codes + decision_frame); an unreadable library degrades to
-        compose_houses' ref/region-0 fallbacks, never a die. An empty `rows` -> no houses (the
-        `:memory:` shell tests stay untouched)."""
+        and the terrain wire can never disagree. `regions` is the caller's OWN, ALREADY-projected
+        `project_terrain(...).regions` (Phase A T3: the slot-resolution seam hoists the ONE
+        projection; this no longer projects internally). `rows` is the caller's OWN
+        `converged_log()` read (review SF4/L-31): the freeze site reads the log ONCE and passes it
+        here AND into `convergence_order`, so `house_refs[i]` names house `i` by construction —
+        never a second, possibly-drifted read. Territory membership comes from the L-1 content
+        library (experience_id -> rubric frame codes + decision_frame); an unreadable library
+        degrades to compose_houses' ref/region-0 fallbacks, never a die. An empty `rows` -> no
+        houses (the `:memory:` shell tests stay untouched)."""
         try:
             frames_of = {
                 e.experience_id: (
@@ -1699,7 +1767,7 @@ class SessionRegistry:
             }
         except Exception:
             frames_of = {}
-        return compose_houses(project_terrain(state, now).regions, rows, frames_of)
+        return compose_houses(regions, rows, frames_of)
 
     def _last_you_turn(self, sit: str) -> str | None:
         """The last persisted substantive "you" (student) turn — THE selection seam shared by the
