@@ -1,48 +1,68 @@
-/* The Kindled Valley — 3D reward terrain renderer.
- * Terrain3D.render(container, payload) builds a WebGL valley from the L-13 wire payload:
- *   each rendered region -> a village (elevation bucket -> terraces, vitality bucket -> brightness);
- *   each seed region     -> a dark ember waiting to be kindled;
- *   each saga HOUSE -> one lit house per convergence (Model A: unit height, Spec-1 §4), placed on
- *   a deterministic ring inside its region's cluster; ordinal-only wire, +N many-cue past 9.
- * Village POSITIONS are a function of the public ordinal ONLY (never frame identity). Requires the
- * vendored global THREE (+ optional EffectComposer/UnrealBloomPass for bloom); degrades to a note if absent.
- * Served at the close AND as the homebase on load (Phase 2). No frame_code / veldra: ref is ever consumed.
+/* The Archipelago — dusk-sky scene scaffold (Spec-2 §3/§6/§8, Phase B T2).
+ * Terrain3D.render(container, payload, opts) consumes window.WXLaw's pure placement law
+ * (WXLaw.layout — Task 1) to place isle base rocks and seed rocks on their frozen bearings. This
+ * scaffold ships the dusk sky + cloud shelf, the home dock (rock, jetty, lantern, doorway glow),
+ * the world group's idle sway, the camera/controls, and the render() contract — every isle/seed
+ * here is an EMPTY rock mass; the facets/monoliths a convergence earns are Task 3's.
+ * The prior Kindled-Valley terrain (heightfield, villages, per-convergence houses, forest, fog
+ * wall) is retired outright: the world is now a home dock and its orbiting isles, not a valley.
+ * Requires the vendored global THREE (+ optional EffectComposer/UnrealBloomPass for bloom) and
+ * window.WXLaw (index.html loads it immediately before this file); degrades to a note if either
+ * is absent.
  */
 window.Terrain3D = (function () {
   "use strict";
   var activeTeardown = null; // one live scene at a time: a re-render stops the prior loop + listeners
+
+  // DUSK_BAND — the violet -> rose dusk palette (Spec-2 §8): every structural material color is
+  // indexed from here, including dim/patina states, so hue/saturation never drifts outside the
+  // band — no desaturated grey-family entry (equal R/G/B channels) is allowed into this list.
+  var DUSK_BAND = [
+    0x0d0a1c, // 0  sky zenith — deep violet-black
+    0x2a1a3c, // 1  sky upper — violet
+    0x5c2d52, // 2  sky mid — mauve-rose
+    0xb8586a, // 3  sky horizon — warm rose
+    0xffb27a, // 4  sun-glow / warm horizon light
+    0x4a2f52, // 5  isle & dock rock — lit dusk-violet stone
+    0x1c1226, // 6  isle & dock rock — dark underside
+    0x3a2440, // 7  jetty stone / lantern post
+    0xffc477, // 8  the lamp — steady warm (never a sweep, never a pulse)
+    0xffb066, // 9  the doorway glow — warm
+    0x2e1c38, // 10 seed rock — dim lit top
+    0x6a4a72  // 11 cloud shelf tint
+  ];
+
+  function hx(n) { return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
   function rgba(r, g, b, a) { return "rgba(" + r + "," + g + "," + b + "," + a + ")"; }
+  function rgbaHex(n, a) { var c = hx(n); return rgba(c[0], c[1], c[2], a); }
+  function cssHex(n) { var s = n.toString(16); while (s.length < 6) s = "0" + s; return "#" + s; }
+  // ambient FX — outside the determinism boundary (spec §5): the sole unseeded-randomness
+  // primitive in this file, funneled through one helper so nothing structural (isle/seed/dock
+  // placement — all of it WXLaw's pure output) ever calls it directly.
   function rnd(a, b) { return a + Math.random() * (b - a); }
 
   function normalize(payload) {
     var regions = Array.isArray(payload) ? payload : (payload && payload.regions) || [];
     var transfer = (payload && payload.transfer) || []; // reserved for the connection layer; unused in V1
-    // Houses are converged segments (living sitting §2f): ordinal-only rows — region index,
-    // coarse public bucket, arrival order. Nothing else ever rides in (L-13).
     var houses = (payload && payload.houses) || [];
     return { regions: regions, transfer: transfer, houses: houses };
   }
 
-  // Positional layout: a deterministic phyllotaxis spiral keyed by the PUBLIC ordinal only (L-13).
-  function pos(ordinal) {
-    var golden = 2.399963, r = 9 + ordinal * 7.4;
-    return { x: Math.cos(ordinal * golden) * r, z: Math.sin(ordinal * golden) * r };
-  }
-
   function render(container, payload, opts) {
     var THREE = window.THREE;
+    var WXLaw = window.WXLaw;
     var data = normalize(payload);
     var onHouseClick = opts && typeof opts.onHouseClick === "function" ? opts.onHouseClick : null;
-    if (!THREE) { return; } // index.html keeps a text note as the no-WebGL fallback
+    if (!THREE || !WXLaw) { return; } // index.html keeps a text note as the no-WebGL/no-law fallback
     if (activeTeardown) { activeTeardown(); activeTeardown = null; } // stop any prior scene first
-    while (container.firstChild) container.removeChild(container.firstChild); // a re-render must not stack a dead canvas under the live one (Phase 2 deferred Minor; re-entry makes re-renders reachable)
+    while (container.firstChild) container.removeChild(container.firstChild); // a re-render must not stack a dead canvas under the live one
 
     var W = container.clientWidth || 680, H = container.clientHeight || 460;
     var cv = document.createElement("canvas");
     container.appendChild(cv);
     var hint = document.createElement("div");
     hint.style.cssText = "position:absolute;left:14px;bottom:11px;font:12px system-ui,sans-serif;color:#e6a860;opacity:.75;pointer-events:none";
-    hint.textContent = "drag to orbit · scroll to zoom · WASD to roam" + (onHouseClick ? " · click a house to remember" : "");
+    hint.textContent = "drag to orbit · scroll to zoom" + (onHouseClick ? " · click a monolith to remember" : "");
     if (getComputedStyle(container).position === "static") container.style.position = "relative";
     container.appendChild(hint);
 
@@ -52,30 +72,20 @@ window.Terrain3D = (function () {
     renderer.setClearColor(0x04060c, 1);
     renderer.outputEncoding = THREE.sRGBEncoding;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 0.82; // lowkey baseline (founder note): restrained when kicking off
+    renderer.toneMappingExposure = 0.82; // restrained baseline (spec §8): bloom spends only at landing moments
     var scene = new THREE.Scene();
-    scene.fog = new THREE.FogExp2(0x08111f, 0.0118);
     var camera = new THREE.PerspectiveCamera(46, W / H, 0.1, 900);
 
-    function th(x, y) {
-      var d2 = x * x + y * y, r = Math.sqrt(d2);
-      var basin = -7 * Math.exp(-d2 / 760);
-      var hills = 2.2 * Math.sin(x * 0.1) * Math.cos(y * 0.09) + 1.6 * Math.sin(x * 0.05 + 1.3) * Math.sin(y * 0.07) + 1.0 * Math.cos(x * 0.17 + y * 0.12) + 0.5 * Math.sin(x * 0.31 + y * 0.25);
-      var ridge = 5.2 * Math.exp(-Math.pow(r - 56, 2) / 460);
-      return basin + hills + ridge;
-    }
-    function wh(X, Z) { return th(X, -Z); }
+    // dock-anchored home framing (Spec-2 §9): the whole orbit sits in frame at rest
+    var target = new THREE.Vector3(0, 4, 0);
+    var az = 0.9, pol = 1.05, rad = 62, dragging = false, lx = 0, ly = 0;
+    var introActive = true, INTRO = 2.0; // reveal beat: fly-in as the camera arrives
 
-    // frame the placed villages
-    var maxR = 12;
-    for (var ri = 0; ri < data.regions.length; ri++) { var p = pos(ri); maxR = Math.max(maxR, Math.sqrt(p.x * p.x + p.z * p.z)); }
-    var target = new THREE.Vector3(0, wh(0, 0) + 4, 0);
-    var az = 0.9, pol = 1.14, rad = Math.min(78, 26 + maxR * 1.1), dragging = false, lx = 0, ly = 0;
-    var introActive = true, INTRO = 2.0; // reveal beat: fly-in + villages kindle up as the camera arrives
-    scene.add(new THREE.HemisphereLight(0x18314c, 0x04060c, 0.28));
-    scene.add(new THREE.AmbientLight(0x091320, 0.16));
-    var moon = new THREE.DirectionalLight(0x8fb0d8, 0.32); moon.position.set(-46, 54, -30); scene.add(moon);
-    var world = new THREE.Group(); scene.add(world);
+    scene.add(new THREE.HemisphereLight(DUSK_BAND[2], DUSK_BAND[6], 0.34));
+    scene.add(new THREE.AmbientLight(DUSK_BAND[1], 0.16));
+    var duskLight = new THREE.DirectionalLight(DUSK_BAND[3], 0.38);
+    duskLight.position.set(-42, 52, -26); scene.add(duskLight);
+    var world = new THREE.Group(); scene.add(world); // idle sway applies to this group only
 
     function radial(st) {
       var c = document.createElement("canvas"); c.width = c.height = 128;
@@ -83,220 +93,112 @@ window.Terrain3D = (function () {
       for (var i = 0; i < st.length; i++) gr.addColorStop(st[i][0], st[i][1]);
       g.fillStyle = gr; g.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(c);
     }
-    var warmTex = radial([[0, rgba(255, 196, 120, 0.9)], [0.45, rgba(255, 140, 64, 0.32)], [1, rgba(255, 140, 64, 0)]]);
-    var coreTex = radial([[0, rgba(255, 224, 164, 0.95)], [0.5, rgba(255, 176, 104, 0.45)], [1, rgba(255, 168, 96, 0)]]);
-    var fogTex = radial([[0, rgba(150, 192, 226, 0.55)], [0.55, rgba(104, 150, 198, 0.28)], [1, rgba(104, 150, 198, 0)]]);
-    var emberTex = radial([[0, rgba(255, 140, 74, 0.7)], [1, rgba(255, 140, 74, 0)]]);
+    var warmTex = radial([[0, rgba(255, 205, 140, 0.9)], [0.5, rgbaHex(DUSK_BAND[8], 0.35)], [1, rgbaHex(DUSK_BAND[8], 0)]]);
+    var cloudTex = radial([[0, rgbaHex(DUSK_BAND[11], 0.55)], [0.6, rgbaHex(DUSK_BAND[11], 0.22)], [1, rgbaHex(DUSK_BAND[11], 0)]]);
     function sprite(t, s, x, y, z, o, bl) {
       var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, blending: bl || THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: o == null ? 1 : o }));
       sp.scale.set(s, s, 1); sp.position.set(x, y, z); world.add(sp); return sp;
     }
 
-    // sky + moon
+    // --- sky: a BackSide sphere painted with a vertical gradient through the dusk stops ---
     (function () {
       var c = document.createElement("canvas"); c.width = 8; c.height = 256;
       var g = c.getContext("2d"), gr = g.createLinearGradient(0, 0, 0, 256);
-      gr.addColorStop(0, "#060a18"); gr.addColorStop(0.5, "#0a1226"); gr.addColorStop(0.75, "#131d34"); gr.addColorStop(0.9, "#20223a"); gr.addColorStop(1, "#2c2440");
+      gr.addColorStop(0, cssHex(DUSK_BAND[0]));
+      gr.addColorStop(0.32, cssHex(DUSK_BAND[1]));
+      gr.addColorStop(0.62, cssHex(DUSK_BAND[2]));
+      gr.addColorStop(0.85, cssHex(DUSK_BAND[3]));
+      gr.addColorStop(1, cssHex(DUSK_BAND[4]));
       g.fillStyle = gr; g.fillRect(0, 0, 8, 256);
       var sky = new THREE.Mesh(new THREE.SphereGeometry(460, 32, 20), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), side: THREE.BackSide, fog: false, depthWrite: false }));
-      scene.add(sky);
-      var moonS = new THREE.Sprite(new THREE.SpriteMaterial({ map: coreTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.8 }));
-      moonS.scale.set(11, 11, 1); moonS.position.set(-170, 160, -280); world.add(moonS);
+      scene.add(sky); // sky stays outside the world group's sway (Spec-2 §3: "everything but sky/stars")
     })();
 
-    // terrain
-    var seg = 170, gs = 230;
-    var geo = new THREE.PlaneGeometry(gs, gs, seg, seg), gp = geo.attributes.position, cols = [];
-    var cLow = new THREE.Color(0x07130e), cMid = new THREE.Color(0x0d2215), cHigh = new THREE.Color(0x152632), cwm = new THREE.Color(0x261a0e), cdark = new THREE.Color(0x03060b);
-    for (var i = 0; i < gp.count; i++) {
-      var x = gp.getX(i), y = gp.getY(i), r = Math.sqrt(x * x + y * y), h = th(x, y);
-      gp.setZ(i, h);
-      var hn = Math.max(0, Math.min(1, (h + 7) / 13));
-      var col = cLow.clone().lerp(cMid, Math.min(1, hn * 1.5));
-      col.lerp(cHigh, Math.max(0, (hn - 0.55) * 2.2));
-      col.lerp(cwm, Math.min(0.34, Math.exp(-(x * x + y * y) / 700) * 0.42));
-      col.lerp(cdark, Math.max(0, Math.min(1, (r - 50) / 30)) * 0.94);
-      cols.push(col.r, col.g, col.b);
-    }
-    geo.setAttribute("color", new THREE.Float32BufferAttribute(cols, 3)); geo.computeVertexNormals();
-    var terrain = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.98, metalness: 0.02 }));
-    terrain.rotation.x = -Math.PI / 2; world.add(terrain);
+    // a low warm sun-glow near the horizon — ambient backdrop, not a light source
+    sprite(warmTex, 130, -210, 10, -300, 0.4);
 
-    // shared materials + geometry
-    var wallMat = new THREE.MeshStandardMaterial({ color: 0x1b2431, roughness: 0.9, metalness: 0.08, emissive: 0x1c1206, emissiveIntensity: 0.14 });
-    var fieldMat = new THREE.MeshStandardMaterial({ color: 0x263a20, roughness: 1 });
-    var cropMat = new THREE.MeshStandardMaterial({ color: 0x3c5a2c, roughness: 1, emissive: 0x0a1604, emissiveIntensity: 0.3 });
-    var postMat = new THREE.MeshStandardMaterial({ color: 0x231a10, roughness: 0.9 });
-    var roofM = new THREE.MeshStandardMaterial({ color: 0x1a120b, roughness: 0.85 });
-    var timber = new THREE.MeshStandardMaterial({ color: 0x2e2116, roughness: 0.9 });
-    var dB = new THREE.MeshStandardMaterial({ color: 0x0d121c, roughness: 0.95 });
-    var dR = new THREE.MeshStandardMaterial({ color: 0x0b0f17, roughness: 0.9 });
-    var chimMat = new THREE.MeshStandardMaterial({ color: 0x241a12, roughness: 0.95 });
-    var orbGeo = new THREE.SphereGeometry(0.2, 8, 8), postGeo = new THREE.CylinderGeometry(0.08, 0.1, 1.5, 5);
-    var beacons = [], lightSites = [], litMats = [];
-
-    function litWinMat(bright) { var m = new THREE.MeshStandardMaterial({ color: 0x1a1208, emissive: 0xffc470, emissiveIntensity: 1.0 + 1.8 * bright }); litMats.push({ m: m, base: m.emissiveIntensity }); return m; }
-    function orbMat(bright) { var m = new THREE.MeshStandardMaterial({ color: 0x1a1206, emissive: 0xffc06a, emissiveIntensity: 1.0 + 1.6 * bright }); litMats.push({ m: m, base: m.emissiveIntensity }); return m; }
-
-    function gTier(cx, cz, vb, rT, rB, h, localCy, rot, bright) {
-      var g = new THREE.Group();
-      g.add(new THREE.Mesh(new THREE.CylinderGeometry(rT, rB, h, 6), wallMat));
-      var top = new THREE.Mesh(new THREE.CylinderGeometry(rT * 0.96, rT * 0.96, 0.35, 6), fieldMat); top.position.y = h / 2 + 0.17; g.add(top);
-      for (var cx2 = -rT * 0.6; cx2 <= rT * 0.6; cx2 += 1.35) {
-        var half = Math.sqrt(Math.max(0, Math.pow(rT * 0.6, 2) - cx2 * cx2)); if (half < 0.7) continue;
-        var cr = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.42, half * 1.9), cropMat); cr.position.set(cx2, h / 2 + 0.5, 0); g.add(cr);
+    // stars — kept from the prior valley scene, unchanged in spirit
+    (function () {
+      var g = new THREE.BufferGeometry(), n = 420, p = new Float32Array(n * 3);
+      for (var i = 0; i < n; i++) {
+        // ambient FX — outside the determinism boundary (spec §5)
+        var r = 150 + rnd(0, 130), th = rnd(0, 6.28), ph = Math.acos(2 * rnd(0, 1) - 1);
+        p[i * 3] = r * Math.sin(ph) * Math.cos(th);
+        p[i * 3 + 1] = Math.abs(r * Math.cos(ph)) * 0.7 + 22;
+        p[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
       }
-      var om = orbMat(bright);
-      for (var a = 0; a < 6.28; a += 6.28 / 5) {
-        var lx2 = Math.cos(a) * (rT * 0.9), lz2 = Math.sin(a) * (rT * 0.9);
-        var post = new THREE.Mesh(postGeo, postMat); post.position.set(lx2, h / 2 + 0.75, lz2); g.add(post);
-        var orb = new THREE.Mesh(orbGeo, om); orb.position.set(lx2, h / 2 + 1.6, lz2); g.add(orb);
-        var gl = new THREE.Sprite(new THREE.SpriteMaterial({ map: warmTex, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.18 + 0.22 * bright }));
-        gl.scale.set(1.5, 1.5, 1); gl.position.set(lx2, h / 2 + 1.6, lz2); g.add(gl);
-      }
-      g.position.set(cx, vb + localCy, cz); g.rotation.y = rot; world.add(g);
+      g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+      scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xcac2e6, size: 0.6, transparent: true, opacity: 0.72 })));
+    })();
+
+    // --- the cloud shelf: 8-12 soft sprites drifting below the isles, never inside the reserved
+    // air shells (radius kept clear of [R_ORBIT*1.12, R_ORBIT*1.40], y kept below y_rim+14) ---
+    var cloudGapLo = WXLaw.R_ORBIT * 1.12, cloudGapHi = WXLaw.R_ORBIT * 1.40;
+    var clouds = [];
+    var CLOUD_N = 10;
+    for (var ci = 0; ci < CLOUD_N; ci++) {
+      // ambient FX — outside the determinism boundary (spec §5)
+      var inner = rnd(0, 1) < 0.62;
+      var cr = inner ? rnd(10, cloudGapLo - 3) : rnd(cloudGapHi + 5, cloudGapHi + 42);
+      var ca = rnd(0, 6.28), cy = rnd(-19, -5);
+      var cx = Math.cos(ca) * cr, cz = Math.sin(ca) * cr;
+      var cs = sprite(cloudTex, rnd(15, 29), cx, cy, cz, rnd(0.16, 0.3));
+      clouds.push({ s: cs, bx: cx, bz: cz, ph: rnd(0, 6.28) });
     }
 
-    // A house is a SAGA: `stories` stacks that many floors, a PER-HOUSE vertical axis distinct
-    // from a region's concentric terraces (reg.elevation). Model A (Spec-1 §4) calls this with
-    // unit height only — one convergence, one story. `s`=scale, `bright`=vitality glow.
-    function house(x, y, z, s, lit, bright, stories) {
+    // --- shared rock materials + geometry (the WX Corolla base: a flat-shaded double cone — lit
+    // top half, dark underside — whose rim sits at y_rim=0 in world space) ---
+    var rockLitMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[5], flatShading: true, roughness: 0.95 });
+    var rockDarkMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[6], flatShading: true, roughness: 1 });
+    var seedLitMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[10], flatShading: true, roughness: 0.95 });
+    function rockGeoms(radius, litH, darkH) {
+      return { top: new THREE.ConeGeometry(radius, litH, 8, 1, false), bot: new THREE.ConeGeometry(radius, darkH, 8, 1, false), litH: litH, darkH: darkH };
+    }
+    function placeRock(geoms, litMat, darkMat, x, z, scale) {
       var g = new THREE.Group();
-      var floors = Math.max(1, Math.min(3, stories || 1)), fh = 1.4 * s;
-      for (var f = 0; f < floors; f++) {
-        var b = new THREE.Mesh(new THREE.BoxGeometry(1.7 * s, fh, 1.7 * s), lit ? timber : dB);
-        b.position.y = fh * f + 0.7 * s; g.add(b);
-        if (lit) {
-          var wm = litWinMat(bright);
-          var w = new THREE.Mesh(new THREE.BoxGeometry(0.5 * s, 0.5 * s, 0.06), wm);
-          w.position.set(0, fh * f + 0.66 * s, 0.86 * s); g.add(w);
-          var w2 = w.clone(); w2.position.set(0, fh * f + 0.66 * s, -0.86 * s); g.add(w2);
-        }
-      }
-      var top = fh * floors;
-      var rf = new THREE.Mesh(new THREE.ConeGeometry(1.5 * s, 1.2 * s, 4), lit ? roofM : dR);
-      rf.position.y = top + 0.58 * s; rf.rotation.y = Math.PI / 4; g.add(rf);
-      var ch = new THREE.Mesh(new THREE.BoxGeometry(0.28 * s, 0.7 * s, 0.28 * s), chimMat);
-      ch.position.set(0.5 * s, top + 0.3 * s, 0.3 * s); g.add(ch);  // top+0.3*s -> 1.7*s at floors=1 (exact)
-      g.position.set(x, y, z); g.rotation.y = Math.random() * 6.28; world.add(g);
+      var top = new THREE.Mesh(geoms.top, litMat); top.position.y = geoms.litH / 2; g.add(top);
+      var bot = new THREE.Mesh(geoms.bot, darkMat); bot.rotation.x = Math.PI; bot.position.y = -geoms.darkH / 2; g.add(bot);
+      g.scale.setScalar(scale == null ? 1 : scale);
+      g.position.set(x, 0, z); // the rim stays at y_rim=0 regardless of scale (uniform scale about the origin)
+      world.add(g);
       return g;
     }
-    // A village: elevation bucket (1..3) -> number of rising terraces; vitality bucket (1..3) -> brightness.
-    function buildVillage(cx, cz, elev, vit) {
-      var vb = wh(cx, cz), bright = Math.max(1, vit) / 3, tiers = Math.max(1, Math.min(3, elev));
-      var rTs = [11.6, 8.0, 4.9], rBs = [12.8, 9.0, 5.7], cy = [0.9, 2.75, 4.7], rots = [0, 0.52, 0.2];
-      for (var k = 0; k < tiers; k++) gTier(cx, cz, vb, rTs[k], rBs[k], 1.85, cy[k], rots[k], bright);
-      // beacon on the top built terrace
-      var by = vb + (tiers >= 3 ? 6.0 : tiers === 2 ? 4.1 : 2.3);
-      var post = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.5, 4.6, 8), new THREE.MeshStandardMaterial({ color: 0x2a2016, roughness: 0.7 })); post.position.set(cx, by + 2.3, cz); world.add(post);
-      var brazier = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.4, 0.6, 8), new THREE.MeshStandardMaterial({ color: 0x241a10, roughness: 0.7, emissive: 0x3a1e08, emissiveIntensity: 0.5 })); brazier.position.set(cx, by + 4.5, cz); world.add(brazier);
-      var flame = new THREE.Mesh(new THREE.IcosahedronGeometry(0.66, 0), new THREE.MeshStandardMaterial({ color: 0x160b04, emissive: 0xff8a2c, emissiveIntensity: 0.7 + 0.9 * bright })); flame.position.set(cx, by + 5.1, cz); world.add(flame);
-      var bl = new THREE.PointLight(0xffab54, 0.7 + 1.1 * bright, 40, 2.1); bl.position.set(cx, by + 5.2, cz); world.add(bl);
-      var gc = sprite(coreTex, 2.6, cx, by + 5.1, cz, 0.3 + 0.3 * bright), gb = sprite(warmTex, 10, cx, by + 4.9, cz, 0.2 + 0.2 * bright);
-      var sh = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 0.5, 20, 18, 1, true), new THREE.MeshBasicMaterial({ color: 0xffbf72, transparent: true, opacity: 0.01 + 0.016 * bright, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })); sh.position.set(cx, by + 12, cz); world.add(sh);
-      beacons.push({ flame: flame, bl: bl, gc: gc, gb: gb, base: bright, ph: Math.random() * 6.28 });
-      lightSites.push({ x: cx, z: cz, y: vb });
-    }
 
-    function buildEmber(cx, cz) {
-      var vb = wh(cx, cz);
-      sprite(emberTex, 2.6, cx, vb + 1.1, cz, 0.3);
-      var pl = new THREE.PointLight(0xff8a4a, 0.22, 16); pl.position.set(cx, vb + 1.4, cz); world.add(pl);
-    }
+    // --- the dock: constant geometry, never grows (Spec-2 §6) ---
+    var HOME_R = 6.2;
+    var jettyMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[7], roughness: 0.9 });
+    var lampMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[8], emissive: DUSK_BAND[8], emissiveIntensity: 1.5 });
+    var doorMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[9], emissive: DUSK_BAND[9], emissiveIntensity: 1.05, side: THREE.DoubleSide });
+    var homeGeoms = rockGeoms(HOME_R, 2.6, 3.4);
+    placeRock(homeGeoms, rockLitMat, rockDarkMat, 0, 0, 1); // the home rock: a squat 8-sided double cone, dusk-violet stone
 
-    // place regions by ordinal
-    for (var rgi = 0; rgi < data.regions.length; rgi++) {
-      var reg = data.regions[rgi], pp = pos(rgi);
-      if (reg && reg.render === "rendered") buildVillage(pp.x, pp.z, reg.elevation || 1, reg.vitality || 1);
-      else buildEmber(pp.x, pp.z);
-    }
+    var jettyLen = 16, jettyX0 = HOME_R * 0.7;
+    var jetty = new THREE.Mesh(new THREE.BoxGeometry(jettyLen, 0.85, 2.6), jettyMat);
+    jetty.position.set(jettyX0 + jettyLen / 2, 0.08, 0); world.add(jetty); // a thin stone pier extending toward +x
 
-    // Per-convergence houses (Model A, Spec-1 §4): one LIT house per convergence (a sitting's forged world),
-    // unit height, clustered inside its region's area — the region's ordinal anchors the cluster;
-    // houses take deterministic
-    // ordinal ring slots (arrival order fixes the angle: no jitter, no data beyond order). Capped
-    // at HOUSE_CAP per region with a many-cue: one brighter, larger beacon over the cluster.
-    // Earned houses live ON the first terrace (r inside the tier-1 rim, elevated to its
-    // surface) — the old ground-level ring OUTSIDE the rim (r=13.4) hid them behind the
-    // mound's silhouette from most camera angles (founder dogfood 2026-07-04).
-    var HOUSE_CAP = 9, HOUSE_RING_R = 10.3, litHouses = 0, clickableHouses = [];
-    var grouped = [];
-    for (var hi = 0; hi < data.houses.length; hi++) {
-      var hrow = data.houses[hi], hr = hrow && hrow.region;
-      if (typeof hr !== "number" || hr < 0 || hr >= data.regions.length) continue; // never invent an anchor
-      (grouped[hr] = grouped[hr] || []).push({ h: hrow, i: hi });
-    }
-    for (var gi = 0; gi < data.regions.length; gi++) {
-      var hs = grouped[gi]; if (!hs) continue;
-      var anchor = pos(gi), shown = Math.min(hs.length, HOUSE_CAP);
-      for (var hk = 0; hk < shown; hk++) {
-        // Arc centred on the DEFAULT camera azimuth (az=0.9): the caption's count must be
-        // countable at the resting view, not after an orbit hunt. Deterministic — ordinal
-        // slots only, no data beyond arrival order.
-        var ha = 0.9 - ((shown - 1) / 2 - hk) * (2 * Math.PI / HOUSE_CAP);
-        var hx = anchor.x + Math.cos(ha) * HOUSE_RING_R, hz = anchor.z + Math.sin(ha) * HOUSE_RING_R;
-        var hb = Math.max(1, hs[hk].h.bucket || 1) / 3;
-        // The EARNED house (one per convergence): the only lit-window house in the valley,
-        // scaled past every ambient shape, with its own hearth glow — countable at a glance
-        // (founder dogfood 2026-07-04: the caption's number must be visible on screen).
-        var onTerrace = data.regions[gi] && data.regions[gi].render === "rendered";
-        var hy = wh(anchor.x, anchor.z) + (onTerrace ? 2.15 : 0);
-        var hg = house(hx, hy, hz, 1.45, true, hb);  // Model A: one house per convergence, unit height (Spec-1 §4)
-        hg.userData.houseIndex = hs[hk].i;  // Phase 3: the click's payload index (the server maps it to that convergence's memory)
-        clickableHouses.push(hg);
-        var hearth = new THREE.PointLight(0xffb066, 0.55 + 0.5 * hb, 12, 2.0);
-        hearth.position.set(hx, hy + 2.2, hz); world.add(hearth);
-        litHouses++;
-      }
-      if (hs.length > HOUSE_CAP) {
-        var my = wh(anchor.x, anchor.z);
-        sprite(coreTex, 5, anchor.x, my + 6.5, anchor.z, 0.9);
-        var ml = new THREE.PointLight(0xffc470, 1.6, 30); ml.position.set(anchor.x, my + 6.5, anchor.z); world.add(ml);
-      }
-    }
+    var postX = jettyX0 + jettyLen;
+    var post = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.4, 4.2, 8), jettyMat);
+    post.position.set(postX, 2.1, 0); world.add(post);
+    var lamp = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.68, 0.68), lampMat);
+    lamp.position.set(postX, 4.5, 0); world.add(lamp);
+    sprite(warmTex, 4.2, postX, 4.5, 0, 0.55); // the lamp's soft halo — steady, never animated
+    var lampLight = new THREE.PointLight(DUSK_BAND[8], 1.1, 30, 2.0);
+    lampLight.position.set(postX, 4.6, 0); world.add(lampLight);
+    // the lamp is STEADY (Spec-2 §6: never a sweeping beam) — its emissive intensity and
+    // lampLight.intensity are set once above and never touched again anywhere in the render loop
 
-    // forest + rocks on the slopes (avoid the placed sites + the basin centre)
-    var trunkGeo = new THREE.CylinderGeometry(0.16, 0.26, 1.5, 6), cone1 = new THREE.ConeGeometry(1.35, 2.3, 7), cone2 = new THREE.ConeGeometry(1.02, 1.9, 7), cone3 = new THREE.ConeGeometry(0.62, 1.4, 7);
-    var trunkMat = new THREE.MeshStandardMaterial({ color: 0x2a1c12, roughness: 0.95 }), pineMat = new THREE.MeshStandardMaterial({ color: 0x1b3823, roughness: 1, flatShading: true }), pineMat2 = new THREE.MeshStandardMaterial({ color: 0x21432a, roughness: 1, flatShading: true });
-    var rockGeo = new THREE.IcosahedronGeometry(1, 0), rockMat = new THREE.MeshStandardMaterial({ color: 0x28303c, roughness: 1, flatShading: true });
-    function nearSite(x, z, rr) {
-      for (var s = 0; s < lightSites.length; s++) { var dx = x - lightSites[s].x, dz = z - lightSites[s].z; if (dx * dx + dz * dz < rr * rr) return true; }
-      for (var r2 = 0; r2 < data.regions.length; r2++) { var q = pos(r2); if ((x - q.x) * (x - q.x) + (z - q.z) * (z - q.z) < rr * rr) return true; }
-      return false;
-    }
-    function tree(x, z, s) {
-      var y = wh(x, z), g = new THREE.Group();
-      var t0 = new THREE.Mesh(trunkGeo, trunkMat); t0.position.y = 0.75 * s; t0.scale.setScalar(s); g.add(t0);
-      var pm = Math.random() < 0.5 ? pineMat : pineMat2;
-      var a = new THREE.Mesh(cone1, pm); a.position.y = 1.7 * s; a.scale.setScalar(s); g.add(a);
-      var b = new THREE.Mesh(cone2, pm); b.position.y = 2.7 * s; b.scale.setScalar(s); g.add(b);
-      var c = new THREE.Mesh(cone3, pm); c.position.y = 3.5 * s; c.scale.setScalar(s); g.add(c);
-      g.position.set(x, y, z); g.rotation.y = Math.random() * 6.28; world.add(g);
-    }
-    var forestR = Math.max(26, maxR + 8);
-    for (var t = 0; t < 120; t++) { var a = Math.random() * 6.28, r = rnd(forestR - 8, 58); var x = Math.cos(a) * r, z = Math.sin(a) * r; if (nearSite(x, z, 18)) continue; tree(x, z, rnd(0.85, 1.8)); }
-    for (var t2 = 0; t2 < 30; t2++) { var a = Math.random() * 6.28, r = rnd(forestR - 10, 60); var x = Math.cos(a) * r, z = Math.sin(a) * r; if (nearSite(x, z, 15)) continue; var m = new THREE.Mesh(rockGeo, rockMat); m.position.set(x, wh(x, z) + 0.1, z); var sc = rnd(0.6, 1.7); m.scale.set(sc, sc * rnd(0.6, 0.9), sc); m.rotation.set(Math.random(), Math.random() * 6.28, Math.random()); world.add(m); }
+    var doorway = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.3), doorMat);
+    doorway.position.set(-4.3, 1.25, 3.5); doorway.rotation.y = 0.5; world.add(doorway); // the lit doorway the front door rises from
 
-    // fog frontier — REAL scatter (additive) at CUT intensity (founder note: real, not shiny)
-    var fogWall = [];
-    for (var fw = 0; fw < 56; fw++) { var a = fw / 56 * 6.28; var R = 60 + Math.sin(a * 4) * 3; var fx = Math.cos(a) * R, fz = Math.sin(a) * R; var s = sprite(fogTex, rnd(30, 44), fx, wh(fx, fz) + rnd(2, 6), fz, rnd(0.12, 0.2)); fogWall.push({ s: s, ph: Math.random() * 6.28, b: s.material.opacity }); }
-    for (var sh2 = 0; sh2 < 16; sh2++) { var a = Math.random() * 6.28, R = 72 + Math.random() * 22; var hx = Math.cos(a) * R, hz = Math.sin(a) * R; var m2 = new THREE.Mesh(new THREE.ConeGeometry(10 + Math.random() * 8, 14 + Math.random() * 11, 5), new THREE.MeshStandardMaterial({ color: 0x05080f, roughness: 1 })); m2.position.set(hx, -2, hz); world.add(m2); }
-    var mist = [];
-    for (var mi = 0; mi < 9; mi++) { var mx = rnd(-50, 50), mz = rnd(-50, 50); var sp = sprite(fogTex, rnd(30, 46), mx, wh(mx, mz) + 2.2, mz, rnd(0.08, 0.15)); mist.push({ s: sp, bx: mx, ph: Math.random() * 6.28 }); }
-    // fireflies near lit villages
-    var flies = [];
-    for (var f = 0; f < Math.min(18, 4 + beacons.length * 5); f++) {
-      var site = lightSites.length ? lightSites[f % lightSites.length] : { x: 0, z: 0, y: wh(0, 0) };
-      var a = Math.random() * 6.28, r = rnd(3, 12);
-      var s = sprite(warmTex, 0.8, site.x + Math.cos(a) * r, site.y + 2 + Math.random() * 4, site.z + Math.sin(a) * r, 0.7);
-      flies.push({ s: s, bx: s.position.x, bz: s.position.z, y0: site.y + 2 + Math.random() * 3, amp: rnd(1.6, 4), ph: Math.random() * 6.28, sp: rnd(0.3, 0.7) });
+    // --- isle base rocks + seed rocks, placed on WXLaw's bearings (Task 1) — no facets yet ---
+    var lay = WXLaw.layout(data);
+    var isleGeoms = rockGeoms(WXLaw.R_ROCK, 8, 10);
+    for (var ii = 0; ii < lay.isles.length; ii++) {
+      placeRock(isleGeoms, rockLitMat, rockDarkMat, lay.isles[ii].x, lay.isles[ii].z, 1);
     }
-    (function () {
-      var g = new THREE.BufferGeometry(), n = 520, p = new Float32Array(n * 3);
-      for (var i = 0; i < n; i++) { var r = 150 + Math.random() * 120, t = Math.random() * 6.28, ph = Math.acos(2 * Math.random() - 1); p[i * 3] = r * Math.sin(ph) * Math.cos(t); p[i * 3 + 1] = Math.abs(r * Math.cos(ph)) * 0.75 + 18; p[i * 3 + 2] = r * Math.sin(ph) * Math.sin(t); }
-      g.setAttribute("position", new THREE.BufferAttribute(p, 3));
-      scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xaec2e6, size: 0.6, transparent: true, opacity: 0.75 })));
-    })();
+    for (var si = 0; si < lay.seeds.length; si++) {
+      placeRock(isleGeoms, seedLitMat, rockDarkMat, lay.seeds[si].x, lay.seeds[si].z, 0.35);
+    }
 
     // controls (no auto-rotate — founder note)
     var keys = {};
@@ -310,8 +212,10 @@ window.Terrain3D = (function () {
     cv.addEventListener("pointerdown", dn); window.addEventListener("pointermove", mv); window.addEventListener("pointerup", up);
     cv.addEventListener("touchstart", dn, { passive: false }); cv.addEventListener("touchmove", mv, { passive: false }); cv.addEventListener("touchend", up);
     cv.addEventListener("wheel", function (e) { rad *= (1 + (e.deltaY > 0 ? 1 : -1) * 0.08); rad = Math.max(14, Math.min(110, rad)); e.preventDefault(); }, { passive: false });
-    // Phase 3: a CLICK (pointerup without a real drag) on an earned house opens that judgment's memory.
-    // Raycast against the earned houses only — ambient shapes and terrain are not addressable.
+    // a CLICK (pointerup without a real drag) on a monolith opens that convergence's memory — the
+    // memory endpoint (index.html owns it). Task 3 populates clickableHouses; this scaffold's
+    // list stays empty, so a click never fires (described==displayed: houseTargets:0 below).
+    var clickableHouses = [];
     var raycaster = onHouseClick ? new THREE.Raycaster() : null;
     function clickAt(e) {
       // !dragging rejects a gesture that STARTED off-canvas (e.g. a text-selection drag released
@@ -355,54 +259,35 @@ window.Terrain3D = (function () {
       var mvx = 0, mvz = 0;
       if (keys["w"] || keys["arrowup"]) mvz += 1; if (keys["s"] || keys["arrowdown"]) mvz -= 1;
       if (keys["a"] || keys["arrowleft"]) mvx -= 1; if (keys["d"] || keys["arrowright"]) mvx += 1;
-      if (mvx || mvz) { var fx = Math.cos(az), fz = Math.sin(az); target.x += (-fx * mvz + fz * mvx) * 0.8; target.z += (-fz * mvz - fx * mvx) * 0.8; var lim = 54, d = Math.sqrt(target.x * target.x + target.z * target.z); if (d > lim) { target.x *= lim / d; target.z *= lim / d; } target.y = wh(target.x, target.z) + 4; }
+      if (mvx || mvz) { var fx = Math.cos(az), fz = Math.sin(az); target.x += (-fx * mvz + fz * mvx) * 0.8; target.z += (-fz * mvz - fx * mvx) * 0.8; var lim = 54, d = Math.sqrt(target.x * target.x + target.z * target.z); if (d > lim) { target.x *= lim / d; target.z *= lim / d; } }
       var ige = 1;
       if (introActive) { var ig = Math.min(1, t / INTRO); ige = 1 - Math.pow(1 - ig, 3); if (ig >= 1) introActive = false; }
-      var kindle = 0.12 + 0.88 * ige; // villages "catch fire" as the reveal settles in
-      for (var bi = 0; bi < beacons.length; bi++) {
-        var bc = beacons[bi], fl = 0.7 + 0.3 * Math.sin(t * 6.5 + bc.ph) + 0.12 * Math.sin(t * 15 + bc.ph);
-        bc.bl.intensity = (0.7 + 1.1 * bc.base) * (0.8 + 0.25 * fl) * kindle;
-        bc.flame.material.emissiveIntensity = (0.7 + 0.9 * bc.base) * (0.75 + 0.4 * fl) * kindle;
-        bc.flame.scale.setScalar(0.9 + 0.14 * fl);
-        bc.gc.material.opacity = (0.3 + 0.3 * bc.base) * (0.8 + 0.3 * fl) * kindle;
-      }
-      for (var li = 0; li < litMats.length; li++) litMats[li].m.emissiveIntensity = litMats[li].base * kindle;
-      for (var i = 0; i < flies.length; i++) { var ff = flies[i]; ff.s.position.y = ff.y0 + (Math.sin(t * ff.sp + ff.ph) * 0.5 + 0.5) * ff.amp; ff.s.position.x = ff.bx + Math.sin(t * 0.4 + ff.ph) * 1.5; ff.s.position.z = ff.bz + Math.cos(t * 0.35 + ff.ph) * 1.5; ff.s.material.opacity = 0.3 + 0.4 * Math.abs(Math.sin(t * 1.3 + ff.ph)); }
-      for (var m = 0; m < mist.length; m++) mist[m].s.position.x = mist[m].bx + Math.sin(t * 0.06 + mist[m].ph) * 9;
-      for (var g2 = 0; g2 < fogWall.length; g2++) fogWall[g2].s.material.opacity = fogWall[g2].b * (0.85 + 0.15 * Math.sin(t * 0.5 + fogWall[g2].ph));
+      world.position.y = Math.sin(t * 0.35) * 0.6; // idle sway — the world group only (Spec-2 §3)
+      for (var ci2 = 0; ci2 < clouds.length; ci2++) { var cl = clouds[ci2]; cl.s.position.x = cl.bx + Math.sin(t * 0.05 + cl.ph) * 4; cl.s.position.z = cl.bz + Math.cos(t * 0.04 + cl.ph) * 4; }
       // fly-in reveal: start wide + high, ease to the resting pose (rr==rad, pp==pol once ige==1)
       var rr = rad * (1 + 0.7 * (1 - ige)), pp = pol * (0.8 + 0.2 * ige);
       camera.position.set(target.x + rr * Math.sin(pp) * Math.cos(az), target.y + rr * Math.cos(pp), target.z + rr * Math.sin(pp) * Math.sin(az));
       camera.lookAt(target);
       draw();
     })();
-    // The described==displayed contract (founder requirement 2026-07-04): the renderer reports
-    // how many EARNED lit houses it actually placed, so a harness can assert caption == scene.
+
+    // The described==displayed contract (Spec-1 founder requirement): the renderer reports how
+    // many EARNED, clickable monoliths it actually placed. This scaffold places none — Task 3
+    // builds the facets/monoliths; litHouses/houseTargets return 0 honestly until then.
     return {
-      litHouses: litHouses,
-      houseTargets: clickableHouses.length,  // described==displayed: how many are clickable
-      houseScreenXY: function (i) {
-        // test hook: the CURRENT screen position of house payload-index i (for the zero-token
-        // smoke to dispatch a REAL pointer event through the production raycast path)
-        for (var k = 0; k < clickableHouses.length; k++) {
-          if (clickableHouses[k].userData.houseIndex === i) {
-            var v = new THREE.Vector3();
-            clickableHouses[k].getWorldPosition(v);
-            v.project(camera);
-            var rect = cv.getBoundingClientRect();
-            return { x: rect.left + ((v.x + 1) / 2) * rect.width, y: rect.top + ((1 - v.y) / 2) * rect.height };
-          }
-        }
-        return null;
-      },
+      litHouses: 0,
+      houseTargets: 0,
+      houseScreenXY: function (i) { return null; },
+      isleCount: lay.isles.length,
+      seedCount: lay.seeds.length,
+      skipped: lay.skipped,
     };
   }
 
-  // teardown: stop the active scene's loop + listeners (Phase 2: #homebase recedes on saga start).
+  // teardown: stop the active scene's loop + listeners (a re-render or a saga start tears it down).
   return {
     render: render,
     teardown: function () { if (activeTeardown) { activeTeardown(); activeTeardown = null; } },
-    _pos: pos,
     _normalize: normalize,
   };
 })();

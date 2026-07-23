@@ -35,3 +35,35 @@ def test_wx_law_carries_no_banned_copy_tokens():
     s = _src().lower()
     for tok in ["solved", "mastered", "correct", "streak", "interleave", "innovation"]:
         assert tok not in s, tok
+
+
+# ---- Phase B T2: the archipelago scene scaffold (dusk sky, dock, camera, contract) -------------
+
+
+def test_terrain3d_loads_wx_law_and_keeps_the_contract():
+    s = Path("src/retnovation/web/static/terrain3d.js").read_text()
+    assert "WXLaw.layout" in s and "houseScreenXY" in s and "teardown" in s
+    assert "litHouses" in s and "ptrMoved" in s
+
+
+def test_index_html_loads_wx_law_before_terrain3d():
+    h = Path("src/retnovation/web/static/index.html").read_text()
+    assert h.index("wx_law.js") < h.index("terrain3d.js")
+
+
+def test_ambient_randomness_is_marked_in_terrain3d():
+    s = Path("src/retnovation/web/static/terrain3d.js").read_text()
+    # every Math.random use sits under an explicit ambient-FX marker within 3 lines above it
+    # (one marker per use, not per block — review-pinned)
+    lines = s.split("\n")
+    for n, ln in enumerate(lines):
+        if "Math.random" in ln:
+            ctx = "\n".join(lines[max(0, n - 3):n + 1])
+            assert "ambient FX" in ctx, f"unmarked Math.random at line {n + 1}"
+
+
+def test_new_static_copy_carries_no_banned_tokens():
+    combined = (Path("src/retnovation/web/static/terrain3d.js").read_text()
+                + Path("src/retnovation/web/static/index.html").read_text()).lower()
+    for tok in ["solved", "mastered", "streak", "interleave", "mix your domains", "innovation"]:
+        assert tok not in combined, tok

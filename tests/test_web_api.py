@@ -976,7 +976,7 @@ def test_memory_chrome_is_recollective_never_evaluative():
     start = html.index("function showMemory")
     block = html[start : html.index("function hideMemory")]
     js = (root / "terrain3d.js").read_text()
-    hint = next(line for line in js.splitlines() if "click a house" in line)  # the hover hint too
+    hint = next(line for line in js.splitlines() if "click a monolith" in line)  # the hover hint too
     for banned in (
         "solved",
         "resolved",
