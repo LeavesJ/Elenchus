@@ -449,3 +449,78 @@ def test_log_converged_stores_the_position_and_legacy_rows_read_null(tmp_path):
     rows = store.converged_log()
     assert rows[0]["position"] == "I hold the 60/40 split."
     assert rows[1]["position"] is None
+
+
+def test_domain_slots_roundtrip_and_confluence_retirement(tmp_path):
+    store = SittingStore(str(tmp_path / "s.db"))
+    claims = [
+        {
+            "slot": 0,
+            "first_touch_at": "2026-07-22T00:00:00+00:00",
+            "member_refs": ["prob:A1"],
+            "member_frames": ["a1", "a2"],
+            "status": "live",
+        },
+        {
+            "slot": 1,
+            "first_touch_at": "2026-07-23T00:00:00+00:00",
+            "member_refs": ["prob:B1"],
+            "member_frames": ["b1"],
+            "status": "live",
+        },
+    ]
+    store.write_domain_slots(claims, retire=[])
+    rows = store.domain_slots()
+    assert [r["slot"] for r in rows] == [0, 1]
+    assert rows[0]["member_frames"] == ["a1", "a2"] and rows[1]["status"] == "live"
+
+    # Confluence: young 1 retires into elder 0; the row survives forever (L-3), resolvable.
+    store.write_domain_slots(
+        [
+            {
+                "slot": 0,
+                "first_touch_at": "2026-07-22T00:00:00+00:00",
+                "member_refs": ["prob:A1", "prob:B1"],
+                "member_frames": ["a1", "a2", "b1"],
+                "status": "live",
+            }
+        ],
+        retire=[(1, 0)],
+    )
+    rows = store.domain_slots()
+    assert [r["slot"] for r in rows] == [0, 1]
+    assert rows[1]["status"] == "confluent-into:0"
+    assert "prob:B1" in rows[0]["member_refs"]
+
+
+def test_write_domain_slots_is_idempotent(tmp_path):
+    store = SittingStore(str(tmp_path / "s.db"))
+    claim = [
+        {
+            "slot": 3,
+            "first_touch_at": "2026-07-22T00:00:00+00:00",
+            "member_refs": ["prob:X"],
+            "member_frames": ["x1"],
+            "status": "live",
+        }
+    ]
+    store.write_domain_slots(claim, retire=[])
+    store.write_domain_slots(claim, retire=[])
+    assert len(store.domain_slots()) == 1
+
+
+def test_inert_store_domain_slots_noop():
+    store = SittingStore(":memory:")
+    store.write_domain_slots(
+        [
+            {
+                "slot": 0,
+                "first_touch_at": "t",
+                "member_refs": [],
+                "member_frames": [],
+                "status": "live",
+            }
+        ],
+        retire=[],
+    )
+    assert store.domain_slots() == []

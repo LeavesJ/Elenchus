@@ -38,6 +38,13 @@ CREATE TABLE IF NOT EXISTS web_world (
 CREATE TABLE IF NOT EXISTS web_generated_problem (
   ref TEXT PRIMARY KEY, sitting_id TEXT NOT NULL, experience_id TEXT NOT NULL,
   scenario TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS web_domain_slot (
+    slot INTEGER PRIMARY KEY,
+    first_touch_at TEXT NOT NULL,
+    member_refs_json TEXT NOT NULL,
+    member_frames_json TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'live'
+);
 """
 
 
@@ -434,6 +441,55 @@ class SittingStore:
             }
             for s, r, at, eid, position in rows
         ]
+
+    def domain_slots(self) -> list[dict]:
+        """The domain-identity registry (Spec-2 §4): every slot ever assigned, live + retired
+        (L-3: retired rows keep their number forever; free = never-assigned)."""
+        if self._inert:
+            return []
+        with self._conn() as c:
+            rows = c.execute(
+                "SELECT slot, first_touch_at, member_refs_json, member_frames_json, status"
+                " FROM web_domain_slot ORDER BY slot"
+            ).fetchall()
+        return [
+            {
+                "slot": r[0],
+                "first_touch_at": r[1],
+                "member_refs": json.loads(r[2]),
+                "member_frames": json.loads(r[3]),
+                "status": r[4],
+            }
+            for r in rows
+        ]
+
+    def write_domain_slots(self, claims: list[dict], retire: list[tuple[int, int]]) -> None:
+        """Commit a landing's slot resolution (the ONE seam, Spec-2 §4). Upsert is idempotent;
+        retirement flips status and never deletes (L-3). Inert (`:memory:`) stores no-op — the
+        landing seam runs on inert-registry test apps (test_web_api builds them) and must not 500."""
+        if self._inert:
+            return
+        with self._conn() as c:
+            for cl in claims:
+                c.execute(
+                    "INSERT INTO web_domain_slot"
+                    " (slot, first_touch_at, member_refs_json, member_frames_json, status)"
+                    " VALUES (?, ?, ?, ?, ?)"
+                    " ON CONFLICT(slot) DO UPDATE SET member_refs_json=excluded.member_refs_json,"
+                    " member_frames_json=excluded.member_frames_json, status=excluded.status",
+                    (
+                        cl["slot"],
+                        cl["first_touch_at"],
+                        json.dumps(cl["member_refs"]),
+                        json.dumps(cl["member_frames"]),
+                        cl["status"],
+                    ),
+                )
+            for young, elder in retire:
+                c.execute(
+                    "UPDATE web_domain_slot SET status = ? WHERE slot = ?",
+                    (f"confluent-into:{elder}", young),
+                )
 
     def max_generated_n(self, sitting_id: str) -> int:
         """Highest instance n among this sitting's gen:{sitting}:{n} rows. The forge counter
