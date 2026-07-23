@@ -372,6 +372,9 @@ class SittingStore:
             "houses": record.get("houses") or [],
             "house_refs": record.get("house_refs") or [],
             "house_at": record.get("house_at") or [],
+            # Vessels (Phase A T4, Spec-2 §6): the ledger count frozen at the SAME landing —
+            # None on a pre-T4 record (attach-only-when-present downstream, never a fake 0).
+            "vessels": record.get("vessels"),
         }
 
     def generated_territories(self, sitting_id: str) -> set[str]:

@@ -98,6 +98,8 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
             out["terrain"] = data["terrain"]
         if data.get("houses"):
             out["houses"] = data["houses"]
+        if data.get("vessels"):
+            out["vessels"] = {"count": data["vessels"]["count"]}
         return out
     if tag == "say":  # every Concierge-authored visible turn (opening, re-invite, probe, wind-down)
         out = {"kind": "say", "text": data["text"]}
@@ -161,6 +163,8 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
                 "from_slot": data["confluence"]["from_slot"],
                 "to_slot": data["confluence"]["to_slot"],
             }
+        if data.get("vessels"):  # Spec-2 §6 (D-S2-4): attach-only-when-present, bare count
+            out["vessels"] = {"count": data["vessels"]["count"]}
         return out
     return {"kind": "error", "message": data.get("message", "")}
 

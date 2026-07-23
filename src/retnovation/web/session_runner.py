@@ -20,6 +20,7 @@ from ..types import EntryClass, Outcome, Regime, Selection, Work
 from . import voice
 from .sitting_store import SittingStore
 from .slots import resolve_slots
+from .vessels import vessel_count
 
 # Liveness bound: after this many consecutive non-substantive door turns, stop re-collecting and
 # fall through — treat the latest text as the RAW opening and enter the engine. Without it, a user
@@ -167,6 +168,9 @@ def _serialize_record(rec: dict) -> dict | None:
         # pins WHICH convergence). A pre-S1 record rebuilds with no house_at — memory()
         # degrades to ref-only back-compat, never a crash (self-heals at the next landing).
         "house_at": rec.get("house_at", []),
+        # Vessels (Task 4): the ledger count frozen at THIS landing, allowlisted through same as
+        # terrain/houses — a pre-T4 record rebuilds with none (see _rebuild/latest_homebase).
+        "vessels": rec.get("vessels"),
     }
 
 
@@ -781,6 +785,8 @@ class SessionRegistry:
                             )
                         data["terrain"] = terrain
                         data["houses"] = home["houses"]
+                        if home.get("vessels"):
+                            data["vessels"] = home["vessels"]
                     data["returning"] = line
             return (tag, data)
         return self._resume(session_id, row, now)
@@ -919,6 +925,8 @@ class SessionRegistry:
             if home["terrain"] and self._store.converged_log():
                 payload["terrain"] = home["terrain"]
                 payload["houses"] = home["houses"]
+                if home.get("vessels"):
+                    payload["vessels"] = home["vessels"]
         return ("resume", payload)
 
     def _rebuild(self, session_id: str) -> dict | None:
@@ -974,6 +982,9 @@ class SessionRegistry:
                 # S1: the index-parallel converged_at, same freeze — a pre-S1 record rebuilds
                 # with an honest empty list (ref-only drift-guard back-compat).
                 "house_at": ser.get("house_at", []),
+                # Vessels (Task 4): the ledger count frozen at the landing — a pre-T4 record
+                # rebuilds with None (attach-only-when-present projection, never a fake 0).
+                "vessels": ser.get("vessels"),
             }
             self._last_record[session_id] = rec
             return rec
@@ -1216,6 +1227,11 @@ class SessionRegistry:
                     }
                 if ch.record.get("confluence"):
                     data["confluence"] = ch.record["confluence"]
+                # Vessels (Spec-2 §6, D-S2-4): the ledger's genuinely-owned problems, frozen
+                # beside the terrain/houses/confluence at THIS landing — a future rebuild reads
+                # the frozen count, never a live re-query (empty=empty stays honest across a
+                # restart the same way terrain does).
+                ch.record["vessels"] = {"count": vessel_count(self._db_path)}
             else:
                 ch.record.setdefault("houses", [])
                 ch.record.setdefault("house_refs", [])
@@ -1720,6 +1736,7 @@ class SessionRegistry:
             "terrain": rec["terrain"],
             "houses": rec.get("houses", []),
             "confluence": rec.get("confluence"),
+            "vessels": rec.get("vessels"),
         }
         if ch is not None and not ch.terminal and ch.record is None:
             # An in-flight segment past the last convergence: the static sign-off (MF-5). The

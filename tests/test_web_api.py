@@ -1029,3 +1029,60 @@ def test_confluence_rides_done_and_close_payloads_and_not_the_reload(world_cross
     # A fresh page load after close: the sitting is over, the record never persisted the event.
     reload = client.post("/api/session").json()
     assert "confluence" not in reload
+
+
+# ---- Phase A T4: the vessels projection rides the full producer chain to the wire -------------
+
+
+def test_vessels_ride_frontdoor_and_close_payloads_as_bare_count(tmp_path, make_fake):
+    """The dock's moored vessels (Spec-2 §6, D-S2-4) ride BOTH the close payload and a subsequent
+    reload's frontdoor payload as a bare {"count": int} — never anything else vessel-shaped.
+    build_store's curated placeholders (provenance='seed') never count, so a real owned corpus
+    row is seeded directly on the world db before driving the landing."""
+    import json as _json
+
+    from retnovation.persistence import Store
+    from retnovation.types import CorpusEntry, LedgerEntry
+
+    db = str(tmp_path / "world.db")
+    store = Store(db)
+    store.add_ledger_entry(LedgerEntry(id="veldra:owned-x", owned_problem="a real owned problem"))
+    store.upsert_corpus(
+        CorpusEntry(
+            ledger_ref="veldra:owned-x",
+            domain="founder_ceo",
+            why_owned="real",
+            unlabeled="real",
+            provenance="veldra_execlog",
+            corpus_pointers=[],
+        )
+    )
+    store.close()
+
+    app = create_app(db_path=db, model_factory=_world_factory(make_fake))
+    client = TestClient(app)
+
+    assert client.post("/api/session").json()["kind"] == "frontdoor"
+    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r["kind"] == "say" and r["text"] == _SCENARIO
+    _drive_to_done(client)
+    r2 = client.post("/api/session/s/continue", json={}).json()
+    assert r2["kind"] == "say"
+    _drive_to_done(client)  # second convergence, same sitting (mirrors the houses-count test)
+
+    cl = client.post("/api/session/s/close").json()
+    assert cl["kind"] == "close"
+    assert set(cl["vessels"]) == {"count"}
+    assert isinstance(cl["vessels"]["count"], int)
+    # the one pre-seeded owned row; the curated doors' own ledger_refs are build_store seed
+    # placeholders (provenance="seed") and never count
+    assert cl["vessels"]["count"] == 1
+
+    reload = client.post("/api/session").json()
+    assert reload["kind"] == "frontdoor"
+    assert set(reload["vessels"]) == {"count"}
+    assert isinstance(reload["vessels"]["count"], int)
+    assert reload["vessels"]["count"] == 1
+
+    blob = _json.dumps([cl, reload])
+    assert "gen:" not in blob and "veldra:" not in blob
