@@ -3531,11 +3531,14 @@ def world_legacy_record(tmp_path, make_fake):
 @pytest.fixture
 def world_bulk_assignment(tmp_path, make_fake):
     """The founder's real-db day-one path (review SHOULD-FIX): two domains land BEFORE any
-    registry exists (`web_domain_slot` wiped after they land, simulating a pre-Phase-A db) — the
-    first post-Phase-A landing assigns ALL qualifying components in one pass, in the projection's
-    positional order. The trigger segment (irreversible_anchor, deflected on both its
-    already-existing frames) introduces no new component and converges nothing new — it only
-    exercises the mechanics fresh over the two pre-existing, now-unslotted domains."""
+    registry (OR any per-house slot bookkeeping) exists — `web_domain_slot` wiped AND the
+    persisted record's houses cleared (`write_state(record=None)`) after they land, so
+    `latest_homebase()` (the copy-forward's prior source, per the follow-up review) has nothing
+    to copy forward either — simulating a genuinely pre-Phase-A db. The first post-Phase-A
+    landing then assigns ALL qualifying components in one pass, in the projection's positional
+    order. The trigger segment (irreversible_anchor, deflected on both its already-existing
+    frames) introduces no new component and converges nothing new — it only exercises the
+    mechanics fresh over the two pre-existing, now-unslotted domains."""
     import sqlite3
 
     db = str(tmp_path / "wbulk.db")
@@ -3546,6 +3549,8 @@ def world_bulk_assignment(tmp_path, make_fake):
     conn.execute("DELETE FROM web_domain_slot")
     conn.commit()
     conn.close()
+    sit = reg._store.live_sitting()["id"]
+    reg._store.write_state(sit, record=None)  # no prior houses/slots to copy forward either
     reg._model_factory = lambda: _agnostic(make_fake, "unchanged")
     _land(reg, "s3", _ANCHOR)
     return reg, "s3", reg._store
@@ -3588,6 +3593,15 @@ def test_cross_domain_judgment_fires_confluence_and_retires_young_slot(world_cro
     from retnovation.web.session_runner import _serialize_record
 
     assert "confluence" not in (_serialize_record(rec) or {})
+    # Per-house slot-at-arrival is frozen forever (Spec-2 §5): the confluence landing must not
+    # overwrite a PRIOR house's slot with the merged component's current resolution — the
+    # younger domain's house keeps its retired slot so the renderer can lay it out as its own
+    # translated sub-cluster (review: copy-forward must source the PRIOR record from the store,
+    # not from the fresh per-landing ch.record).
+    slots = [h["slot"] for h in rec["houses"]]
+    assert slots[0] == 0  # first landing's house: elder domain, frozen at arrival
+    assert slots[1] == 1  # second landing's house: YOUNGER slot preserved post-confluence
+    assert slots[2] == 0  # the confluence landing's new house: stamped elder
 
 
 def test_deflected_push_claims_no_slot_and_fires_no_confluence(world_with_deflection):

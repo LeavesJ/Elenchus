@@ -1176,8 +1176,19 @@ class SessionRegistry:
                 for h in houses:
                     h["region"] = remap[h["region"]]  # housed => always in remap
                 # --- per-house slot: prefix copy-forward (append-only log; Spec-2 §5) ---
-                prior_refs = ch.record.get("house_refs", [])
-                prior_houses = ch.record.get("houses", [])
+                # Sourced from the STORE's latest landed record, not the fresh per-landing
+                # ch.record (which never carries a prior landing's houses forward — each segment
+                # gets its own brand-new dict): the copy-forward exists so a house's slot-at-
+                # arrival is frozen forever even across a LATER confluence that merges its region
+                # with another — a younger house must keep its retired slot (the renderer lays it
+                # out as its own translated sub-cluster) rather than being silently overwritten
+                # with the elder's slot on the next recompute. `latest_homebase` is landed_at-
+                # keyed (genuine landings only, cross-sitting cumulative) — a first landing has
+                # none, so everything stamps fresh; a stale landing never promoted it, so it can
+                # never be read back as "prior" either.
+                prior = self._store.latest_homebase() or {}
+                prior_refs = prior.get("house_refs") or []
+                prior_houses = prior.get("houses") or []
                 new_refs = convergence_order(rows)
                 for i, h in enumerate(houses):
                     if (
