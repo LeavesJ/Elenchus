@@ -67,3 +67,18 @@ def test_new_static_copy_carries_no_banned_tokens():
                 + Path("src/retnovation/web/static/index.html").read_text()).lower()
     for tok in ["solved", "mastered", "streak", "interleave", "mix your domains", "innovation"]:
         assert tok not in combined, tok
+
+
+# ---- Phase B T3: the isles — facets, monoliths, terraces, thread, ghost -------------------------
+
+
+def test_terrain3d_builds_isle_structures():
+    s = Path("src/retnovation/web/static/terrain3d.js").read_text()
+    for token in ["clickableMonoliths", "houseIndex", "thread", "ghost", "rings"]:
+        assert token in s, token
+
+
+def test_thread_is_per_isle_never_cross_isle():
+    s = Path("src/retnovation/web/static/terrain3d.js").read_text()
+    # the thread builder must iterate isle.thread, never a global houses list
+    assert "isle.thread" in s or "isles[k].thread" in s

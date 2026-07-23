@@ -1,9 +1,10 @@
-/* The Archipelago — dusk-sky scene scaffold (Spec-2 §3/§6/§8, Phase B T2).
+/* The Archipelago — dusk-sky scene (Spec-2 §3/§5/§6/§8, Phase B T2+T3).
  * Terrain3D.render(container, payload, opts) consumes window.WXLaw's pure placement law
- * (WXLaw.layout — Task 1) to place isle base rocks and seed rocks on their frozen bearings. This
- * scaffold ships the dusk sky + cloud shelf, the home dock (rock, jetty, lantern, doorway glow),
- * the world group's idle sway, the camera/controls, and the render() contract — every isle/seed
- * here is an EMPTY rock mass; the facets/monoliths a convergence earns are Task 3's.
+ * (WXLaw.layout — Task 1) to place isle base rocks and seed rocks on their frozen bearings, then
+ * populates each isle with its earned facets/monoliths/strata rings, one per-isle arrival-thread,
+ * and one uniform ghost invitation; seed rocks earn their own small housed monoliths. This file
+ * ships the dusk sky + cloud shelf, the home dock (rock, jetty, lantern, doorway glow), the world
+ * group's idle sway, the camera/controls, and the render() contract.
  * The prior Kindled-Valley terrain (heightfield, villages, per-convergence houses, forest, fog
  * wall) is retired outright: the world is now a home dock and its orbiting isles, not a valley.
  * Requires the vendored global THREE (+ optional EffectComposer/UnrealBloomPass for bloom) and
@@ -29,7 +30,18 @@ window.Terrain3D = (function () {
     0xffc477, // 8  the lamp — steady warm (never a sweep, never a pulse)
     0xffb066, // 9  the doorway glow — warm
     0x2e1c38, // 10 seed rock — dim lit top
-    0x6a4a72  // 11 cloud shelf tint
+    0x6a4a72, // 11 cloud shelf tint
+    // 12-17: the facet hue ramp (Phase B T3, Spec-2 §5) — six shared instances, indexed by
+    // isle.slot % 6, a green -> violet ramp that stays inside this same dusk band (no grey entry:
+    // every stop below has three distinct channels).
+    0x3d6b4e, // 12 facet hue 0 — moss green
+    0x4f7a52, // 13 facet hue 1 — leaf green
+    0x6c7a5a, // 14 facet hue 2 — olive-green (transitional)
+    0x6b6a92, // 15 facet hue 3 — blue-violet (transitional)
+    0x7a5a92, // 16 facet hue 4 — violet
+    0x5c3a78, // 17 facet hue 5 — deep violet
+    0xcac2e6, // 18 the ghost bud — pale lavender, IDENTICAL on every isle
+    0xbfae9e  // 19 strata ring — stone-pale
   ];
 
   function hx(n) { return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -190,14 +202,157 @@ window.Terrain3D = (function () {
     var doorway = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.3), doorMat);
     doorway.position.set(-4.3, 1.25, 3.5); doorway.rotation.y = 0.5; world.add(doorway); // the lit doorway the front door rises from
 
-    // --- isle base rocks + seed rocks, placed on WXLaw's bearings (Task 1) — no facets yet ---
+    // --- isle base rocks + seed rocks, placed on WXLaw's bearings (Task 1) ---
     var lay = WXLaw.layout(data);
     var isleGeoms = rockGeoms(WXLaw.R_ROCK, 8, 10);
+    var SEED_SCALE = 0.35;
+    // No height-field survives from the old valley (T2 review, Adjudication 2): the isle "top" is
+    // pinned at the rock's own apex so the earned structures always clear the rock mass rather
+    // than clip into its sloped flank — a floating crown at the isle's peak, not a buried plaza.
+    var ISLE_TOP_Y = isleGeoms.litH;
+    var SEED_TOP_Y = isleGeoms.litH * SEED_SCALE;
     for (var ii = 0; ii < lay.isles.length; ii++) {
       placeRock(isleGeoms, rockLitMat, rockDarkMat, lay.isles[ii].x, lay.isles[ii].z, 1);
     }
     for (var si = 0; si < lay.seeds.length; si++) {
-      placeRock(isleGeoms, seedLitMat, rockDarkMat, lay.seeds[si].x, lay.seeds[si].z, 0.35);
+      placeRock(isleGeoms, seedLitMat, rockDarkMat, lay.seeds[si].x, lay.seeds[si].z, SEED_SCALE);
+    }
+
+    // --- Phase B T3: facets, monoliths, strata rings, per-isle thread, ghost bud ----------------
+    // Every position below is a pure function of WXLaw's layout() output (facet.x/z/y/r/sides/rot,
+    // bucket, houseIndex) plus plain index arithmetic (k, houseIndex, lap) — no unseeded randomness
+    // touches any structural placement here (the determinism boundary, Spec-2 §5).
+    var FACET_FR = 1.35;               // facet dome radius (binding)
+    var GHOST_R = FACET_FR;            // the ghost outline reads as a facet-sized invitation
+
+    var facetGeomCache = {}, monoGeomCache = {}, monoMatCache = {};
+    function facetGeomFor(sides) {
+      if (!facetGeomCache[sides]) facetGeomCache[sides] = new THREE.CylinderGeometry(FACET_FR, FACET_FR * 1.08, 0.9, sides);
+      return facetGeomCache[sides];
+    }
+    function monoGeomFor(bucket) {
+      if (!monoGeomCache[bucket]) monoGeomCache[bucket] = new THREE.BoxGeometry(0.32, 1.6 + 0.5 * bucket, 0.32);
+      return monoGeomCache[bucket];
+    }
+    function monoMatFor(bucket) {
+      // warm glow family only: color/emissive always DUSK_BAND[9] (the doorway's warm hue); only
+      // intensity moves with bucket — bucket null->0 still reads as a dim ember, never grey.
+      if (!monoMatCache[bucket]) monoMatCache[bucket] = new THREE.MeshStandardMaterial({
+        color: DUSK_BAND[9], emissive: DUSK_BAND[9], emissiveIntensity: 0.6 + 0.5 * bucket,
+        flatShading: true, roughness: 0.55,
+      });
+      return monoMatCache[bucket];
+    }
+    // the six shared facet materials (isle.slot % 6) — never a per-facet material (draw-call budget)
+    var facetMats = [];
+    for (var fm = 0; fm < 6; fm++) {
+      facetMats.push(new THREE.MeshStandardMaterial({ color: DUSK_BAND[12 + fm], flatShading: true, roughness: 0.88 }));
+    }
+    // one shared strata-ring geometry/material — fr is a fixed constant, so every ring is congruent
+    var ringGeo = new THREE.TorusGeometry(FACET_FR * 1.15, 0.05, 8, 20);
+    var ringMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[19], flatShading: true, roughness: 0.9 });
+    var threadMat = new THREE.LineBasicMaterial({ color: DUSK_BAND[9], transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+
+    function hexLoopGeometry(r) {
+      var g = new THREE.BufferGeometry(), n = 6, p = new Float32Array(n * 3);
+      for (var k = 0; k < n; k++) { var a = k * (Math.PI / 3); p[k * 3] = Math.cos(a) * r; p[k * 3 + 1] = 0; p[k * 3 + 2] = Math.sin(a) * r; }
+      g.setAttribute("position", new THREE.BufferAttribute(p, 3));
+      return g;
+    }
+    // shared ghost geometry/material: IDENTICAL parameters on every isle — only position differs,
+    // so the one shared material's opacity pulse (the animation loop, below) drives every isle at once
+    var ghostGeo = hexLoopGeometry(GHOST_R);
+    var ghostMat = new THREE.LineBasicMaterial({ color: DUSK_BAND[18], transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false });
+
+    var clickableMonoliths = [];
+    var litHouses = 0;
+
+    for (var ik = 0; ik < lay.isles.length; ik++) {
+      var isle = lay.isles[ik];
+      var tipByHouse = {}; // houseIndex -> this isle's built monolith tip, world-space
+
+      for (var ck = 0; ck < isle.clusters.length; ck++) {
+        var cluster = isle.clusters[ck];
+        for (var fk = 0; fk < cluster.facets.length; fk++) {
+          var facet = cluster.facets[fk];
+          var baseY = ISLE_TOP_Y + facet.y; // the facet's base plane (terrace lift + stack run)
+          var wx = isle.x + facet.x, wz = isle.z + facet.z; // facet.x/z are isle-local (cluster offset already applied)
+
+          var facetMesh = new THREE.Mesh(facetGeomFor(facet.sides), facetMats[isle.slot % 6]);
+          facetMesh.position.set(wx, baseY + 0.45, wz);
+          facetMesh.rotation.y = facet.rot;
+          world.add(facetMesh);
+
+          if (facet.rings > 0) {
+            var ring = new THREE.Mesh(ringGeo, ringMat);
+            ring.position.set(wx, baseY, wz); // centered on the base plane: half above, half sunk
+            // organically tilted by facet.rot (tree-ring vocabulary) — a perfectly flat, identical
+            // series would read as a mechanical stamp, not a grown terrace
+            ring.rotation.x = Math.PI / 2 + (facet.rot - Math.PI) * 0.12;
+            world.add(ring);
+          }
+
+          var bucket = facet.bucket == null ? 0 : facet.bucket;
+          var monoH = 1.6 + 0.5 * bucket;
+          var facetTopY = baseY + 0.9;
+          var monoMesh = new THREE.Mesh(monoGeomFor(bucket), monoMatFor(bucket));
+          monoMesh.position.set(wx, facetTopY + monoH / 2, wz);
+          monoMesh.userData.houseIndex = facet.houseIndex; // the GLOBAL house index (Task 4's raycast target)
+          world.add(monoMesh);
+          clickableMonoliths.push(monoMesh);
+          litHouses++;
+          tipByHouse[facet.houseIndex] = { x: wx, y: facetTopY + monoH, z: wz };
+        }
+      }
+
+      // the arrival-thread: isle.thread order, through the built monolith tips, PER ISLE ONLY —
+      // never a global houses list, never crossing into another isle's thread
+      var threadPts = [];
+      for (var th2 = 0; th2 < isle.thread.length; th2++) {
+        var tip = tipByHouse[isle.thread[th2]]; // skip seed-hosted/skipped indices absent as facets here
+        if (tip) threadPts.push(tip);
+      }
+      if (threadPts.length >= 2) {
+        var tg = new THREE.BufferGeometry(), tp = new Float32Array(threadPts.length * 3);
+        for (var tpk = 0; tpk < threadPts.length; tpk++) { tp[tpk * 3] = threadPts[tpk].x; tp[tpk * 3 + 1] = threadPts[tpk].y; tp[tpk * 3 + 2] = threadPts[tpk].z; }
+        tg.setAttribute("position", new THREE.BufferAttribute(tp, 3));
+        world.add(new THREE.Line(tg, threadMat));
+      }
+
+      // the ghost bud: the outward invitation, one per isle, identical shape/material everywhere
+      if (isle.ghost) {
+        var ghostLoop = new THREE.LineLoop(ghostGeo, ghostMat);
+        ghostLoop.position.set(isle.x + isle.ghost.x, ISLE_TOP_Y + isle.ghost.y, isle.z + isle.ghost.z);
+        world.add(ghostLoop);
+      }
+
+      // ONE warm point light per isle, at its center — never per monolith (draw-call budget)
+      var isleLight = new THREE.PointLight(DUSK_BAND[9], 1.0, 40, 2.0);
+      isleLight.position.set(isle.x, ISLE_TOP_Y + 2.2, isle.z);
+      world.add(isleLight);
+    }
+
+    // seed monoliths: small, on the seed rock, deterministic TIGHT RING positions by their list
+    // order — index arithmetic only, no randomness
+    var SEED_RING_R = 0.55, SEED_RING_STEP = Math.PI / 3; // a hex step; a 7th+ entry laps outward
+    for (var sk = 0; sk < lay.seeds.length; sk++) {
+      var seed = lay.seeds[sk];
+      for (var mk = 0; mk < seed.monoliths.length; mk++) {
+        var houseIndex = seed.monoliths[mk];
+        var house = data.houses[houseIndex];
+        var sBucket = (house && house.bucket != null) ? house.bucket : 0;
+        var lap = Math.floor(mk / 6), ang = (mk % 6) * SEED_RING_STEP;
+        var ringR = SEED_RING_R * (1 + lap * 0.6);
+        var sx = seed.x + Math.cos(ang) * ringR, sz = seed.z + Math.sin(ang) * ringR;
+        var sMonoH = (1.6 + 0.5 * sBucket) * SEED_SCALE;
+        var sMono = new THREE.Mesh(monoGeomFor(sBucket), monoMatFor(sBucket));
+        sMono.scale.setScalar(SEED_SCALE);
+        sMono.position.set(sx, SEED_TOP_Y + sMonoH / 2, sz);
+        sMono.userData.houseIndex = houseIndex; // the GLOBAL house index
+        world.add(sMono);
+        clickableMonoliths.push(sMono);
+        litHouses++;
+      }
     }
 
     // controls (no auto-rotate — founder note)
@@ -213,15 +368,14 @@ window.Terrain3D = (function () {
     cv.addEventListener("touchstart", dn, { passive: false }); cv.addEventListener("touchmove", mv, { passive: false }); cv.addEventListener("touchend", up);
     cv.addEventListener("wheel", function (e) { rad *= (1 + (e.deltaY > 0 ? 1 : -1) * 0.08); rad = Math.max(14, Math.min(110, rad)); e.preventDefault(); }, { passive: false });
     // a CLICK (pointerup without a real drag) on a monolith opens that convergence's memory — the
-    // memory endpoint (index.html owns it). Task 3 populates clickableHouses; this scaffold's
-    // list stays empty, so a click never fires (described==displayed: houseTargets:0 below).
-    var clickableHouses = [];
+    // memory endpoint (index.html owns it). clickableMonoliths is populated above (isle facet
+    // monoliths + seed monoliths); an empty payload leaves it empty, so a click never fires.
     var raycaster = onHouseClick ? new THREE.Raycaster() : null;
     function clickAt(e) {
       // !dragging rejects a gesture that STARTED off-canvas (e.g. a text-selection drag released
       // over the canvas): dn never ran, so ptrMoved is stale — the canvas-target listener fires
       // before the window-bubble up() clears dragging, so this check is reliable.
-      if (!onHouseClick || !dragging || ptrMoved || !clickableHouses.length) return;
+      if (!onHouseClick || !dragging || ptrMoved || !clickableMonoliths.length) return;
       var rect = cv.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
       var ndc = new THREE.Vector2(
@@ -229,7 +383,7 @@ window.Terrain3D = (function () {
         -((e.clientY - rect.top) / rect.height) * 2 + 1
       );
       raycaster.setFromCamera(ndc, camera);
-      var hits = raycaster.intersectObjects(clickableHouses, true);
+      var hits = raycaster.intersectObjects(clickableMonoliths, true);
       if (!hits.length) return;
       var o = hits[0].object;
       while (o && o.userData.houseIndex === undefined) o = o.parent;
@@ -264,6 +418,9 @@ window.Terrain3D = (function () {
       if (introActive) { var ig = Math.min(1, t / INTRO); ige = 1 - Math.pow(1 - ig, 3); if (ig >= 1) introActive = false; }
       world.position.y = Math.sin(t * 0.35) * 0.6; // idle sway — the world group only (Spec-2 §3)
       for (var ci2 = 0; ci2 < clouds.length; ci2++) { var cl = clouds[ci2]; cl.s.position.x = cl.bx + Math.sin(t * 0.05 + cl.ph) * 4; cl.s.position.z = cl.bz + Math.cos(t * 0.04 + cl.ph) * 4; }
+      // the ghost bud's pulse: deterministic, time-based (t only), 0.35<->0.85, IDENTICAL on every
+      // isle because every isle's LineLoop shares this ONE material — one assignment drives them all
+      ghostMat.opacity = 0.6 + 0.25 * Math.sin(t * 1.3);
       // fly-in reveal: start wide + high, ease to the resting pose (rr==rad, pp==pol once ige==1)
       var rr = rad * (1 + 0.7 * (1 - ige)), pp = pol * (0.8 + 0.2 * ige);
       camera.position.set(target.x + rr * Math.sin(pp) * Math.cos(az), target.y + rr * Math.cos(pp), target.z + rr * Math.sin(pp) * Math.sin(az));
@@ -272,12 +429,25 @@ window.Terrain3D = (function () {
     })();
 
     // The described==displayed contract (Spec-1 founder requirement): the renderer reports how
-    // many EARNED, clickable monoliths it actually placed. This scaffold places none — Task 3
-    // builds the facets/monoliths; litHouses/houseTargets return 0 honestly until then.
+    // many EARNED, clickable monoliths it actually placed — isle facet monoliths + seed monoliths,
+    // every one of them clickable (litHouses === clickableMonoliths.length by construction).
     return {
-      litHouses: 0,
-      houseTargets: 0,
-      houseScreenXY: function (i) { return null; },
+      litHouses: litHouses,
+      houseTargets: clickableMonoliths.length,
+      houseScreenXY: function (i) {
+        // test hook: the CURRENT screen position of monolith payload-index i (for the zero-token
+        // smoke to dispatch a REAL pointer event through the production raycast path)
+        for (var k = 0; k < clickableMonoliths.length; k++) {
+          if (clickableMonoliths[k].userData.houseIndex === i) {
+            var v = new THREE.Vector3();
+            clickableMonoliths[k].getWorldPosition(v);
+            v.project(camera);
+            var rect = cv.getBoundingClientRect();
+            return { x: rect.left + ((v.x + 1) / 2) * rect.width, y: rect.top + ((1 - v.y) / 2) * rect.height };
+          }
+        }
+        return null;
+      },
       isleCount: lay.isles.length,
       seedCount: lay.seeds.length,
       skipped: lay.skipped,
