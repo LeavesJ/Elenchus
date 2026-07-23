@@ -3629,3 +3629,43 @@ def test_bulk_first_assignment_on_a_multi_domain_db(world_bulk_assignment):
     rec = reg._last_record[sid]
     slots = [r["slot"] for r in rec["terrain"]]
     assert slots == sorted(slots) and len(store.domain_slots()) == len(slots)
+    # Minor #3 (whole-branch review): the assertion that would have caught the MUST-FIX bug —
+    # every house's slot must equal its OWN region's terrain slot, not some other component's.
+    assert all(h["slot"] == rec["terrain"][h["region"]]["slot"] for h in rec["houses"])
+
+
+@pytest.fixture
+def world_deflected_before_new_house(tmp_path, make_fake):
+    """MUST-FIX regression (whole-branch review, `probe_e2e_v2.py` recipe): deflect one problem
+    in a first sitting — decision_under_stakes fully deflected (frames seen, none closed) yields
+    TWO houseless empty-breadth singleton components (`choose_the_failure_default_deliberately`,
+    `lead_with_what_you_refuse_to_do`) — then cleanly close a DIFFERENT problem in a second
+    sitting: continuity_lock_in (`embed_credentials_as_a_list`) converges to a brand-new house
+    (`i >= len(prior_refs)` -> the `else` branch). Alphabetically `choose_...` sorts before
+    `embed_...`, so the houseless singleton sits at projection index 0 and the housed region at
+    index 1; the seam filters index 0 (houseless), remapping the housed region to index 0. The
+    buggy `else` branch read `res.slot_of_component[0]` — `choose`'s ORIGINAL slot (None, since it
+    never claimed a domain) — instead of the housed region's own decorated terrain slot."""
+    reg = SessionRegistry(
+        str(tmp_path / "wdeflect_new.db"), model_factory=lambda: _agnostic(make_fake, "unchanged")
+    )
+    _land(reg, "s1", _STAKES_REF)  # deflected: two houseless singletons, no new house
+    reg._model_factory = lambda: _agnostic(make_fake, "closed")
+    _land(reg, "s2", _CONTINUITY_REF)  # cleanly converges -> a NEW house (else branch)
+    return reg, "s2"
+
+
+def test_house_slot_reads_the_filtered_terrain_row_not_the_original_index_component(
+    world_deflected_before_new_house,
+):
+    # MUST-FIX (whole-branch review): a houseless component that sorts BEFORE a NEW housed
+    # region gets filtered out of the frozen terrain, shifting the housed region's index. The
+    # else branch must read the region's OWN decorated terrain slot at its remapped position,
+    # never `res.slot_of_component` keyed by the ORIGINAL (pre-filter) projection index.
+    reg, sid = world_deflected_before_new_house
+    rec = _landed_record(reg, sid)
+    assert len(rec["terrain"]) == 1  # both houseless singletons filtered out
+    assert rec["terrain"][0]["slot"] == 0
+    assert rec["houses"] == [{"region": 0, "bucket": None, "slot": 0}]
+    # The general invariant the review names: every house's slot equals its own terrain row's slot.
+    assert all(h["slot"] == rec["terrain"][h["region"]]["slot"] for h in rec["houses"])

@@ -1210,7 +1210,11 @@ class SessionRegistry:
                     ):
                         h["slot"] = prior_houses[i]["slot"]  # frozen forever, never re-derived
                     else:
-                        h["slot"] = res.slot_of_component.get(h["region"])
+                        # h["region"] is the FILTERED terrain index (remapped above), not the
+                        # original projection index that res.slot_of_component is keyed by.
+                        # Read the slot from the region's own decorated terrain row instead —
+                        # correct by construction at the remapped position (review MUST-FIX 1).
+                        h["slot"] = terrain[h["region"]]["slot"]
                 ch.record["houses"] = houses
                 ch.record["house_refs"] = new_refs
                 # S1 drift-guard hardening: index-parallel converged_at, frozen from the SAME
