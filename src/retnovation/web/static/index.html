@@ -69,6 +69,7 @@
 <script src="/static/vendor/ShaderPass.js"></script>
 <script src="/static/vendor/UnrealBloomPass.js"></script>
 <script src="/static/wx_law.js"></script>
+<script src="/static/ceremonies.js"></script>
 <script src="/static/terrain3d.js"></script>
 </head>
 <body><div id="wrap">
@@ -293,7 +294,21 @@ function advance(r){
   muted('error: '+(r.message||'')); showComposer(true);
 }
 function renderClose(r){ if(contBox){ contBox.remove(); contBox=null; }
-  if(r.close) bubble('vera', r.close); renderTerrain(r.terrain||[], r.houses||[], r.vessels, r.confluence); showComposer(false); }
+  if(r.close) bubble('vera', r.close);
+  // the ceremony trigger (Phase C T3): newHouseIndices is the range the stash witnessed as NEW
+  // since the saga began; opts.ceremony is passed ONLY under the pinned predicate below. The stash
+  // itself is deleted UNCONDITIONALLY right after — single-fire, so a later still-render never
+  // replays a stale ceremony.
+  let ceremony;
+  if(window.__preSittingHouses !== undefined){
+    const closedHouses = r.houses||[];
+    const newHouseIndices = [];
+    for(let i=window.__preSittingHouses;i<closedHouses.length;i++) newHouseIndices.push(i);
+    if(newHouseIndices.length>0 || r.confluence) ceremony = {newHouseIndices: newHouseIndices, confluence: r.confluence};
+  }
+  delete window.__preSittingHouses;
+  renderTerrain(r.terrain||[], r.houses||[], r.vessels, r.confluence, ceremony);
+  showComposer(false); }
 const homebaseEl = document.getElementById('homebase');
 // Phase 2: render the cumulative world into the first-screen host (spec §6). Reuses Terrain3D.render
 // (regions + saga-houses); an empty world (first visit) shows no band. The close-time in-thread
@@ -301,10 +316,11 @@ const homebaseEl = document.getElementById('homebase');
 // the no-WebGL fallback (§8): one static, neutrally-named line — shown only when Terrain3D
 // genuinely fails to draw (e.g. WebGLRenderer throws); never evaluative, never a score.
 const NO_WEBGL_TEXT = 'Your world could not be drawn here — the archipelago needs WebGL.';
+let lastHouses = 0;  // module-scope: the house count from the most recent renderHomebase (Phase C T3 stash)
 function renderHomebase(regions, houses, vessels, confluence){
   regions = regions||[]; houses = houses||[];
-  if(!regions.length && !houses.length){ homebaseEl.hidden = true; return; }
-  homebaseEl.hidden = false;
+  lastHouses = houses.length;
+  homebaseEl.hidden = false;  // empty=empty is still a SEEN dock — Terrain3D draws the world regardless
   try { if(window.Terrain3D) window.__homebase = Terrain3D.render(homebaseEl, {regions: regions, houses: houses, vessels: vessels, confluence: confluence}, {onHouseClick: openMemory}); }  // __homebase: the smoke's described==displayed handle
   catch(_){ homebaseEl.textContent = NO_WEBGL_TEXT; }  // the band stays; the front door below still works
 }
@@ -312,10 +328,13 @@ function renderHomebase(regions, houses, vessels, confluence){
 // height. Idempotent; tears the scene down (frees the WebGL loop). Reload returns to the homebase.
 function hideHomebase(){
   if(homebaseEl.hidden) return;
+  // the witnessed-recede stash (Phase C T3): whatever the world showed just before the saga began,
+  // so the close render can tell which houses are genuinely NEW when the judgment comes home.
+  window.__preSittingHouses = lastHouses;
   homebaseEl.hidden = true;
   try { if(window.Terrain3D && Terrain3D.teardown) Terrain3D.teardown(); } catch(_){}
 }
-function renderTerrain(regions, houses, vessels, confluence){
+function renderTerrain(regions, houses, vessels, confluence, ceremony){
   regions = regions || []; houses = houses || [];
   const rendered = regions.filter(x=>x.render==='rendered').length;
   const host=document.createElement('div'); host.className='terrain3d';
@@ -338,7 +357,7 @@ function renderTerrain(regions, houses, vessels, confluence){
     muted(rendered ? (rendered+' area'+(rendered===1?'':'s')+(rendered===1?' has':' have')+' taken shape.')
                    : 'A seed was planted — your world begins.');
   }
-  try { if(window.Terrain3D) Terrain3D.render(host, {regions: regions, houses: houses, vessels: vessels, confluence: confluence}); } catch(_) { host.textContent = NO_WEBGL_TEXT; }
+  try { if(window.Terrain3D) Terrain3D.render(host, {regions: regions, houses: houses, vessels: vessels, confluence: confluence}, ceremony ? {ceremony: ceremony} : undefined); } catch(_) { host.textContent = NO_WEBGL_TEXT; }
   thread.scrollTop=thread.scrollHeight;
 }
 composer.addEventListener('submit', async e=>{

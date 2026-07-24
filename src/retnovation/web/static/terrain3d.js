@@ -53,6 +53,28 @@ window.Terrain3D = (function () {
   // placement — all of it WXLaw's pure output) ever calls it directly.
   function rnd(a, b) { return a + Math.random() * (b - a); }
 
+  // Phase C T3: the ceremony's initial hidden states. Only SCALE is touched here (never position),
+  // so ceremonies.js can read a mesh's position.y back out unmodified as its own resting value.
+  // Grouping mirrors WXCeremony's own grouping exactly: an index absent from handles.houses is
+  // skipped outright (never entered the scene); isleSlot is read straight off _handles.houses.
+  function applyCeremonyHiddenStates(ceremony, handles) {
+    var idx = ceremony.newHouseIndices || [];
+    var isleSlotsSeen = {};
+    for (var k = 0; k < idx.length; k++) {
+      var hh = handles.houses[idx[k]];
+      if (!hh) continue;
+      if (hh.facetMesh) hh.facetMesh.scale.setScalar(0.01);
+      if (hh.monoMesh) hh.monoMesh.scale.setScalar(0.01);
+      if (hh.isleSlot !== null && hh.isleSlot !== undefined) isleSlotsSeen[hh.isleSlot] = true;
+    }
+    for (var ii = 0; ii < handles.isles.length; ii++) {
+      if (isleSlotsSeen[handles.isles[ii].slot]) {
+        var tl = handles.threadLines[ii];
+        if (tl) tl.visible = false; // its opacity is zeroed by WXCeremony itself, once it clones
+      } // the shared thread material — never mutated here (cross-isle safety)
+    }
+  }
+
   function normalize(payload) {
     var regions = Array.isArray(payload) ? payload : (payload && payload.regions) || [];
     var transfer = (payload && payload.transfer) || []; // reserved for the connection layer; unused in V1
@@ -525,7 +547,13 @@ window.Terrain3D = (function () {
     cv.addEventListener("pointerup", clickAt);
     container.style.cursor = "grab";
     var stopped = false;
-    activeTeardown = function () { stopped = true; window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku); window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up); };
+    activeTeardown = function () {
+      stopped = true; window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku);
+      window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up);
+      // a fresh render (or an explicit teardown) must not leave a stale ceremony still animating a
+      // torn-down scene (Phase C T3): stop it and restore Vera home before this scene is discarded.
+      if (window.WXCeremony && window.WXCeremony.cancel) window.WXCeremony.cancel();
+    };
 
     var composer = null;
     if (window.ResizeObserver) new ResizeObserver(function () { var w = container.clientWidth, h = container.clientHeight; if (!w || !h) return; renderer.setSize(w, h); if (composer) composer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }).observe(container);
@@ -574,6 +602,40 @@ window.Terrain3D = (function () {
       draw();
     })();
 
+    // underscore-private plumbing (smoke/ceremony use only, not public contract) — the
+    // review-pinned shape Phase C T3's ceremonies module builds its playback on
+    var handlesObj = {
+      vera: { group: veraGroup, light: veraLight, home: veraHome },
+      world: world,
+      scene: scene,
+      dockLamp: lamp,
+      houses: handlesHouses,
+      isles: handlesIsles,
+      threadLines: handlesThreadLines,
+    };
+
+    // --- Phase C T3: the ceremony trigger. The hidden states apply SYNCHRONOUSLY, right here,
+    // before this scene's first frame ever paints — so a witnessed landing never flashes the full
+    // scene before hiding it. WXCeremony itself is only invoked one frame later (a bare rAF tick),
+    // so the browser genuinely paints that hidden frame before the reveal begins.
+    if (opts && opts.ceremony) {
+      applyCeremonyHiddenStates(opts.ceremony, handlesObj);
+      requestAnimationFrame(function () {
+        if (stopped || !window.WXCeremony) return; // a re-render beat us here — never animate a dead scene
+        var startLanding = function () {
+          if (opts.ceremony.newHouseIndices && opts.ceremony.newHouseIndices.length) {
+            window.WXCeremony.playLanding(handlesObj, opts.ceremony.newHouseIndices);
+          }
+        };
+        if (opts.ceremony.confluence) {
+          // confluence runs BEFORE landing when both are present (review-pinned ordering)
+          window.WXCeremony.playConfluence(handlesObj, opts.ceremony.confluence.from_slot, opts.ceremony.confluence.to_slot, null, startLanding);
+        } else {
+          startLanding();
+        }
+      });
+    }
+
     // The described==displayed contract (Spec-1 founder requirement): the renderer reports how
     // many EARNED, clickable monoliths it actually placed — isle facet monoliths + seed monoliths,
     // every one of them clickable (litHouses === clickableMonoliths.length by construction).
@@ -598,17 +660,7 @@ window.Terrain3D = (function () {
       seedCount: lay.seeds.length,
       skipped: lay.skipped,
       vesselCount: vesselCount,
-      // underscore-private plumbing (smoke/ceremony use only, not public contract) — the
-      // review-pinned shape Phase C T3's ceremonies module builds its playback on
-      _handles: {
-        vera: { group: veraGroup, light: veraLight, home: veraHome },
-        world: world,
-        scene: scene,
-        dockLamp: lamp,
-        houses: handlesHouses,
-        isles: handlesIsles,
-        threadLines: handlesThreadLines,
-      },
+      _handles: handlesObj,
     };
   }
 

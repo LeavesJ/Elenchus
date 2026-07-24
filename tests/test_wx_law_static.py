@@ -174,3 +174,27 @@ def test_vera_idle_transform_is_constant():
     assert not re.search(r"vera\w*\s*\.\s*(?:group\s*\.\s*)?(?:position|rotation|scale|quaternion)", loop)
     # the breathe is the NAMED sprite-material write, present in the loop
     assert "veraBreathe" in loop
+
+
+# ---- Phase C T3: the ceremonies — settle-cascade + confluence, in the named slot ----------------
+
+
+def test_ceremonies_module_exists_and_owns_all_structural_motion():
+    c = Path("src/retnovation/web/static/ceremonies.js").read_text()
+    assert "playLanding" in c and "playConfluence" in c and "active" in c
+    assert "Math.random" not in c  # ceremonies are deterministic
+    assert ".stack" not in c  # cascade parity: no rhythm branches
+    # parity holds in terrain3d's trigger/hidden-state section too (review-extended):
+    assert ".stack" not in Path("src/retnovation/web/static/terrain3d.js").read_text()
+    h = Path("src/retnovation/web/static/index.html").read_text()
+    assert "__preSittingHouses" in h and "ceremonies.js" in h
+    # single-fire: the stash is deleted at the close render
+    assert "delete window.__preSittingHouses" in h
+
+
+def test_arrival_renders_never_carry_a_ceremony():
+    h = Path("src/retnovation/web/static/index.html").read_text()
+    import re
+
+    rh = re.search(r"function renderHomebase\((.*?)\n\}", h, re.S).group(0)
+    assert "ceremony" not in rh  # load/resume/frontdoor renders are always still
