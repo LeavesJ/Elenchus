@@ -211,7 +211,7 @@ function renderMenu(problems, nonce, compact){
 // user, no incantation parsing.
 function renderFrontdoor(r){
   applyTheme(r.theme);
-  renderHomebase(r.terrain, r.houses);  // Phase 2: the world is the first screen (spec §6)
+  renderHomebase(r.terrain, r.houses, r.vessels, r.confluence);  // Phase 2: the world is the first screen (spec §6)
   if(r.returning) muted(r.returning);  // the return visit is not amnesiac (§2f review P10)
   bubble('vera', r.text);
   muted('or start from one of these');
@@ -264,7 +264,7 @@ function renderResume(r){
   mode = r.mode==='converse' ? 'converse' : 'engine';
   nextTitle = r.next_title || ''; nextDesc = r.next_desc || ''; nextKind = r.next_kind || 'pressure';
   if(r.frontdoor){ // a sitting parked at the front door resumes with its ask + small doors
-    renderHomebase(r.terrain, r.houses);  // Phase 2 T7: the world shows on reload-to-front-door too
+    renderHomebase(r.terrain, r.houses, r.vessels, r.confluence);  // Phase 2 T7: the world shows on reload-to-front-door too
     bubble('vera', r.frontdoor.text);
     muted('or start from one of these');
     renderMenu(r.frontdoor.menu.problems, r.frontdoor.menu.nonce, true);
@@ -293,17 +293,20 @@ function advance(r){
   muted('error: '+(r.message||'')); showComposer(true);
 }
 function renderClose(r){ if(contBox){ contBox.remove(); contBox=null; }
-  if(r.close) bubble('vera', r.close); renderTerrain(r.terrain||[], r.houses||[]); showComposer(false); }
+  if(r.close) bubble('vera', r.close); renderTerrain(r.terrain||[], r.houses||[], r.vessels, r.confluence); showComposer(false); }
 const homebaseEl = document.getElementById('homebase');
 // Phase 2: render the cumulative world into the first-screen host (spec §6). Reuses Terrain3D.render
 // (regions + saga-houses); an empty world (first visit) shows no band. The close-time in-thread
 // render (renderTerrain) is untouched — the arrival moment; this is the land-on-your-world moment.
-function renderHomebase(regions, houses){
+// the no-WebGL fallback (§8): one static, neutrally-named line — shown only when Terrain3D
+// genuinely fails to draw (e.g. WebGLRenderer throws); never evaluative, never a score.
+const NO_WEBGL_TEXT = 'Your world could not be drawn here — the archipelago needs WebGL.';
+function renderHomebase(regions, houses, vessels, confluence){
   regions = regions||[]; houses = houses||[];
   if(!regions.length && !houses.length){ homebaseEl.hidden = true; return; }
   homebaseEl.hidden = false;
-  try { if(window.Terrain3D) window.__homebase = Terrain3D.render(homebaseEl, {regions: regions, houses: houses}, {onHouseClick: openMemory}); }  // __homebase: the smoke's described==displayed handle
-  catch(_){ /* no-WebGL: the band stays but empty; the front door below still works */ }
+  try { if(window.Terrain3D) window.__homebase = Terrain3D.render(homebaseEl, {regions: regions, houses: houses, vessels: vessels, confluence: confluence}, {onHouseClick: openMemory}); }  // __homebase: the smoke's described==displayed handle
+  catch(_){ homebaseEl.textContent = NO_WEBGL_TEXT; }  // the band stays; the front door below still works
 }
 // A saga is starting (front-door submit / door pick): the world recedes to give the session full
 // height. Idempotent; tears the scene down (frees the WebGL loop). Reload returns to the homebase.
@@ -312,7 +315,7 @@ function hideHomebase(){
   homebaseEl.hidden = true;
   try { if(window.Terrain3D && Terrain3D.teardown) Terrain3D.teardown(); } catch(_){}
 }
-function renderTerrain(regions, houses){
+function renderTerrain(regions, houses, vessels, confluence){
   regions = regions || []; houses = houses || [];
   const rendered = regions.filter(x=>x.render==='rendered').length;
   const host=document.createElement('div'); host.className='terrain3d';
@@ -335,7 +338,7 @@ function renderTerrain(regions, houses){
     muted(rendered ? (rendered+' area'+(rendered===1?'':'s')+(rendered===1?' has':' have')+' taken shape.')
                    : 'A seed was planted — your world begins.');
   }
-  try { if(window.Terrain3D) Terrain3D.render(host, {regions: regions, houses: houses}); } catch(_) { /* text note stands as fallback */ }
+  try { if(window.Terrain3D) Terrain3D.render(host, {regions: regions, houses: houses, vessels: vessels, confluence: confluence}); } catch(_) { host.textContent = NO_WEBGL_TEXT; }
   thread.scrollTop=thread.scrollHeight;
 }
 composer.addEventListener('submit', async e=>{

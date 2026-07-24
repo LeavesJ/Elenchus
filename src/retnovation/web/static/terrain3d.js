@@ -57,7 +57,12 @@ window.Terrain3D = (function () {
     var regions = Array.isArray(payload) ? payload : (payload && payload.regions) || [];
     var transfer = (payload && payload.transfer) || []; // reserved for the connection layer; unused in V1
     var houses = (payload && payload.houses) || [];
-    return { regions: regions, transfer: transfer, houses: houses };
+    // vessels/confluence: carried on the normalized data for Phase C — this file renders neither
+    // yet (Spec-2 §11/§8 visuals land in Phase C); attach-only-when-present, so an absent key stays
+    // undefined rather than a fabricated default.
+    var vessels = payload && payload.vessels;
+    var confluence = payload && payload.confluence;
+    return { regions: regions, transfer: transfer, houses: houses, vessels: vessels, confluence: confluence };
   }
 
   function render(container, payload, opts) {
