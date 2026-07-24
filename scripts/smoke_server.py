@@ -31,7 +31,7 @@ def main() -> int:
         "--db", default=str(_DEFAULT_DB), help="SQLite db path (default: %(default)s)"
     )
     parser.add_argument(
-        "--port", type=int, default=8000, help="port to bind (default: %(default)s)"
+        "--port", type=int, default=8123, help="port to bind (default: %(default)s)"
     )
     parser.add_argument(
         "--fresh", action="store_true", help="delete the db file before starting (clean state)"
