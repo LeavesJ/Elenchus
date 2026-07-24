@@ -398,7 +398,7 @@ window.Terrain3D = (function () {
     cv.addEventListener("touchstart", dn, { passive: false }); cv.addEventListener("touchmove", mv, { passive: false }); cv.addEventListener("touchend", up);
     cv.addEventListener("wheel", function (e) {
       var nextRad = rad * (1 + (e.deltaY > 0 ? 1 : -1) * 0.08);
-      if (nextRad > 55) { goHome(); } // wheel-zoom-out past rad>55 tweens back to the home framing
+      if (e.deltaY > 0 && nextRad > 55) { goHome(); } // wheel-zoom-out past rad>55 tweens back to the home framing
       else { tween = null; rad = Math.max(14, Math.min(110, nextRad)); } // manual zoom — user wins
       e.preventDefault();
     }, { passive: false });
