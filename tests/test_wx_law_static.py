@@ -82,3 +82,15 @@ def test_thread_is_per_isle_never_cross_isle():
     s = Path("src/retnovation/web/static/terrain3d.js").read_text()
     # the thread builder must iterate isle.thread, never a global houses list
     assert "isle.thread" in s or "isles[k].thread" in s
+
+
+# ---- Phase B T4: interaction — monolith clicks, isle close-orbit, pick priority -----------------
+
+
+def test_interaction_pick_priority_and_close_orbit():
+    s = Path("src/retnovation/web/static/terrain3d.js").read_text()
+    assert "pick priority: monolith" in s
+    assert "closeOrbit" in s or "close-orbit" in s
+    # the renderer performs NO network I/O — a stronger invariant than banning a path literal
+    # (review-corrected: the old `"/memory" not in s` guard collided with honest comments)
+    assert "fetch(" not in s and "XMLHttpRequest" not in s

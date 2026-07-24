@@ -74,7 +74,7 @@ window.Terrain3D = (function () {
     container.appendChild(cv);
     var hint = document.createElement("div");
     hint.style.cssText = "position:absolute;left:14px;bottom:11px;font:12px system-ui,sans-serif;color:#e6a860;opacity:.75;pointer-events:none";
-    hint.textContent = "drag to orbit · scroll to zoom" + (onHouseClick ? " · click a monolith to remember" : "");
+    hint.textContent = "drag to orbit · scroll to zoom · click an isle to look closer" + (onHouseClick ? " · click a monolith to remember" : "");
     if (getComputedStyle(container).position === "static") container.style.position = "relative";
     container.appendChild(hint);
 
@@ -89,8 +89,10 @@ window.Terrain3D = (function () {
     var camera = new THREE.PerspectiveCamera(46, W / H, 0.1, 900);
 
     // dock-anchored home framing (Spec-2 §9): the whole orbit sits in frame at rest
-    var target = new THREE.Vector3(0, 4, 0);
-    var az = 0.9, pol = 1.05, rad = 62, dragging = false, lx = 0, ly = 0;
+    var HOME_TARGET_Y = 4, HOME_RAD = 62; // Esc / wheel-zoom-out-past-55 tween back to these values
+    var CLOSE_ORBIT_RAD = 26, CLOSE_ORBIT_MS = 800; // isle close-orbit tween targets (Spec-2 §9, binding)
+    var target = new THREE.Vector3(0, HOME_TARGET_Y, 0);
+    var az = 0.9, pol = 1.05, rad = HOME_RAD, dragging = false, lx = 0, ly = 0;
     var introActive = true, INTRO = 2.0; // reveal beat: fly-in as the camera arrives
 
     scene.add(new THREE.HemisphereLight(DUSK_BAND[2], DUSK_BAND[6], 0.34));
@@ -211,8 +213,12 @@ window.Terrain3D = (function () {
     // than clip into its sloped flank — a floating crown at the isle's peak, not a buried plaza.
     var ISLE_TOP_Y = isleGeoms.litH;
     var SEED_TOP_Y = isleGeoms.litH * SEED_SCALE;
+    var CLOSE_ORBIT_Y = ISLE_TOP_Y + 3; // close-orbit target height — centered on the facet/monolith crown
+    var clickableIsles = []; // second-priority pick layer (Task 4): a hit starts the close-orbit tween
     for (var ii = 0; ii < lay.isles.length; ii++) {
-      placeRock(isleGeoms, rockLitMat, rockDarkMat, lay.isles[ii].x, lay.isles[ii].z, 1);
+      var isleRock = placeRock(isleGeoms, rockLitMat, rockDarkMat, lay.isles[ii].x, lay.isles[ii].z, 1);
+      isleRock.userData.isleCenter = { x: lay.isles[ii].x, z: lay.isles[ii].z }; // world-space center for closeOrbit()
+      clickableIsles.push(isleRock);
     }
     for (var si = 0; si < lay.seeds.length; si++) {
       placeRock(isleGeoms, seedLitMat, rockDarkMat, lay.seeds[si].x, lay.seeds[si].z, SEED_SCALE);
@@ -358,24 +364,53 @@ window.Terrain3D = (function () {
     // controls (no auto-rotate — founder note)
     var keys = {};
     var downX = 0, downY = 0, ptrMoved = false;
-    function kd(e) { keys[e.key.toLowerCase()] = true; }
+    // the close-orbit tween: a deterministic time-eased interpolation of target/rad, driven every
+    // frame in the animation loop below — no library, no unseeded input anywhere in it. A fresh
+    // call OVERWRITES this object outright (a new tween cancels whatever was in flight, Spec-2 §9);
+    // real drag input clears it to null (the user wins — see mv() below).
+    var tween = null;
+    function startTween(tx, ty, tz, tr) {
+      tween = { fx: target.x, fy: target.y, fz: target.z, tx: tx, ty: ty, tz: tz, fr: rad, tr: tr, t0: Date.now() };
+    }
+    function goHome() { startTween(0, HOME_TARGET_Y, 0, HOME_RAD); } // Esc / zoom-out-past-55 land here
+    // the isle close-orbit (Spec-2 §9): target tweens to the isle's own center, rad tightens to
+    // CLOSE_ORBIT_RAD, eased over CLOSE_ORBIT_MS — no other camera behavior lives in this function.
+    function closeOrbit(center) { startTween(center.x, CLOSE_ORBIT_Y, center.z, CLOSE_ORBIT_RAD); }
+    function kd(e) {
+      keys[e.key.toLowerCase()] = true;
+      if (e.key === "Escape") goHome(); // Esc always returns to the home framing, from anywhere
+    }
     function ku(e) { keys[e.key.toLowerCase()] = false; }
     window.addEventListener("keydown", kd); window.addEventListener("keyup", ku);
     function dn(e) { dragging = true; introActive = false; container.style.cursor = "grabbing"; var t = e.touches ? e.touches[0] : e; lx = t.clientX; ly = t.clientY; downX = t.clientX; downY = t.clientY; ptrMoved = false; }
-    function mv(e) { if (!dragging) return; var t = e.touches ? e.touches[0] : e; if (Math.abs(t.clientX - downX) + Math.abs(t.clientY - downY) > 6) ptrMoved = true; az -= (t.clientX - lx) * 0.006; pol -= (t.clientY - ly) * 0.006; pol = Math.max(0.14, Math.min(1.42, pol)); lx = t.clientX; ly = t.clientY; if (e.touches) e.preventDefault(); }
+    function mv(e) {
+      if (!dragging) return;
+      tween = null; // drag input during a tween cancels it outright — the user wins (Spec-2 §9)
+      var t = e.touches ? e.touches[0] : e; if (Math.abs(t.clientX - downX) + Math.abs(t.clientY - downY) > 6) ptrMoved = true; az -= (t.clientX - lx) * 0.006; pol -= (t.clientY - ly) * 0.006; pol = Math.max(0.14, Math.min(1.42, pol)); lx = t.clientX; ly = t.clientY; if (e.touches) e.preventDefault();
+    }
     function up() { dragging = false; container.style.cursor = "grab"; }
     cv.addEventListener("pointerdown", dn); window.addEventListener("pointermove", mv); window.addEventListener("pointerup", up);
     cv.addEventListener("touchstart", dn, { passive: false }); cv.addEventListener("touchmove", mv, { passive: false }); cv.addEventListener("touchend", up);
-    cv.addEventListener("wheel", function (e) { rad *= (1 + (e.deltaY > 0 ? 1 : -1) * 0.08); rad = Math.max(14, Math.min(110, rad)); e.preventDefault(); }, { passive: false });
-    // a CLICK (pointerup without a real drag) on a monolith opens that convergence's memory — the
-    // memory endpoint (index.html owns it). clickableMonoliths is populated above (isle facet
-    // monoliths + seed monoliths); an empty payload leaves it empty, so a click never fires.
-    var raycaster = onHouseClick ? new THREE.Raycaster() : null;
+    cv.addEventListener("wheel", function (e) {
+      var nextRad = rad * (1 + (e.deltaY > 0 ? 1 : -1) * 0.08);
+      if (nextRad > 55) { goHome(); } // wheel-zoom-out past rad>55 tweens back to the home framing
+      else { tween = null; rad = Math.max(14, Math.min(110, nextRad)); } // manual zoom — user wins
+      e.preventDefault();
+    }, { passive: false });
+
+    // pick priority: monolith > (reserved: vessel) > (reserved: station) > isle > dock
+    // A CLICK (pointerup without a real drag) resolves against exactly one layer, in that order.
+    // A monolith hit fires onHouseClick(houseIndex) — the memory endpoint (index.html owns it; this
+    // file performs no network I/O of any kind, here or anywhere else). Failing that, the isle base
+    // rocks are raycast next and a hit starts the close-orbit tween. Vessel and station are named
+    // placeholders only — Phase B builds neither pick layer, so those two rungs always fall through.
+    // The dock itself has no click behavior defined at any priority.
+    var raycaster = new THREE.Raycaster();
     function clickAt(e) {
       // !dragging rejects a gesture that STARTED off-canvas (e.g. a text-selection drag released
       // over the canvas): dn never ran, so ptrMoved is stale — the canvas-target listener fires
       // before the window-bubble up() clears dragging, so this check is reliable.
-      if (!onHouseClick || !dragging || ptrMoved || !clickableMonoliths.length) return;
+      if (!dragging || ptrMoved) return;
       var rect = cv.getBoundingClientRect();
       if (!rect.width || !rect.height) return;
       var ndc = new THREE.Vector2(
@@ -383,13 +418,28 @@ window.Terrain3D = (function () {
         -((e.clientY - rect.top) / rect.height) * 2 + 1
       );
       raycaster.setFromCamera(ndc, camera);
-      var hits = raycaster.intersectObjects(clickableMonoliths, true);
-      if (!hits.length) return;
-      var o = hits[0].object;
-      while (o && o.userData.houseIndex === undefined) o = o.parent;
-      if (o) onHouseClick(o.userData.houseIndex);
+
+      if (onHouseClick && clickableMonoliths.length) {
+        var mHits = raycaster.intersectObjects(clickableMonoliths, true);
+        if (mHits.length) {
+          var mo = mHits[0].object;
+          while (mo && mo.userData.houseIndex === undefined) mo = mo.parent;
+          if (mo) { onHouseClick(mo.userData.houseIndex); return; }
+        }
+      }
+      // (reserved: vessel) — no vessel pick layer exists yet
+      // (reserved: station) — no station pick layer exists yet
+      if (clickableIsles.length) {
+        var iHits = raycaster.intersectObjects(clickableIsles, true);
+        if (iHits.length) {
+          var io = iHits[0].object;
+          while (io && io.userData.isleCenter === undefined) io = io.parent;
+          if (io) { closeOrbit(io.userData.isleCenter); return; }
+        }
+      }
+      // dock: reserved lowest priority — no gesture is defined for it
     }
-    if (onHouseClick) cv.addEventListener("pointerup", clickAt);
+    cv.addEventListener("pointerup", clickAt);
     container.style.cursor = "grab";
     var stopped = false;
     activeTeardown = function () { stopped = true; window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku); window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up); };
@@ -414,6 +464,17 @@ window.Terrain3D = (function () {
       if (keys["w"] || keys["arrowup"]) mvz += 1; if (keys["s"] || keys["arrowdown"]) mvz -= 1;
       if (keys["a"] || keys["arrowleft"]) mvx -= 1; if (keys["d"] || keys["arrowright"]) mvx += 1;
       if (mvx || mvz) { var fx = Math.cos(az), fz = Math.sin(az); target.x += (-fx * mvz + fz * mvx) * 0.8; target.z += (-fz * mvz - fx * mvx) * 0.8; var lim = 54, d = Math.sqrt(target.x * target.x + target.z * target.z); if (d > lim) { target.x *= lim / d; target.z *= lim / d; } }
+      if (tween) {
+        // deterministic time-eased interpolation (ease-out cubic, t-only — no library): while a
+        // tween is in flight it OWNS target/rad, overriding any WASD delta computed just above.
+        var te = Math.min(1, (Date.now() - tween.t0) / CLOSE_ORBIT_MS);
+        var ee = 1 - Math.pow(1 - te, 3);
+        target.x = tween.fx + (tween.tx - tween.fx) * ee;
+        target.y = tween.fy + (tween.ty - tween.fy) * ee;
+        target.z = tween.fz + (tween.tz - tween.fz) * ee;
+        rad = tween.fr + (tween.tr - tween.fr) * ee;
+        if (te >= 1) tween = null; // arrived — discard, don't leave it dangling at ee==1 forever
+      }
       var ige = 1;
       if (introActive) { var ig = Math.min(1, t / INTRO); ige = 1 - Math.pow(1 - ig, 3); if (ig >= 1) introActive = false; }
       world.position.y = Math.sin(t * 0.35) * 0.6; // idle sway — the world group only (Spec-2 §3)
