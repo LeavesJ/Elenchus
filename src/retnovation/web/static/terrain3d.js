@@ -57,14 +57,17 @@ window.Terrain3D = (function () {
   // so ceremonies.js can read a mesh's position.y back out unmodified as its own resting value.
   // Grouping mirrors WXCeremony's own grouping exactly: an index absent from handles.houses is
   // skipped outright (never entered the scene); isleSlot is read straight off _handles.houses.
+  // review C1 fix: a mesh's BUILT rest scale is stamped BEFORE it's zeroed (seed monoliths are
+  // built at SEED_SCALE=0.35, never 1.0 — ceremonies.js's bloom/rise beats read this back out and
+  // animate to it, so a seed-hosted landing never ends up 2.86x oversized).
   function applyCeremonyHiddenStates(ceremony, handles) {
     var idx = ceremony.newHouseIndices || [];
     var isleSlotsSeen = {};
     for (var k = 0; k < idx.length; k++) {
       var hh = handles.houses[idx[k]];
       if (!hh) continue;
-      if (hh.facetMesh) hh.facetMesh.scale.setScalar(0.01);
-      if (hh.monoMesh) hh.monoMesh.scale.setScalar(0.01);
+      if (hh.facetMesh) { hh.facetMesh.userData.restScale = hh.facetMesh.scale.clone(); hh.facetMesh.scale.setScalar(0.01); }
+      if (hh.monoMesh) { hh.monoMesh.userData.restScale = hh.monoMesh.scale.clone(); hh.monoMesh.scale.setScalar(0.01); }
       if (hh.isleSlot !== null && hh.isleSlot !== undefined) isleSlotsSeen[hh.isleSlot] = true;
     }
     for (var ii = 0; ii < handles.isles.length; ii++) {

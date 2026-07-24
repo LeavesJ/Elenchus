@@ -56,19 +56,29 @@ window.WXCeremony = (function () {
     return mesh.material;
   }
 
+  // review C1 fix: the rise/bloom beats must animate to a mesh's own BUILT rest scale, never a
+  // hardcoded 1.0 — terrain3d.js's hidden-state step stamps it into userData.restScale before
+  // zeroing (a seed monolith is built at SEED_SCALE=0.35; an isle facet/monolith at 1.0 — reading
+  // it back out here is what keeps isle meshes byte-identical to before this fix).
+  function restScalar(mesh) {
+    return mesh.userData && mesh.userData.restScale ? mesh.userData.restScale.x : 1;
+  }
+
   // ---- beat builders: each returns {start, dur, run(easedProgress), after?} -------------------
   function beatFacetBloom(mesh, start, dur) {
-    return { start: start, dur: dur, run: function (e) { mesh.scale.setScalar(0.01 + 0.99 * e); } };
+    var rest = restScalar(mesh);
+    return { start: start, dur: dur, run: function (e) { mesh.scale.setScalar(0.01 + (rest - 0.01) * e); } };
   }
 
   function beatMonolithRise(mesh, start, dur) {
+    var rest = restScalar(mesh);
     var finalY = mesh.position.y; // untouched by the hidden-state step — already the resting value
     var h = (mesh.geometry && mesh.geometry.parameters && mesh.geometry.parameters.height) || 0;
-    var startY = finalY - h / 2; // grounded flush with the facet's top face at the start
+    var startY = finalY - (h * rest) / 2; // grounded flush with the facet's top face, at the SCALED height
     return {
       start: start, dur: dur,
       run: function (e) {
-        mesh.scale.setScalar(0.01 + 0.99 * e);
+        mesh.scale.setScalar(0.01 + (rest - 0.01) * e);
         mesh.position.y = startY + (finalY - startY) * e;
       },
     };
