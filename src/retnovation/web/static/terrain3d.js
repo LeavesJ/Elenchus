@@ -206,6 +206,25 @@ window.Terrain3D = (function () {
     // the lamp is STEADY (Spec-2 §6: never a sweeping beam) — its emissive intensity and
     // lampLight.intensity are set once above and never touched again anywhere in the render loop
 
+    // --- Vera, Keeper of the Lamp (Spec-2 §7, Phase C T2): a small constant companion hovering
+    // just above the jetty lamp. Her group's transform is set ONCE here, at build time, and this
+    // file's animation loop never writes to it — only ceremonies.js (Task 3) may move her, and
+    // every playback it drives ends by restoring her `home` exactly. The only idle motion she
+    // gets here is a sprite-material opacity breathe (deterministic, time-based).
+    var VERA_CYAN = 0xd8f4ff; // her own cyan-white family — company, not dusk structure
+    var veraTex = radial([[0, rgba(236, 250, 255, 0.95)], [0.5, rgbaHex(VERA_CYAN, 0.45)], [1, rgbaHex(VERA_CYAN, 0)]]);
+    var veraGroup = new THREE.Group();
+    veraGroup.position.set(postX, 4.5 + 1.4, 0); // lampPos (postX, 4.5, 0) + (0, 1.4, 0) — her `home`
+    world.add(veraGroup);
+    var veraSpriteMat = new THREE.SpriteMaterial({ map: veraTex, color: VERA_CYAN, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.75 });
+    var veraSprite = new THREE.Sprite(veraSpriteMat);
+    veraSprite.scale.set(1.1, 1.1, 1); // small — a companion, not a landmark
+    veraGroup.add(veraSprite);
+    var veraLight = new THREE.PointLight(VERA_CYAN, 0.9, 18);
+    veraGroup.add(veraLight);
+    var veraHome = veraGroup.position.clone(); // a Vector3 COPY — never the live group.position reference
+    var veraBreathe = veraSpriteMat; // the loop's ONLY write channel into Vera: opacity, never a transform
+
     var doorway = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.3), doorMat);
     doorway.position.set(-4.3, 1.25, 3.5); doorway.rotation.y = 0.5; world.add(doorway); // the lit doorway the front door rises from
 
@@ -306,6 +325,13 @@ window.Terrain3D = (function () {
     var clickableMonoliths = [];
     var litHouses = 0;
 
+    // --- _handles plumbing (underscore-private; Phase C T3's ceremonies module relies on the
+    // exact shape below, review-pinned): collected as the isles/seeds are built, alongside the
+    // click-layer/count bookkeeping above — never a second pass over the meshes.
+    var handlesHouses = {}; // houseIndex -> {facetMesh|null, ringMesh|null, monoMesh, clusterSlot, isleSlot|null}
+    var handlesIsles = [];  // [{slot, center:{x,z}, thread:[houseIndex...]}] — reverse arrival order
+    var handlesThreadLines = []; // parallel to handlesIsles; null where an isle built no thread line
+
     for (var ik = 0; ik < lay.isles.length; ik++) {
       var isle = lay.isles[ik];
       var tipByHouse = {}; // houseIndex -> this isle's built monolith tip, world-space
@@ -320,15 +346,21 @@ window.Terrain3D = (function () {
           var facetMesh = new THREE.Mesh(facetGeomFor(facet.sides), facetMats[isle.slot % 6]);
           facetMesh.position.set(wx, baseY + 0.45, wz);
           facetMesh.rotation.y = facet.rot;
+          facetMesh.userData.clusterSlot = cluster.slot;
+          facetMesh.userData.isleSlot = isle.slot;
           world.add(facetMesh);
 
+          var ringMeshForHouse = null; // reset every facet — `var ring` below is function-scoped
           if (facet.rings > 0) {
             var ring = new THREE.Mesh(ringGeo, ringMat);
             ring.position.set(wx, baseY, wz); // centered on the base plane: half above, half sunk
             // organically tilted by facet.rot (tree-ring vocabulary) — a perfectly flat, identical
             // series would read as a mechanical stamp, not a grown terrace
             ring.rotation.x = Math.PI / 2 + (facet.rot - Math.PI) * 0.12;
+            ring.userData.clusterSlot = cluster.slot;
+            ring.userData.isleSlot = isle.slot;
             world.add(ring);
+            ringMeshForHouse = ring;
           }
 
           var bucket = facet.bucket == null ? 0 : facet.bucket;
@@ -337,10 +369,16 @@ window.Terrain3D = (function () {
           var monoMesh = new THREE.Mesh(monoGeomFor(bucket), monoMatFor(bucket));
           monoMesh.position.set(wx, facetTopY + monoH / 2, wz);
           monoMesh.userData.houseIndex = facet.houseIndex; // the GLOBAL house index (Task 4's raycast target)
+          monoMesh.userData.clusterSlot = cluster.slot;
+          monoMesh.userData.isleSlot = isle.slot;
           world.add(monoMesh);
           clickableMonoliths.push(monoMesh);
           litHouses++;
           tipByHouse[facet.houseIndex] = { x: wx, y: facetTopY + monoH, z: wz };
+          handlesHouses[facet.houseIndex] = {
+            facetMesh: facetMesh, ringMesh: ringMeshForHouse, monoMesh: monoMesh,
+            clusterSlot: cluster.slot, isleSlot: isle.slot,
+          };
         }
       }
 
@@ -351,11 +389,13 @@ window.Terrain3D = (function () {
         var tip = tipByHouse[isle.thread[th2]]; // skip seed-hosted/skipped indices absent as facets here
         if (tip) threadPts.push(tip);
       }
+      var isleThreadLine = null;
       if (threadPts.length >= 2) {
         var tg = new THREE.BufferGeometry(), tp = new Float32Array(threadPts.length * 3);
         for (var tpk = 0; tpk < threadPts.length; tpk++) { tp[tpk * 3] = threadPts[tpk].x; tp[tpk * 3 + 1] = threadPts[tpk].y; tp[tpk * 3 + 2] = threadPts[tpk].z; }
         tg.setAttribute("position", new THREE.BufferAttribute(tp, 3));
-        world.add(new THREE.Line(tg, threadMat));
+        isleThreadLine = new THREE.Line(tg, threadMat);
+        world.add(isleThreadLine);
       }
 
       // the ghost bud: the outward invitation, one per isle, identical shape/material everywhere
@@ -369,6 +409,10 @@ window.Terrain3D = (function () {
       var isleLight = new THREE.PointLight(DUSK_BAND[9], 1.0, 40, 2.0);
       isleLight.position.set(isle.x, ISLE_TOP_Y + 2.2, isle.z);
       world.add(isleLight);
+
+      // reverse arrival order = descending houseIndex over isle.thread (pushed in global order)
+      handlesIsles.push({ slot: isle.slot, center: { x: isle.x, z: isle.z }, thread: isle.thread.slice().reverse() });
+      handlesThreadLines.push(isleThreadLine);
     }
 
     // seed monoliths: small, on the seed rock, deterministic TIGHT RING positions by their list
@@ -380,6 +424,7 @@ window.Terrain3D = (function () {
         var houseIndex = seed.monoliths[mk];
         var house = data.houses[houseIndex];
         var sBucket = (house && house.bucket != null) ? house.bucket : 0;
+        var sSlot = (house && typeof house.slot === "number") ? house.slot : null; // seeds carry no cluster, so clusterSlot is the house's own frozen arrival slot
         var lap = Math.floor(mk / 6), ang = (mk % 6) * SEED_RING_STEP;
         var ringR = SEED_RING_R * (1 + lap * 0.6);
         var sx = seed.x + Math.cos(ang) * ringR, sz = seed.z + Math.sin(ang) * ringR;
@@ -388,9 +433,14 @@ window.Terrain3D = (function () {
         sMono.scale.setScalar(SEED_SCALE);
         sMono.position.set(sx, SEED_TOP_Y + sMonoH / 2, sz);
         sMono.userData.houseIndex = houseIndex; // the GLOBAL house index
+        sMono.userData.clusterSlot = sSlot;
+        sMono.userData.isleSlot = null; // seed-hosted: no isle, per the review-pinned shape
         world.add(sMono);
         clickableMonoliths.push(sMono);
         litHouses++;
+        handlesHouses[houseIndex] = {
+          facetMesh: null, ringMesh: null, monoMesh: sMono, clusterSlot: sSlot, isleSlot: null,
+        };
       }
     }
 
@@ -515,6 +565,8 @@ window.Terrain3D = (function () {
       // the ghost bud's pulse: deterministic, time-based (t only), 0.35<->0.85, IDENTICAL on every
       // isle because every isle's LineLoop shares this ONE material — one assignment drives them all
       ghostMat.opacity = 0.6 + 0.25 * Math.sin(t * 1.3);
+      // Vera's idle breathe (Spec-2 §7): opacity only — her group's transform never changes here
+      veraBreathe.opacity = 0.75 + 0.25 * Math.sin(t * 1.1);
       // fly-in reveal: start wide + high, ease to the resting pose (rr==rad, pp==pol once ige==1)
       var rr = rad * (1 + 0.7 * (1 - ige)), pp = pol * (0.8 + 0.2 * ige);
       camera.position.set(target.x + rr * Math.sin(pp) * Math.cos(az), target.y + rr * Math.cos(pp), target.z + rr * Math.sin(pp) * Math.sin(az));
@@ -546,6 +598,17 @@ window.Terrain3D = (function () {
       seedCount: lay.seeds.length,
       skipped: lay.skipped,
       vesselCount: vesselCount,
+      // underscore-private plumbing (smoke/ceremony use only, not public contract) — the
+      // review-pinned shape Phase C T3's ceremonies module builds its playback on
+      _handles: {
+        vera: { group: veraGroup, light: veraLight, home: veraHome },
+        world: world,
+        scene: scene,
+        dockLamp: lamp,
+        houses: handlesHouses,
+        isles: handlesIsles,
+        threadLines: handlesThreadLines,
+      },
     };
   }
 

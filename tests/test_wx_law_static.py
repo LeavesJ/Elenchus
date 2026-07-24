@@ -158,3 +158,19 @@ def test_vessels_render_from_count_only_and_stay_inert():
     body = _js_fn(s, "buildVessels")
     assert "userData" not in body and "clickableMonoliths" not in body
     assert "houses" not in body and "terrain" not in body  # count-only input
+
+
+# ---- Phase C T2: Vera, Keeper of the Lamp — constant idle transform + _handles plumbing --------
+
+
+def test_vera_idle_transform_is_constant():
+    s = Path("src/retnovation/web/static/terrain3d.js").read_text()
+    assert "vera" in s and "_handles" in s and "OFF_RETIRED" in Path(
+        "src/retnovation/web/static/wx_law.js").read_text().split("return {")[-1]
+    loop = _js_fn(s, "loop")
+    # the loop never writes ANY vera transform channel (review-strengthened; the ceremony
+    # module owns motion)
+    import re
+    assert not re.search(r"vera\w*\s*\.\s*(?:group\s*\.\s*)?(?:position|rotation|scale|quaternion)", loop)
+    # the breathe is the NAMED sprite-material write, present in the loop
+    assert "veraBreathe" in loop

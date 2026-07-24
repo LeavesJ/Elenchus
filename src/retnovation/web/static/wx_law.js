@@ -168,6 +168,6 @@ window.WXLaw = (function () {
   }
 
   return { K: K, R_ORBIT: R_ORBIT, R_SEED: R_SEED, R_ROCK: R_ROCK, R_DOME_MAX: R_DOME_MAX,
-           QUAY_W: QUAY_W, SHELLS: SHELLS, mulberry32: mulberry32, bearing: bearing,
-           layout: layout };
+           QUAY_W: QUAY_W, OFF_RETIRED: OFF_RETIRED, SHELLS: SHELLS, mulberry32: mulberry32,
+           bearing: bearing, layout: layout };
 })();
