@@ -13,6 +13,9 @@ from retnovation.types import (
 )
 from retnovation.web.app import create_app
 
+# Phase C T4: single-sourced world fake (tests/conftest.py) — `_world_factory` delegates to it.
+from conftest import _SCENARIO, make_world_model
+
 # irreversible_anchor's display title — the menu shows titles, never the veldra: ref, so the tests
 # pick by index resolved from the (stable, content-authored) title.
 _ANCHOR_TITLE = "Shipping something you can't take back"
@@ -532,26 +535,17 @@ def test_menu_suffix_marks_just_worked_doors(tmp_path, make_fake):
 
 _SITUATION = "Signing a delivery commitment Thursday; the penalty clause is the fight."
 
-_SCENARIO = (
-    "You signed the delivery agreement on Thursday, and this morning your second-largest "
-    "customer asked for the same penalty terms before Fridays board review. The account team "
-    "wants an answer before the standup, and whatever you give one customer the others will "
-    "hear about. What do you do?"
-)
+# _SCENARIO is single-sourced in tests/conftest.py (Phase C T4) and imported above.
 
 
 def _world_factory(make_fake):
+    """Delegates to `make_world_model` (tests/conftest.py, Phase C T4) — the shared,
+    single-sourced world FakeModel construction (base scripted fake + the three living-sitting
+    overrides). `make_fake` is accepted for call-site compatibility (every caller here already
+    passes it) but is no longer read directly."""
+
     def factory():
-        m = make_fake()
-        m.classify_intake = lambda exp, opening: IntakeClassification(
-            frame_states={f.frame_code: FrameState.absent for f in exp.rubric.frames},
-            trap_states={t.trap_code: TrapState.not_tripped for t in exp.rubric.traps},
-        )
-        m.classify_response = lambda exp, kind, code, push, response, stress=False: (
-            ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
-        )
-        m.forge_scenario = lambda brief, steer="": _SCENARIO
-        return m
+        return make_world_model()
 
     return factory
 
