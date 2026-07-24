@@ -9,6 +9,20 @@ from pathlib import Path
 SRC = Path("src/retnovation/web/static/wx_law.js")
 
 
+def _js_fn(src: str, name: str) -> str:
+    """Extract a function body using brace-depth counting.
+    Handles mixed indentation and complex nesting reliably."""
+    i = src.index("function " + name)
+    j = src.index("{", i)
+    depth = 0
+    for k in range(j, len(src)):
+        depth += src[k] == "{"
+        depth -= src[k] == "}"
+        if depth == 0:
+            return src[i : k + 1]
+    raise AssertionError(f"unterminated function {name}")
+
+
 def _src() -> str:
     return SRC.read_text()
 
@@ -133,3 +147,14 @@ def test_patina_stays_in_the_dusk_band():
     for hex6 in re.findall(r"0x([0-9a-fA-F]{6})", m.group(1)):
         r, g, b = hex6[0:2], hex6[2:4], hex6[4:6]
         assert not (r == g == b), f"grey-family color 0x{hex6} in DUSK_BAND"
+
+
+# ---- Phase C T1: vessels at the jetty — count-only, deterministic moorings -----
+
+
+def test_vessels_render_from_count_only_and_stay_inert():
+    s = Path("src/retnovation/web/static/terrain3d.js").read_text()
+    assert "VESSEL_CAP = 20" in s and "vesselCount" in s
+    body = _js_fn(s, "buildVessels")
+    assert "userData" not in body and "clickableMonoliths" not in body
+    assert "houses" not in body and "terrain" not in body  # count-only input

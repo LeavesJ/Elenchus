@@ -209,6 +209,34 @@ window.Terrain3D = (function () {
     var doorway = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 2.3), doorMat);
     doorway.position.set(-4.3, 1.25, 3.5); doorway.rotation.y = 0.5; world.add(doorway); // the lit doorway the front door rises from
 
+    // --- vessels at the jetty: count-only, deterministic moorings (Spec-2 §6, Phase C T1) ---
+    var VESSEL_CAP = 20;
+    var JETTY_TIP_X = jettyX0 + jettyLen; // the jetty's eastern tip (post location)
+    var hullMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[7], flatShading: true, roughness: 0.9 });
+    var ridingLightMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[9], emissive: DUSK_BAND[9], emissiveIntensity: 1.2, flatShading: true });
+    function buildVessels(count) {
+      // skip if no vessel count or if count is 0
+      if (!count) return;
+      for (var vk = 0; vk < count; vk++) {
+        // deterministic placement: line off the jetty's south side, four rows of five
+        var vx = JETTY_TIP_X - 1.2 - (vk % 5) * 2.1;
+        var vz = 2.2 + Math.floor(vk / 5) * 1.9;
+        var vy = -0.6; // y_rim is 0, vessels ride at -0.6
+
+        // hull: small flat-shaded box
+        var hull = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 0.7), hullMat);
+        hull.position.set(vx, vy, vz);
+        world.add(hull);
+
+        // riding light: tiny steady emissive cube (no pulse, no loop writes)
+        var light = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.12), ridingLightMat);
+        light.position.set(vx, vy + 0.4, vz);
+        world.add(light);
+      }
+    }
+    var vesselCount = Math.min(VESSEL_CAP, (data.vessels && data.vessels.count) | 0);
+    buildVessels(vesselCount);
+
     // --- isle base rocks + seed rocks, placed on WXLaw's bearings (Task 1) ---
     var lay = WXLaw.layout(data);
     var isleGeoms = rockGeoms(WXLaw.R_ROCK, 8, 10);
@@ -517,6 +545,7 @@ window.Terrain3D = (function () {
       isleCount: lay.isles.length,
       seedCount: lay.seeds.length,
       skipped: lay.skipped,
+      vesselCount: vesselCount,
     };
   }
 
