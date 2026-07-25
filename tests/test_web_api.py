@@ -487,6 +487,21 @@ def test_shell_is_served_no_store_and_build_stamp_rides_health_and_session(tmp_p
     assert cold["menu"].get("nonce")  # the stale-menu guard rides the embedded doors too
 
 
+def test_static_assets_are_not_cacheable():
+    """The L-25 hazard, one hop over: `/` sends no-store (test above) but a bare StaticFiles mount
+    sends only etag/last-modified, so a browser can heuristically cache /static/terrain3d.js and
+    /static/ceremonies.js. That is undetectable from the tab — the shell is fresh, /api/health
+    reports the real build, and the renderer silently executes stale bytes underneath both. Assert
+    a REAL response through the app, not a source-text grep, so a revert to bare StaticFiles fails
+    this test immediately."""
+    client = TestClient(create_app(db_path=":memory:", model_factory=None))
+    static_resp = client.get("/static/terrain3d.js")
+    assert static_resp.status_code == 200
+    assert static_resp.headers.get("cache-control") == "no-store"
+    # the shell and its static assets must never be able to drift apart on this policy
+    assert client.get("/").headers.get("cache-control") == "no-store"
+
+
 def test_resume_over_http_carries_the_room(tmp_path, make_fake):
     """The founder's incident, exercised end-to-end over HTTP: converge, 'restart' (new app over
     the same db), and the front door returns the WHOLE room — transcript, End, Continue, mode."""

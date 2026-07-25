@@ -169,6 +169,22 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
     return {"kind": "error", "message": data.get("message", "")}
 
 
+class _NoStoreStaticFiles(StaticFiles):
+    """Same staleness hazard the `/` route already guards against with `Cache-Control: no-store`
+    (durable sittings §2f) — a bare `StaticFiles` mount only sends `etag`/`last-modified`, so a
+    browser is free to serve terrain3d.js / ceremonies.js from heuristic cache without ever
+    revalidating. That is invisible from a human's checking of the build: the shell is always
+    fresh, /api/health reports the real running build, and the 3D renderer silently keeps
+    executing yesterday's bytes underneath both. Force `no-store` on every static response
+    (including 304s — StaticFiles.file_response mutates the same response object either way) so
+    a cached renderer under a fresh shell can never happen again, undetected or otherwise."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["cache-control"] = "no-store"
+        return response
+
+
 def create_app(db_path: str, model_factory=None) -> FastAPI:
     app = FastAPI(title="Retnovation — Cartographer MVP")
 
@@ -185,7 +201,7 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
         # shell that predates kind:"resume" would render every page load as an error line.
         return FileResponse(_STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
-    app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+    app.mount("/static", _NoStoreStaticFiles(directory=_STATIC), name="static")
 
     @app.post("/api/session")
     def start():
