@@ -56,3 +56,17 @@ def test_no_raw_hex_reaches_a_material_or_light():
             continue
         offenders.append(m.group(0).strip())
     assert not offenders, "unconverted colour reaching a material/light: " + "; ".join(offenders)
+
+
+def test_canvas_textures_declare_srgb_encoding():
+    # A 2D canvas is painted with sRGB colour strings, but CanvasTexture defaults to
+    # LinearEncoding in r128 — the same over-brightening as an unconverted material colour.
+    # Funnel every construction through one helper so the encoding cannot be forgotten.
+    s = TERRAIN.read_text()
+    assert "function canvasTex(" in s, "canvas textures must be built through one seam"
+    body = _js_fn(s, "canvasTex")
+    assert "sRGBEncoding" in body, "canvasTex() must set encoding = THREE.sRGBEncoding"
+    assert s.count("new THREE.CanvasTexture(") == 1, (
+        "CanvasTexture may only be constructed inside canvasTex(); found "
+        f"{s.count('new THREE.CanvasTexture(')} sites"
+    )

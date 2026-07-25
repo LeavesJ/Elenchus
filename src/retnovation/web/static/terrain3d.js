@@ -137,11 +137,19 @@ window.Terrain3D = (function () {
     duskLight.position.set(-42, 52, -26); scene.add(duskLight);
     var world = new THREE.Group(); scene.add(world); // idle sway applies to this group only
 
+    // A 2D canvas holds sRGB pixels; CanvasTexture defaults to LinearEncoding in r128, which
+    // over-brightens it exactly like an unconverted material colour. One seam, so no future
+    // texture can miss the decode.
+    function canvasTex(c) {
+      var t = new THREE.CanvasTexture(c);
+      t.encoding = THREE.sRGBEncoding;
+      return t;
+    }
     function radial(st) {
       var c = document.createElement("canvas"); c.width = c.height = 128;
       var g = c.getContext("2d"), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
       for (var i = 0; i < st.length; i++) gr.addColorStop(st[i][0], st[i][1]);
-      g.fillStyle = gr; g.fillRect(0, 0, 128, 128); return new THREE.CanvasTexture(c);
+      g.fillStyle = gr; g.fillRect(0, 0, 128, 128); return canvasTex(c);
     }
     var warmTex = radial([[0, rgba(255, 205, 140, 0.9)], [0.5, rgbaHex(DUSK_BAND[8], 0.35)], [1, rgbaHex(DUSK_BAND[8], 0)]]);
     var cloudTex = radial([[0, rgbaHex(DUSK_BAND[11], 0.55)], [0.6, rgbaHex(DUSK_BAND[11], 0.22)], [1, rgbaHex(DUSK_BAND[11], 0)]]);
@@ -160,7 +168,7 @@ window.Terrain3D = (function () {
       gr.addColorStop(0.85, cssHex(DUSK_BAND[3]));
       gr.addColorStop(1, cssHex(DUSK_BAND[4]));
       g.fillStyle = gr; g.fillRect(0, 0, 8, 256);
-      var sky = new THREE.Mesh(new THREE.SphereGeometry(460, 32, 20), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(c), side: THREE.BackSide, fog: false, depthWrite: false }));
+      var sky = new THREE.Mesh(new THREE.SphereGeometry(460, 32, 20), new THREE.MeshBasicMaterial({ map: canvasTex(c), side: THREE.BackSide, fog: false, depthWrite: false }));
       scene.add(sky); // sky stays outside the world group's sway (Spec-2 §3: "everything but sky/stars")
     })();
 
