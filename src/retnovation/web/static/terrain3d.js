@@ -48,6 +48,12 @@ window.Terrain3D = (function () {
   function rgba(r, g, b, a) { return "rgba(" + r + "," + g + "," + b + "," + a + ")"; }
   function rgbaHex(n, a) { var c = hx(n); return rgba(c[0], c[1], c[2], a); }
   function cssHex(n) { var s = n.toString(16); while (s.length < 6) s = "0" + s; return "#" + s; }
+  // r128 has no ColorManagement: a hex handed straight to a material or light is consumed as a
+  // LINEAR radiance value, so authored dusk renders far too bright — worst at the dark end,
+  // where the lift v/EOTF(v) is largest (measured: zenith x6.5, mid x3.6, sun-glow x1.2). Every
+  // structural colour goes through here. Canvas PAINT (cssHex/rgbaHex) does NOT: those strings
+  // are decoded at the texture level instead, via tex.encoding = sRGBEncoding.
+  function srgb(n) { return new THREE.Color(n).convertSRGBToLinear(); }
   // ambient FX — outside the determinism boundary (spec §5): the sole unseeded-randomness
   // primitive in this file, funneled through one helper so nothing structural (isle/seed/dock
   // placement — all of it WXLaw's pure output) ever calls it directly.
@@ -125,9 +131,9 @@ window.Terrain3D = (function () {
     var az = 0.9, pol = 1.05, rad = HOME_RAD, dragging = false, lx = 0, ly = 0;
     var introActive = true, INTRO = 2.0; // reveal beat: fly-in as the camera arrives
 
-    scene.add(new THREE.HemisphereLight(DUSK_BAND[2], DUSK_BAND[6], 0.34));
-    scene.add(new THREE.AmbientLight(DUSK_BAND[1], 0.16));
-    var duskLight = new THREE.DirectionalLight(DUSK_BAND[3], 0.38);
+    scene.add(new THREE.HemisphereLight(srgb(DUSK_BAND[2]), srgb(DUSK_BAND[6]), 0.34));
+    scene.add(new THREE.AmbientLight(srgb(DUSK_BAND[1]), 0.16));
+    var duskLight = new THREE.DirectionalLight(srgb(DUSK_BAND[3]), 0.38);
     duskLight.position.set(-42, 52, -26); scene.add(duskLight);
     var world = new THREE.Group(); scene.add(world); // idle sway applies to this group only
 
@@ -172,7 +178,7 @@ window.Terrain3D = (function () {
         p[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
       }
       g.setAttribute("position", new THREE.BufferAttribute(p, 3));
-      scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xcac2e6, size: 0.6, transparent: true, opacity: 0.72 })));
+      scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: srgb(0xcac2e6), size: 0.6, transparent: true, opacity: 0.72 })));
     })();
 
     // --- the cloud shelf: 8-12 soft sprites drifting below the isles, never inside the reserved
@@ -192,9 +198,9 @@ window.Terrain3D = (function () {
 
     // --- shared rock materials + geometry (the WX Corolla base: a flat-shaded double cone — lit
     // top half, dark underside — whose rim sits at y_rim=0 in world space) ---
-    var rockLitMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[5], flatShading: true, roughness: 0.95 });
-    var rockDarkMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[6], flatShading: true, roughness: 1 });
-    var seedLitMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[10], flatShading: true, roughness: 0.95 });
+    var rockLitMat = new THREE.MeshStandardMaterial({ color: srgb(DUSK_BAND[5]), flatShading: true, roughness: 0.95 });
+    var rockDarkMat = new THREE.MeshStandardMaterial({ color: srgb(DUSK_BAND[6]), flatShading: true, roughness: 1 });
+    var seedLitMat = new THREE.MeshStandardMaterial({ color: srgb(DUSK_BAND[10]), flatShading: true, roughness: 0.95 });
     function rockGeoms(radius, litH, darkH) {
       return { top: new THREE.ConeGeometry(radius, litH, 8, 1, false), bot: new THREE.ConeGeometry(radius, darkH, 8, 1, false), litH: litH, darkH: darkH };
     }
@@ -210,9 +216,9 @@ window.Terrain3D = (function () {
 
     // --- the dock: constant geometry, never grows (Spec-2 §6) ---
     var HOME_R = 6.2;
-    var jettyMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[7], roughness: 0.9, flatShading: true });
-    var lampMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[8], emissive: DUSK_BAND[8], emissiveIntensity: 1.5, flatShading: true });
-    var doorMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[9], emissive: DUSK_BAND[9], emissiveIntensity: 1.05, side: THREE.DoubleSide, flatShading: true });
+    var jettyMat = new THREE.MeshStandardMaterial({ color: srgb(DUSK_BAND[7]), roughness: 0.9, flatShading: true });
+    var lampMat = new THREE.MeshStandardMaterial({ color: srgb(DUSK_BAND[8]), emissive: srgb(DUSK_BAND[8]), emissiveIntensity: 1.5, flatShading: true });
+    var doorMat = new THREE.MeshStandardMaterial({ color: srgb(DUSK_BAND[9]), emissive: srgb(DUSK_BAND[9]), emissiveIntensity: 1.05, side: THREE.DoubleSide, flatShading: true });
     var homeGeoms = rockGeoms(HOME_R, 2.6, 3.4);
     placeRock(homeGeoms, rockLitMat, rockDarkMat, 0, 0, 1); // the home rock: a squat 8-sided double cone, dusk-violet stone
 
@@ -226,7 +232,7 @@ window.Terrain3D = (function () {
     var lamp = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.68, 0.68), lampMat);
     lamp.position.set(postX, 4.5, 0); world.add(lamp);
     sprite(warmTex, 4.2, postX, 4.5, 0, 0.55); // the lamp's soft halo — steady, never animated
-    var lampLight = new THREE.PointLight(DUSK_BAND[8], 1.1, 30, 2.0);
+    var lampLight = new THREE.PointLight(srgb(DUSK_BAND[8]), 1.1, 30, 2.0);
     lampLight.position.set(postX, 4.6, 0); world.add(lampLight);
     // the lamp is STEADY (Spec-2 §6: never a sweeping beam) — its emissive intensity and
     // lampLight.intensity are set once above and never touched again anywhere in the render loop
@@ -237,15 +243,16 @@ window.Terrain3D = (function () {
     // every playback it drives ends by restoring her `home` exactly. The only idle motion she
     // gets here is a sprite-material opacity breathe (deterministic, time-based).
     var VERA_CYAN = 0xd8f4ff; // her own cyan-white family — company, not dusk structure
+    var VERA_CYAN_LIN = srgb(VERA_CYAN); // the linear form; both her sprite tint and her light use it
     var veraTex = radial([[0, rgba(236, 250, 255, 0.95)], [0.5, rgbaHex(VERA_CYAN, 0.45)], [1, rgbaHex(VERA_CYAN, 0)]]);
     var veraGroup = new THREE.Group();
     veraGroup.position.set(postX, 4.5 + 1.4, 0); // lampPos (postX, 4.5, 0) + (0, 1.4, 0) — her `home`
     world.add(veraGroup);
-    var veraSpriteMat = new THREE.SpriteMaterial({ map: veraTex, color: VERA_CYAN, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.75 });
+    var veraSpriteMat = new THREE.SpriteMaterial({ map: veraTex, color: VERA_CYAN_LIN, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.75 });
     var veraSprite = new THREE.Sprite(veraSpriteMat);
     veraSprite.scale.set(1.1, 1.1, 1); // small — a companion, not a landmark
     veraGroup.add(veraSprite);
-    var veraLight = new THREE.PointLight(VERA_CYAN, 0.9, 18);
+    var veraLight = new THREE.PointLight(VERA_CYAN_LIN, 0.9, 18);
     veraGroup.add(veraLight);
     var veraHome = veraGroup.position.clone(); // a Vector3 COPY — never the live group.position reference
     var veraBreathe = veraSpriteMat; // the loop's ONLY write channel into Vera: opacity, never a transform
@@ -256,8 +263,8 @@ window.Terrain3D = (function () {
     // --- vessels at the jetty: count-only, deterministic moorings (Spec-2 §6, Phase C T1) ---
     var VESSEL_CAP = 20;
     var JETTY_TIP_X = jettyX0 + jettyLen; // the jetty's eastern tip (post location)
-    var hullMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[7], flatShading: true, roughness: 0.9 });
-    var ridingLightMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[9], emissive: DUSK_BAND[9], emissiveIntensity: 1.2, flatShading: true });
+    var hullMat = new THREE.MeshStandardMaterial({ color: srgb(DUSK_BAND[7]), flatShading: true, roughness: 0.9 });
+    var ridingLightMat = new THREE.MeshStandardMaterial({ color: srgb(DUSK_BAND[9]), emissive: srgb(DUSK_BAND[9]), emissiveIntensity: 1.2, flatShading: true });
     function buildVessels(count) {
       // skip if no vessel count or if count is 0
       if (!count) return;
@@ -321,7 +328,7 @@ window.Terrain3D = (function () {
       // warm glow family only: color/emissive always DUSK_BAND[9] (the doorway's warm hue); only
       // intensity moves with bucket — bucket null->0 still reads as a dim ember, never grey.
       if (!monoMatCache[bucket]) monoMatCache[bucket] = new THREE.MeshStandardMaterial({
-        color: DUSK_BAND[9], emissive: DUSK_BAND[9], emissiveIntensity: 0.6 + 0.5 * bucket,
+        color: srgb(DUSK_BAND[9]), emissive: srgb(DUSK_BAND[9]), emissiveIntensity: 0.6 + 0.5 * bucket,
         flatShading: true, roughness: 0.55,
       });
       return monoMatCache[bucket];
@@ -329,12 +336,12 @@ window.Terrain3D = (function () {
     // the six shared facet materials (isle.slot % 6) — never a per-facet material (draw-call budget)
     var facetMats = [];
     for (var fm = 0; fm < 6; fm++) {
-      facetMats.push(new THREE.MeshStandardMaterial({ color: DUSK_BAND[12 + fm], flatShading: true, roughness: 0.88 }));
+      facetMats.push(new THREE.MeshStandardMaterial({ color: srgb(DUSK_BAND[12 + fm]), flatShading: true, roughness: 0.88 }));
     }
     // one shared strata-ring geometry/material — fr is a fixed constant, so every ring is congruent
     var ringGeo = new THREE.TorusGeometry(FACET_FR * 1.15, 0.05, 8, 20);
-    var ringMat = new THREE.MeshStandardMaterial({ color: DUSK_BAND[19], flatShading: true, roughness: 0.9 });
-    var threadMat = new THREE.LineBasicMaterial({ color: DUSK_BAND[9], transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+    var ringMat = new THREE.MeshStandardMaterial({ color: srgb(DUSK_BAND[19]), flatShading: true, roughness: 0.9 });
+    var threadMat = new THREE.LineBasicMaterial({ color: srgb(DUSK_BAND[9]), transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
 
     function hexLoopGeometry(r) {
       var g = new THREE.BufferGeometry(), n = 6, p = new Float32Array(n * 3);
@@ -345,7 +352,7 @@ window.Terrain3D = (function () {
     // shared ghost geometry/material: IDENTICAL parameters on every isle — only position differs,
     // so the one shared material's opacity pulse (the animation loop, below) drives every isle at once
     var ghostGeo = hexLoopGeometry(GHOST_R);
-    var ghostMat = new THREE.LineBasicMaterial({ color: DUSK_BAND[18], transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false });
+    var ghostMat = new THREE.LineBasicMaterial({ color: srgb(DUSK_BAND[18]), transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false });
 
     var clickableMonoliths = [];
     var litHouses = 0;
@@ -431,7 +438,7 @@ window.Terrain3D = (function () {
       }
 
       // ONE warm point light per isle, at its center — never per monolith (draw-call budget)
-      var isleLight = new THREE.PointLight(DUSK_BAND[9], 1.0, 40, 2.0);
+      var isleLight = new THREE.PointLight(srgb(DUSK_BAND[9]), 1.0, 40, 2.0);
       isleLight.position.set(isle.x, ISLE_TOP_Y + 2.2, isle.z);
       world.add(isleLight);
 

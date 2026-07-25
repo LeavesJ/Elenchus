@@ -141,7 +141,7 @@ window.WXCeremony = (function () {
   function buildShimmerOverlay(isle, handles) {
     var THREE = window.THREE, overlay = [];
     if (!THREE || !THREE.EdgesGeometry || !THREE.LineSegments) return overlay;
-    var mat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
+    var mat = new THREE.LineBasicMaterial({ color: new THREE.Color(0xffffff).convertSRGBToLinear(), transparent: true, opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending });
     for (var k in handles.houses) {
       if (!Object.prototype.hasOwnProperty.call(handles.houses, k)) continue;
       var hh = handles.houses[k];
