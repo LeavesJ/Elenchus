@@ -579,7 +579,13 @@ window.Terrain3D = (function () {
       if (THREE.EffectComposer && THREE.RenderPass && THREE.UnrealBloomPass) {
         composer = new THREE.EffectComposer(renderer);
         composer.addPass(new THREE.RenderPass(scene, camera));
-        composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(W, H), 0.55, 0.5, 0.62)); // lowkey bloom
+        var bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(W, H), 0.55, 0.5, 0.62); // lowkey bloom
+        // RenderPass already tone-mapped into the composer buffer; this pass blits that buffer to
+        // screen through a MeshBasicMaterial, whose shader tone-maps AGAIN. Two ACES passes crush
+        // chroma at the bright end (sun-glow 23->13, horizon 19->11). Recovers colour, NOT
+        // luminance separation — earned-vs-unearned stays ~1.03:1 and is P2's problem.
+        bloomPass.basic.toneMapped = false;
+        composer.addPass(bloomPass);
       }
     } catch (e) { composer = null; }
     function draw() { if (composer) composer.render(); else renderer.render(scene, camera); }

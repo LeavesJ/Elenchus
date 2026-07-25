@@ -70,3 +70,14 @@ def test_canvas_textures_declare_srgb_encoding():
         "CanvasTexture may only be constructed inside canvasTex(); found "
         f"{s.count('new THREE.CanvasTexture(')} sites"
     )
+
+
+def test_bloom_blit_does_not_tone_map_twice():
+    # RenderPass already tone-maps the scene INTO the composer buffer; UnrealBloomPass then
+    # blits that buffer to screen through a MeshBasicMaterial whose shader includes
+    # <tonemapping_fragment>, so ACES runs a second time and crushes chroma at the bright end
+    # — precisely where the reward vocabulary lives.
+    s = TERRAIN.read_text()
+    assert re.search(r"\.basic\.toneMapped\s*=\s*false", s), (
+        "the UnrealBloomPass screen blit must set basic.toneMapped = false"
+    )
