@@ -81,3 +81,15 @@ def test_bloom_blit_does_not_tone_map_twice():
     assert re.search(r"\.basic\.toneMapped\s*=\s*false", s), (
         "the UnrealBloomPass screen blit must set basic.toneMapped = false"
     )
+
+
+def test_scene_has_fog_tinted_to_the_sky():
+    # No fog means no aerial perspective: a 2.9x depth spread renders at identical contrast,
+    # so floating lands have nothing to float in. The colour must come from the dusk band via
+    # the srgb() seam, not an invented grey.
+    s = TERRAIN.read_text()
+    m = re.search(r"scene\.fog\s*=\s*new THREE\.Fog\w*\(\s*([^,)]+)", s)
+    assert m, "scene.fog must be assigned"
+    assert m.group(1).strip().startswith("srgb(DUSK_BAND["), (
+        f"fog colour must come from the dusk band through srgb(), got {m.group(1).strip()}"
+    )

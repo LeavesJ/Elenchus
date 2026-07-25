@@ -137,6 +137,13 @@ window.Terrain3D = (function () {
     duskLight.position.set(-42, 52, -26); scene.add(duskLight);
     var world = new THREE.Group(); scene.add(world); // idle sway applies to this group only
 
+    // Aerial perspective (Spec-3 P0 §3d): without fog, near and far render at identical contrast
+    // and the archipelago has no depth to float in. Tinted to the sky's mid stop so distance
+    // dissolves INTO the sky rather than toward an invented grey. Near/far bracket the lived
+    // world: the home dock sits at the origin and the isle orbit at R_ORBIT=46, so haze starts
+    // beyond the dock and saturates past the far rim.
+    scene.fog = new THREE.Fog(srgb(DUSK_BAND[2]), 40, 220);
+
     // A 2D canvas holds sRGB pixels; CanvasTexture defaults to LinearEncoding in r128, which
     // over-brightens it exactly like an unconverted material colour. One seam, so no future
     // texture can miss the decode.
