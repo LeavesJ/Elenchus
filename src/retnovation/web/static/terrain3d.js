@@ -139,9 +139,12 @@ window.Terrain3D = (function () {
 
     // Aerial perspective (Spec-3 P0 §3d): without fog, near and far render at identical contrast
     // and the archipelago has no depth to float in. Tinted to the sky's mid stop so distance
-    // dissolves INTO the sky rather than toward an invented grey. Near/far bracket the lived
-    // world: the home dock sits at the origin and the isle orbit at R_ORBIT=46, so haze starts
-    // beyond the dock and saturates past the far rim.
+    // dissolves INTO the sky rather than toward an invented grey. THREE.Fog works in CAMERA-SPACE
+    // depth, not distance from the world origin, so near/far are picked against the resting camera
+    // pose (az=0.9, pol=1.05, rad=62, target (0,4,0) -> camera ~= (33.4, 34.8, 42.1)): the origin
+    // dock is ~64 from the camera there (already past near=40, ~13% haze at rest), the nearest isle
+    // is ~34 (under near, unfogged), and the farthest isle is ~105 (~36% fog, short of saturating
+    // at far=220).
     scene.fog = new THREE.Fog(srgb(DUSK_BAND[2]), 40, 220);
 
     // A 2D canvas holds sRGB pixels; CanvasTexture defaults to LinearEncoding in r128, which
@@ -179,10 +182,20 @@ window.Terrain3D = (function () {
       scene.add(sky); // sky stays outside the world group's sway (Spec-2 §3: "everything but sky/stars")
     })();
 
-    // a low warm sun-glow near the horizon — ambient backdrop, not a light source
-    sprite(warmTex, 130, -210, 10, -300, 0.4);
+    // a low warm sun-glow near the horizon — ambient backdrop, not a light source. Fog rule:
+    // backdrop (sky/stars/this) is exempt from fog exactly like the sky sphere above; world
+    // content is fogged. This sprite sits at radius ~366 from the origin, always >= 256 from the
+    // clamped-max-110 camera, so at the fog's far=220 the depth factor saturates to 1.0 every
+    // frame and its authored warm amber would otherwise be replaced outright by the fog colour
+    // before the additive blend. The OTHER sprite(warmTex, ...) call below (the dock lamp halo)
+    // stays fogged on purpose: it sits close to the camera and is legitimately world content.
+    sprite(warmTex, 130, -210, 10, -300, 0.4).material.fog = false;
 
-    // stars — kept from the prior valley scene, unchanged in spirit
+    // stars — kept from the prior valley scene, unchanged in spirit. Backdrop per this file's own
+    // doctrine ("sky stays outside the world group's sway (Spec-2 §3: 'everything but sky/stars')"),
+    // so exempt from fog for the same reason as the sky sphere and the sun-glow sprite above:
+    // backdrop is exempt, world content is fogged. Stars sit at radius 150-280 and would otherwise
+    // wash toward the fog colour at typical camera distances.
     (function () {
       var g = new THREE.BufferGeometry(), n = 420, p = new Float32Array(n * 3);
       for (var i = 0; i < n; i++) {
@@ -193,7 +206,7 @@ window.Terrain3D = (function () {
         p[i * 3 + 2] = r * Math.sin(ph) * Math.sin(th);
       }
       g.setAttribute("position", new THREE.BufferAttribute(p, 3));
-      scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: srgb(0xcac2e6), size: 0.6, transparent: true, opacity: 0.72 })));
+      scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: srgb(0xcac2e6), size: 0.6, transparent: true, opacity: 0.72, fog: false })));
     })();
 
     // --- the cloud shelf: 8-12 soft sprites drifting below the isles, never inside the reserved
