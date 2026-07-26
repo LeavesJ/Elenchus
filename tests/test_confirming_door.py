@@ -177,3 +177,22 @@ def test_content_gap_is_inert_on_a_memory_store():
         corrected=False,
         now=datetime(2026, 7, 26, tzinfo=timezone.utc),
     )
+
+
+def test_gap_is_logged_only_when_the_correction_still_does_not_fit():
+    # A correction that lands cleanly is NOT a gap — the mapper just needed her second phrasing.
+    # Logging every correction would drown the content axis's signal in noise.
+    body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
+    assert "log_content_gap" in body, "the no-branch must record the miss"
+    seg = body[body.index("log_content_gap") - 900 : body.index("log_content_gap") + 400]
+    assert "corrections" in seg, "a gap is only meaningful after a correction"
+    assert "verdict" in seg and "confidence" in seg, (
+        "only log when the re-map still does not fit honestly"
+    )
+
+
+def test_gap_is_recorded_before_the_forge_not_after():
+    # The gap is about what the door COULD NOT serve. Recording it after the forge would describe
+    # a scenario that was built anyway, which is a different (and misleading) fact.
+    body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
+    assert body.index("log_content_gap") < body.rindex("sel = forge_selection(")

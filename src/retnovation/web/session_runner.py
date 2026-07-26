@@ -617,6 +617,23 @@ class SessionRegistry:
                             # 2026-07-24 defect deferred by two turns, not fixed. Spec §4b: fall
                             # through to the honest-fit beat, which names the stretch in her own
                             # words and keeps the doors answerable, then proceed. Never dead-ends.
+                            #
+                            # And if the re-map STILL does not fit her corrected words, that is a
+                            # CONTENT gap — five territories, not a user failure. Record it for the
+                            # mining pipeline (server-side only, L-13). A correction that lands
+                            # cleanly is NOT a gap: the mapper simply needed her second phrasing.
+                            if sit is not None and (
+                                tmap.verdict != "decision"
+                                or tmap.confidence.strip().lower() != "high"
+                            ):
+                                self._store.log_content_gap(
+                                    situation=situation,
+                                    mapped_eid=eid,
+                                    confidence=tmap.confidence,
+                                    verdict=tmap.verdict,
+                                    corrected=True,
+                                    now=now,
+                                )
                             picked = honest_fit_beat()
                             if picked is not None:
                                 return forge_selection(eids[picked], situation, clicked=True)
