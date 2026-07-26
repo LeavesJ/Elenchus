@@ -131,3 +131,49 @@ def test_honest_fit_beat_is_one_implementation_shared_by_both_callers():
     assert body.count("def honest_fit_beat(") == 1
     # count CALL sites only — the def line contains the same substring
     assert len(re.findall(r"(?<!def )honest_fit_beat\(\)", body)) == 2
+
+
+# ---- T4: the content-gap ledger --------------------------------------------------------------
+# The door becomes an instrument as well as a surface. When a correction still cannot be served
+# honestly, that is a CONTENT gap (five territories), not a user failure — and the mining pipeline
+# should be told mechanically rather than left to infer it from dogfood memory.
+
+
+def test_content_gap_is_recorded_with_her_words(tmp_path):
+    import sqlite3
+    from datetime import datetime, timezone
+
+    from retnovation.web.sitting_store import SittingStore
+
+    db = tmp_path / "g.db"
+    s = SittingStore(str(db))
+    s.log_content_gap(
+        situation="how do I find my first client",
+        mapped_eid="proof_before_promise",
+        confidence="low",
+        verdict="topic",
+        corrected=True,
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+    )
+    c = sqlite3.connect(str(db))
+    rows = c.execute(
+        "SELECT situation, mapped_eid, confidence, verdict, corrected FROM web_content_gap"
+    ).fetchall()
+    c.close()
+    assert rows == [("how do I find my first client", "proof_before_promise", "low", "topic", 1)]
+
+
+def test_content_gap_is_inert_on_a_memory_store():
+    # :memory: stores are inert by design; a gap write must not raise.
+    from datetime import datetime, timezone
+
+    from retnovation.web.sitting_store import SittingStore
+
+    SittingStore(":memory:").log_content_gap(
+        situation="x",
+        mapped_eid="y",
+        confidence="low",
+        verdict="topic",
+        corrected=False,
+        now=datetime(2026, 7, 26, tzinfo=timezone.utc),
+    )

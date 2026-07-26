@@ -140,6 +140,9 @@ CREATE TABLE IF NOT EXISTS web_domain_slot (
     member_frames_json TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'live'
 );
+CREATE TABLE IF NOT EXISTS web_content_gap (
+  situation TEXT NOT NULL, mapped_eid TEXT NOT NULL, confidence TEXT NOT NULL,
+  verdict TEXT NOT NULL, corrected INTEGER NOT NULL, at TEXT NOT NULL);
 """
 
 
@@ -386,6 +389,32 @@ class SittingStore:
                 "ON CONFLICT(sitting_id) DO UPDATE SET situation=excluded.situation, "
                 "updated_at=excluded.updated_at",
                 (sitting_id, situation, now.isoformat()),
+            )
+
+    def log_content_gap(
+        self,
+        situation: str,
+        mapped_eid: str,
+        confidence: str,
+        verdict: str,
+        corrected: bool,
+        now: datetime,
+    ) -> None:
+        """Record a problem the five territories could not serve honestly (Spec-3 §4b).
+
+        SERVER-SIDE ONLY — never read into a payload (L-13). The front door becomes an instrument
+        as well as a surface: this is the content axis's first mechanical input, telling the mining
+        pipeline what the library is missing instead of leaving it to be inferred from dogfood
+        memory. A miss here is a CONTENT gap, not a user failure.
+
+        Holds her own words, so it lives under the same privacy stance as web_world."""
+        if self._inert:
+            return
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO web_content_gap "
+                "(situation, mapped_eid, confidence, verdict, corrected, at) VALUES (?,?,?,?,?,?)",
+                (situation, mapped_eid, confidence, verdict, int(corrected), now.isoformat()),
             )
 
     def read_world(self, sitting_id: str) -> str | None:
