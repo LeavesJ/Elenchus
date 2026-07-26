@@ -35,7 +35,28 @@ def _backfill_positions(c: sqlite3.Connection) -> int:
     equals their convergence count; anything else keeps an honest NULL (L-16: never force a
     verdict the record cannot support).
 
-    L-3: only fills NULLs. Never overwrites, never deletes. Idempotent."""
+    L-3: only fills NULLs. Never overwrites, never deletes. Idempotent.
+
+    Known limit (C1, adversarial review of e522382): the exact-rule branch assumes each
+    `converged` landing turn has exactly one `web_converged` row, and two live paths in
+    session_runner.py can each break that assumption in the opposite direction:
+      - session_runner.py's stale-channel path gates `log_converged` on `stop_reason ==
+        "converged" and not stale`, but still appends the `landing` turn for a stale channel
+        regardless — a STALE converged landing therefore leaves a `landing` turn with no
+        matching `web_converged` row (landing, no row).
+      - session_runner.py's non-stale landing append is gated on `data.get("landing")` being
+        truthy, but the voice's `land` step can return `""` for a genuine convergence —
+        `log_converged` already ran, so that produces a `web_converged` row with no matching
+        `landing` turn (row, no landing).
+    Either failure alone makes this sitting's landing count and convergence-row count disagree,
+    so it is safely skipped by this function (an honest NULL). But if BOTH occur in the SAME
+    sitting, one of each cancels out: the counts re-balance, the exact rule's `len(chosen) ==
+    len(rows)` guard passes, and `zip(rows, chosen)` silently pairs each convergence with the
+    wrong landing — off by one. The result is a memory that opens to the words of an arc the
+    user actually abandoned. There is no cheap fix: `web_sitting_turn` carries no timestamp
+    column, so there is no independent signal to re-anchor the pairing without one. This is not
+    hypothetical-then-dismissed — it is a real, if narrow, gap in this function's guarantee.
+    """
     filled = 0
     sittings = [
         r[0]
@@ -58,10 +79,17 @@ def _backfill_positions(c: sqlite3.Connection) -> int:
         reasons = []
         for _, payload in landings:
             try:
-                reasons.append(json.loads(payload).get("stop_reason"))
+                decoded = json.loads(payload)
             except (ValueError, TypeError):
-                reasons.append(None)
-        if all(reasons) and reasons:
+                decoded = None
+            # I1: valid JSON that isn't an object (`null`, a string, a list, ...) has no `.get` —
+            # shape-check explicitly rather than widen the except, so the intent stays legible.
+            reasons.append(decoded.get("stop_reason") if isinstance(decoded, dict) else None)
+        # C2: test PRESENCE, not truthiness — a landing whose stop_reason is present and empty
+        # ("") is still a post-column, non-converged landing. `all(reasons)` treats "" as absent
+        # and silently demotes the sitting to the legacy count-equality heuristic below, which
+        # does not filter by convergence at all — precisely the corruption this rule prevents.
+        if reasons and all(r is not None for r in reasons):
             chosen = [seq for (seq, _), r in zip(landings, reasons) if r == "converged"]
         elif len(landings) == len(rows):
             chosen = [seq for seq, _ in landings]  # legacy: unambiguous only on count equality
@@ -77,9 +105,10 @@ def _backfill_positions(c: sqlite3.Connection) -> int:
             if not prior:
                 continue
             try:
-                text = json.loads(prior[-1]).get("text")
+                decoded = json.loads(prior[-1])
             except (ValueError, TypeError):
                 continue
+            text = decoded.get("text") if isinstance(decoded, dict) else None  # I1: shape-safe
             if not text:
                 continue
             c.execute("UPDATE web_converged SET position = ? WHERE rowid = ?", (text, rowid))
@@ -171,7 +200,14 @@ class SittingStore:
                 # Runs at migration time like the landed_at backfill above — otherwise the fix
                 # is inert on an existing db until a fresh landing, and these rows would never
                 # get one. Guarded by `position IS NULL`, so it is a no-op on every later open.
-                _backfill_positions(c)
+                try:
+                    _backfill_positions(c)
+                except sqlite3.OperationalError:
+                    # Same pattern as the sibling migrations above: a transient failure (e.g. a
+                    # concurrent writer holding the lock) here must leave the rows NULL and the
+                    # store LIVE, not fall through to the outer handler and silently mark the
+                    # whole process inert (I2) — the next open just retries the backfill.
+                    pass
         except sqlite3.OperationalError:
             # An unopenable path must not crash the registry at construction — the WORKER surfaces
             # the db error per-session (its build_store fails the same way and emits `error`).
