@@ -97,3 +97,37 @@ def test_same_world_continue_skips_the_confirm_beat():
     early = body[: body.index("_FRONTDOOR_ASK")]
     assert "return forge_selection(target, world, focus=focus)" in early
     assert "_CONFIRM_COPY" not in early
+
+
+def test_the_correction_cap_never_forges_silently():
+    # THE REVIEW FINDING (Critical). The cap used to `break` straight to forge_selection, so two
+    # corrections produced a scenario the user never agreed to — the 2026-07-24 defect deferred by
+    # two turns, not fixed. Spec §4b requires falling through to the honest-fit beat, which names
+    # the stretch in her own words and keeps the doors answerable.
+    body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
+    cap = body.index("corrections >= _MAX_CONFIRM_CORRECTIONS")
+    forge = body.rindex("sel = forge_selection(")
+    between = body[cap:forge]
+    assert "honest_fit_beat()" in between, (
+        "past the correction cap the composer must serve the honest-fit beat before forging, "
+        "never fall straight through to the forge"
+    )
+
+
+def test_the_remap_precedes_the_cap_check():
+    # The other review finding: if the cap short-circuits the re-map, the forge builds her LATEST
+    # words under a rubric chosen for her PREVIOUS ones — one scenario from two different inputs.
+    body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
+    seg = body[body.index("corrections += 1") :]
+    remap = seg.index("model.map_territories(")
+    cap = seg.index("corrections >= _MAX_CONFIRM_CORRECTIONS")
+    assert remap < cap, "the re-map must run BEFORE the cap check so eid always matches situation"
+
+
+def test_honest_fit_beat_is_one_implementation_shared_by_both_callers():
+    # L-31: the low-confidence path and the cap path must not drift apart. One definition, two
+    # call sites — a second inlined copy is how the two silently diverge.
+    body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
+    assert body.count("def honest_fit_beat(") == 1
+    # count CALL sites only — the def line contains the same substring
+    assert len(re.findall(r"(?<!def )honest_fit_beat\(\)", body)) == 2

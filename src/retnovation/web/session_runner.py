@@ -536,12 +536,17 @@ class SessionRegistry:
                     # signal; the extra beat costs one collect. force_fit (a second topic)
                     # takes it regardless of confidence.
                     base = next(e for e in open_exps if e.experience_id == eid)
-                    if force_fit or tmap.confidence.strip().lower() != "high":
-                        # Honest fit (§2a): her situation stays the world; no silent stretching. The
-                        # edge is named in HER words when the mapper authored a safe `fit` (screened
-                        # like the conversion beat — L-13), else the generic territory description
-                        # (honest-fit reflection fix, 2026-07-05 founder dogfood: the generic recite
-                        # "never adjusts" to her material).
+
+                    def honest_fit_beat():
+                        """The honest-stretch beat (§2a): her situation stays the world; no silent
+                        stretching. The edge is named in HER words when the mapper authored a safe
+                        `fit` (screened — L-13), else the generic territory description (2026-07-05
+                        founder dogfood: the generic recite "never adjusts" to her material).
+
+                        Reads `tmap`/`base`/`eid` at CALL time, so it reflects the latest mapping.
+                        Returns a door index if she clicked one, else None (any text proceeds with
+                        the MAPPED territory). Shared by the low-confidence path and the confirm
+                        beat's correction cap, so the two can never drift apart (L-31)."""
                         fit_text = tmap.fit.strip()
                         if fit_text and voice.egress_safe_reply(model, base, fit_text):
                             desc = " ".join(fit_text.split()).rstrip(".")
@@ -553,19 +558,27 @@ class SessionRegistry:
                         fit_copy = _HONEST_FIT_VARIANTS[n % len(_HONEST_FIT_VARIANTS)]
                         ch.frontdoor_pending = fit_copy.format(desc=desc)  # before the put
                         ch.from_worker.put(("say", {"text": ch.frontdoor_pending}))
-                        value = ch.to_worker.get()
+                        v = ch.to_worker.get()
                         ch.frontdoor_pending = None  # consumed
-                        if value is _ABANDON:
+                        if v is _ABANDON:
                             raise _Abandoned()
-                        if isinstance(value, int):
-                            return forge_selection(eids[value], situation, clicked=True)
+                        return v if isinstance(v, int) else None
+
+                    if force_fit or tmap.confidence.strip().lower() != "high":
+                        picked = honest_fit_beat()
+                        if picked is not None:
+                            return forge_selection(eids[picked], situation, clicked=True)
                         # any text proceeds with the MAPPED territory (branch kept simple)
                     # THE CONFIRM BEAT (Spec-3 §4a): nothing is forged unconfirmed. The 2026-07-24
                     # dogfood forged `proof_before_promise` at HIGH confidence on a go-to-market
                     # question, and the correction that followed could not be distinguished from
                     # evasion once the scenario existed. The gate lives HERE — outside the judgment
                     # loop — so the loop stays sealed (L-5): there is no effort to evade yet.
-                    # Costs no model call: `fit` is already on the TerritoryMap.
+                    # COST: the mapper's `fit` is already on the TerritoryMap, so the beat adds no
+                    # MAPPING call — but screening it is `voice.egress_safe_reply`, which is one
+                    # model call per serve (its own docstring says so), and on the HIGH-confidence
+                    # path that screen did not previously run at all. One added call per serve is
+                    # the honest cost; do not describe this beat as free.
                     corrections = 0
                     while True:
                         fit_text = tmap.fit.strip()
@@ -584,15 +597,14 @@ class SessionRegistry:
                             return forge_selection(eids[value], situation, clicked=True)
                         if _is_affirmative(value):
                             break
-                        # A correction. Re-map on HER words and ask again. Capped: past the cap the
-                        # composer falls through to the mapped territory rather than dead-ending,
-                        # and the doors remain on offer throughout.
+                        # A correction. Re-map on HER words and ask again.
                         corrections += 1
                         situation = value
                         if sit is not None:
                             self._store.write_world(sit, situation, now)
-                        if corrections >= _MAX_CONFIRM_CORRECTIONS:
-                            break
+                        # Re-map BEFORE the cap check, always. If the cap short-circuited this,
+                        # the forge below would build her LATEST words under a rubric chosen for
+                        # her PREVIOUS ones — a scenario assembled from two different inputs.
                         tmap = model.map_territories(situation, territories)
                         ranked = [e for e in tmap.ranked if e in known] or [
                             e for e, _ in territories
@@ -600,6 +612,15 @@ class SessionRegistry:
                         eid = ranked[0]
                         ch.mapped_rank = ranked
                         base = next(e for e in open_exps if e.experience_id == eid)
+                        if corrections >= _MAX_CONFIRM_CORRECTIONS:
+                            # Past the cap the composer must NOT forge silently — that is the
+                            # 2026-07-24 defect deferred by two turns, not fixed. Spec §4b: fall
+                            # through to the honest-fit beat, which names the stretch in her own
+                            # words and keeps the doors answerable, then proceed. Never dead-ends.
+                            picked = honest_fit_beat()
+                            if picked is not None:
+                                return forge_selection(eids[picked], situation, clicked=True)
+                            break
                     sel = forge_selection(eid, situation)
                     try:
                         if ch.pending_bridge is None:
