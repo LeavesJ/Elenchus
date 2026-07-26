@@ -196,3 +196,31 @@ def test_gap_is_recorded_before_the_forge_not_after():
     # a scenario that was built anyway, which is a different (and misleading) fact.
     body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
     assert body.index("log_content_gap") < body.rindex("sel = forge_selection(")
+
+
+# ---- T6: the teeth ---------------------------------------------------------------------------
+
+
+def test_every_front_door_forge_path_is_consented():
+    # THE regression that matters. From the front door there must be exactly two ways to reach a
+    # forge: a DOOR CLICK (she picked the problem herself — its own consent), or falling out of
+    # the confirm loop. A third path is the 2026-07-24 defect returning.
+    body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
+    after_ask = body[body.index("_FRONTDOOR_ASK") :]
+    calls = re.findall(r"forge_selection\([^)]*\)", after_ask)
+    assert calls, "expected forge paths to exist"
+    for call in calls:
+        consented = "clicked=True" in call or call == "forge_selection(eid, situation)"
+        assert consented, f"unreviewed forge path from the front door: {call}"
+
+
+def test_confirm_beat_carries_no_identifier_to_the_client():
+    # L-13: the confirm beat is a NEW learner-facing surface, so it gets the same sweep as every
+    # other one. `fit` is her own words; a ref/eid/frame code must never ride with it.
+    from retnovation.web.app import _emit
+
+    data = {"text": "Before I build it — here's the decision I'd put to you: the price you set."}
+    out = _emit(object(), "say", data)
+    blob = repr(out)
+    for forbidden in ["gen:", "veldra:", "experience_id", "ledger_ref", "sitting_id", "frame_code"]:
+        assert forbidden not in blob, forbidden
