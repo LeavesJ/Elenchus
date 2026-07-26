@@ -102,7 +102,11 @@ def test_keyboard_camera_ignores_typing():
     # is visible while the composer has focus at the front door, so every keystroke of a typed
     # situation drove the camera.
     s = TERRAIN.read_text()
-    assert "_typing(" in _js_fn(s, "kd"), "kd() must bail out when the event targets a text field"
+    kd_code = re.sub(r"//[^\n]*", "", _js_fn(s, "kd"))  # strip comments: a guard must be a real
+    # statement, not merely an identifier mentioned in passing (including inside a comment)
+    assert re.search(r"if\s*\(\s*_typing\(\s*e\s*\)\s*\)\s*return\s*;", kd_code), (
+        "kd() must bail out with an early `return` guarded by _typing(e), not just mention it"
+    )
     typing = _js_fn(s, "_typing")
     for token in ["INPUT", "TEXTAREA", "isContentEditable"]:
         assert token in typing, f"_typing() must recognise {token}"

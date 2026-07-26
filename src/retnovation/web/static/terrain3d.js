@@ -528,15 +528,16 @@ window.Terrain3D = (function () {
       var tag = t.tagName;
       return tag === "INPUT" || tag === "TEXTAREA" || t.isContentEditable === true;
     }
+    // kd() is guarded by _typing() below — keys typed into the composer must not drive the
+    // camera. ku() is deliberately left UNguarded: clearing keys[k] is always safe, and guarding
+    // it would strand a key pressed while the canvas had focus but released after focus moved
+    // into the composer.
     function kd(e) {
       if (_typing(e)) return;
       keys[e.key.toLowerCase()] = true;
-      if (e.key === "Escape") goHome(); // Esc always returns to the home framing, from anywhere
+      if (e.key === "Escape") goHome(); // Esc re-homes the camera, but only when _typing(e) is false (guarded above)
     }
-    function ku(e) {
-      if (_typing(e)) { keys[e.key.toLowerCase()] = false; return; } // never strand a held key
-      keys[e.key.toLowerCase()] = false;
-    }
+    function ku(e) { keys[e.key.toLowerCase()] = false; }
     window.addEventListener("keydown", kd); window.addEventListener("keyup", ku);
     function dn(e) { dragging = true; introActive = false; container.style.cursor = "grabbing"; var t = e.touches ? e.touches[0] : e; lx = t.clientX; ly = t.clientY; downX = t.clientX; downY = t.clientY; ptrMoved = false; }
     function mv(e) {
