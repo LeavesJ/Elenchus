@@ -357,7 +357,13 @@ function renderTerrain(regions, houses, vessels, confluence, ceremony){
     muted(rendered ? (rendered+' area'+(rendered===1?'':'s')+(rendered===1?' has':' have')+' taken shape.')
                    : 'A seed was planted — your world begins.');
   }
-  try { if(window.Terrain3D) Terrain3D.render(host, {regions: regions, houses: houses, vessels: vessels, confluence: confluence}, ceremony ? {ceremony: ceremony} : undefined); } catch(_) { host.textContent = NO_WEBGL_TEXT; }
+  // The just-earned monolith must be openable without a reload (Spec-3 P0 §3f). The ceremony
+  // still rides when present. Index safety: /memory resolves against latest_homebase().house_refs
+  // with a ref+converged_at drift guard, so a mismatch degrades to an honest "unavailable",
+  // never a wrong memory — no second guard belongs here (L-31).
+  const opts = {onHouseClick: openMemory};
+  if(ceremony) opts.ceremony = ceremony;
+  try { if(window.Terrain3D) Terrain3D.render(host, {regions: regions, houses: houses, vessels: vessels, confluence: confluence}, opts); } catch(_) { host.textContent = NO_WEBGL_TEXT; }
   thread.scrollTop=thread.scrollHeight;
 }
 composer.addEventListener('submit', async e=>{

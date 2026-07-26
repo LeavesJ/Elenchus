@@ -110,3 +110,17 @@ def test_keyboard_camera_ignores_typing():
     typing = _js_fn(s, "_typing")
     for token in ["INPUT", "TEXTAREA", "isContentEditable"]:
         assert token in typing, f"_typing() must recognise {token}"
+
+
+def test_close_render_passes_the_memory_click_handler():
+    # The post-landing render must make the just-earned monolith openable. Without this the
+    # memory is inert until a page reload, and the click falls through to the isle pick layer
+    # (it moves the camera instead of opening the memory).
+    s = SHELL.read_text()
+    m = re.search(r"function renderTerrain\(.*?\n\}", s, re.S)
+    assert m, "renderTerrain must exist in index.html"
+    body = m.group(0)
+    assert "Terrain3D.render(" in body
+    assert "onHouseClick" in body, (
+        "renderTerrain must pass onHouseClick so a just-earned memory is clickable"
+    )
