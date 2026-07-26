@@ -395,10 +395,19 @@ window.Terrain3D = (function () {
       g.setAttribute("position", new THREE.BufferAttribute(p, 3));
       return g;
     }
+    // The ghost bud marks NOTHING EARNED — the invitation on an isle with room left. Light is
+    // this world's reward vocabulary (§5c), so the placeholder must never bloom and must never
+    // out-shine a real memory. P0's bloom retune (threshold 0.62 -> 0.46, so a single-convergence
+    // monolith would finally glow) pulled the ghost over the line too, and its pulse crossed the
+    // threshold mid-cycle — the emptiness marker was the only FLICKERING thing in the scene.
+    // Pinned as named constants so the separation guard reads the real values, not a literal.
+    var GHOST_OPACITY = 0.14;    // resting
+    var GHOST_PULSE_AMP = 0.05;  // +/- around it; peak 0.19 stays well under the bloom threshold
+
     // shared ghost geometry/material: IDENTICAL parameters on every isle — only position differs,
     // so the one shared material's opacity pulse (the animation loop, below) drives every isle at once
     var ghostGeo = hexLoopGeometry(GHOST_R);
-    var ghostMat = new THREE.LineBasicMaterial({ color: srgb(DUSK_BAND[18]), transparent: true, opacity: 0.35, blending: THREE.AdditiveBlending, depthWrite: false });
+    var ghostMat = new THREE.LineBasicMaterial({ color: srgb(DUSK_BAND[18]), transparent: true, opacity: GHOST_OPACITY, blending: THREE.AdditiveBlending, depthWrite: false });
 
     var clickableMonoliths = [];
     var litHouses = 0;
@@ -677,9 +686,10 @@ window.Terrain3D = (function () {
       if (introActive) { var ig = Math.min(1, t / INTRO); ige = 1 - Math.pow(1 - ig, 3); if (ig >= 1) introActive = false; }
       world.position.y = Math.sin(t * 0.35) * 0.6; // idle sway — the world group only (Spec-2 §3)
       for (var ci2 = 0; ci2 < clouds.length; ci2++) { var cl = clouds[ci2]; cl.s.position.x = cl.bx + Math.sin(t * 0.05 + cl.ph) * 4; cl.s.position.z = cl.bz + Math.cos(t * 0.04 + cl.ph) * 4; }
-      // the ghost bud's pulse: deterministic, time-based (t only), 0.35<->0.85, IDENTICAL on every
-      // isle because every isle's LineLoop shares this ONE material — one assignment drives them all
-      ghostMat.opacity = 0.6 + 0.25 * Math.sin(t * 1.3);
+      // The ghost's breath is now SLOWER and SHALLOWER than a memory's (T3 gives the ember its
+      // own): emptiness may be present, never the liveliest thing on the isle. Deterministic,
+      // time-based, and shared by every isle's LineLoop through this one material.
+      ghostMat.opacity = GHOST_OPACITY + GHOST_PULSE_AMP * Math.sin(t * 0.55);
       // Vera's idle breathe (Spec-2 §7): opacity only — her group's transform never changes here
       veraBreathe.opacity = 0.75 + 0.25 * Math.sin(t * 1.1);
       // fly-in reveal: start wide + high, ease to the resting pose (rr==rad, pp==pol once ige==1)
