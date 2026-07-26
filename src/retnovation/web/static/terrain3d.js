@@ -519,11 +519,24 @@ window.Terrain3D = (function () {
     // the isle close-orbit (Spec-2 §9): target tweens to the isle's own center, rad tightens to
     // CLOSE_ORBIT_RAD, eased over CLOSE_ORBIT_MS — no other camera behavior lives in this function.
     function closeOrbit(center) { startTween(center.x, CLOSE_ORBIT_Y, center.z, CLOSE_ORBIT_RAD); }
+    // The camera keys are bound at WINDOW level, so without this every keystroke typed into the
+    // composer drove the camera — and Escape re-homed it mid-sentence. The world is on screen
+    // while the front door has focus, so this fired on the very first thing anyone ever types.
+    function _typing(e) {
+      var t = e.target;
+      if (!t) return false;
+      var tag = t.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || t.isContentEditable === true;
+    }
     function kd(e) {
+      if (_typing(e)) return;
       keys[e.key.toLowerCase()] = true;
       if (e.key === "Escape") goHome(); // Esc always returns to the home framing, from anywhere
     }
-    function ku(e) { keys[e.key.toLowerCase()] = false; }
+    function ku(e) {
+      if (_typing(e)) { keys[e.key.toLowerCase()] = false; return; } // never strand a held key
+      keys[e.key.toLowerCase()] = false;
+    }
     window.addEventListener("keydown", kd); window.addEventListener("keyup", ku);
     function dn(e) { dragging = true; introActive = false; container.style.cursor = "grabbing"; var t = e.touches ? e.touches[0] : e; lx = t.clientX; ly = t.clientY; downX = t.clientX; downY = t.clientY; ptrMoved = false; }
     function mv(e) {

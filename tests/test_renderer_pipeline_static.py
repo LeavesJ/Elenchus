@@ -95,3 +95,14 @@ def test_scene_has_fog_tinted_to_the_sky():
     assert m.group(1).strip().startswith("srgb(DUSK_BAND["), (
         f"fog colour must come from the dusk band through srgb(), got {m.group(1).strip()}"
     )
+
+
+def test_keyboard_camera_ignores_typing():
+    # w/a/s/d + arrows pan the camera and Escape re-homes it, bound at window level. The world
+    # is visible while the composer has focus at the front door, so every keystroke of a typed
+    # situation drove the camera.
+    s = TERRAIN.read_text()
+    assert "_typing(" in _js_fn(s, "kd"), "kd() must bail out when the event targets a text field"
+    typing = _js_fn(s, "_typing")
+    for token in ["INPUT", "TEXTAREA", "isContentEditable"]:
+        assert token in typing, f"_typing() must recognise {token}"
