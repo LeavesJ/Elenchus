@@ -119,8 +119,9 @@ def test_close_render_passes_the_memory_click_handler():
     s = SHELL.read_text()
     m = re.search(r"function renderTerrain\(.*?\n\}", s, re.S)
     assert m, "renderTerrain must exist in index.html"
-    body = m.group(0)
+    body = re.sub(r"//[^\n]*", "", m.group(0))  # strip comments, same discipline as the guard
+    # test above: the handler must be PASSED, not merely named in the comment beside the call
     assert "Terrain3D.render(" in body
-    assert "onHouseClick" in body, (
+    assert re.search(r"onHouseClick\s*:", body), (
         "renderTerrain must pass onHouseClick so a just-earned memory is clickable"
     )
