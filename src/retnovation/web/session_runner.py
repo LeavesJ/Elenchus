@@ -27,6 +27,49 @@ from .vessels import vessel_count
 # who keeps typing non-substantive input (or a mis-classifying model) pins the session open forever.
 _DOOR_MAX_NONSUBSTANTIVE = 3
 
+# The confirm beat's yes/no split (Spec-3 §4a). Deliberately CONSERVATIVE about yes: a false
+# "no" costs one extra re-map on a reply the mapper handles fine, while a false "yes" forges a
+# scenario the learner never agreed to — the exact defect this gate exists to prevent. Local and
+# pure: the happy path must not pay a model call.
+_AFFIRMATIVE = frozenset(
+    {
+        "y",
+        "yes",
+        "yep",
+        "yeah",
+        "yup",
+        "ya",
+        "aye",
+        "ok",
+        "okay",
+        "k",
+        "sure",
+        "go",
+        "go ahead",
+        "proceed",
+        "continue",
+        "right",
+        "correct",
+        "exactly",
+        "that's it",
+        "thats it",
+        "that is it",
+        "that's right",
+        "thats right",
+        "sounds right",
+        "confirmed",
+        "agreed",
+    }
+)
+_MAX_CONFIRM_CORRECTIONS = 2
+
+
+def _is_affirmative(text: str) -> bool:
+    """True only for a BARE agreement. Anything carrying its own content is a correction."""
+    t = " ".join((text or "").split()).strip().lower().rstrip(".!")
+    return bool(t) and t in _AFFIRMATIVE
+
+
 # Chained sittings: a poison-pill put on an ORPHANED segment's to_worker queue (continue/close over
 # a live channel). The worker raises _Abandoned at its next collect, swallows it, and exits through
 # finally so its store CLOSES (MF-4 — otherwise the parked worker leaks an open connection forever).
