@@ -594,7 +594,10 @@ def test_front_door_free_text_flow_over_http(tmp_path, make_fake):
     assert "eids" not in fd["menu"]  # L-13: the F1 territory keys stay server-side too
     blobs.append(fd)
 
-    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    r0 = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r0["kind"] == "say"
+    blobs.append(r0)
+    r = client.post("/api/session/s/say", json={"text": "yes"}).json()  # the confirm beat
     assert r["kind"] == "say" and r["text"] == _SCENARIO
     assert r.get("bridge") == "[reflect]"  # the heard-you beat rides the opening
     blobs.append(r)
@@ -627,7 +630,9 @@ def test_close_payload_shows_one_house_per_convergence(tmp_path, make_fake):
     app = create_app(db_path=str(tmp_path / "h2.db"), model_factory=_world_factory(make_fake))
     client = TestClient(app)
     assert client.post("/api/session").json()["kind"] == "frontdoor"
-    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    r0 = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r0["kind"] == "say"
+    r = client.post("/api/session/s/say", json={"text": "yes"}).json()  # the confirm beat
     assert r["kind"] == "say" and r["text"] == _SCENARIO
     _drive_to_done(client)
     r2 = client.post("/api/session/s/continue", json={}).json()
@@ -691,7 +696,9 @@ def test_load_payload_wire_sweep_over_engine_composed_bytes(tmp_path, make_fake)
     # registry stays in hand afterward to close the sitting and reload.
     reg = SessionRegistry(str(tmp_path / "loadsweep.db"), _world_factory(make_fake))
     assert reg.resume_or_start("single")[0] == "say"  # frontdoor cold start
-    tag, r = reg.step("single", _SITUATION)
+    tag, r0 = reg.step("single", _SITUATION)
+    assert tag == "say"
+    tag, r = reg.step("single", "yes")  # the confirm beat: she agrees before it forges
     assert tag == "say" and r["text"] == _SCENARIO
     _drive_reg_to_done(reg, "single")
     tag, r2 = reg.continue_session("single")
@@ -753,7 +760,9 @@ def test_plateau_adds_no_house(tmp_path, make_fake):
     app = create_app(db_path=str(tmp_path / "hp.db"), model_factory=factory)
     client = TestClient(app)
     assert client.post("/api/session").json()["kind"] == "frontdoor"
-    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    r0 = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r0["kind"] == "say"
+    r = client.post("/api/session/s/say", json={"text": "yes"}).json()  # the confirm beat
     assert r["kind"] == "say"
     _drive_to_done(client)  # converged: house one
     r2 = client.post("/api/session/s/continue", json={}).json()
@@ -789,7 +798,9 @@ def test_reserve_convergence_adds_a_new_house(tmp_path, make_fake):
     app = create_app(db_path=db, model_factory=_world_factory(make_fake))
     client = TestClient(app)
     assert client.post("/api/session").json()["kind"] == "frontdoor"
-    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    r0 = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r0["kind"] == "say"
+    r = client.post("/api/session/s/say", json={"text": "yes"}).json()  # the confirm beat
     assert r["kind"] == "say"
     _drive_to_done(client)  # the fifth territory converges: house 5
     rv = client.post("/api/session/s/continue", json={}).json()
@@ -812,7 +823,9 @@ def test_houses_are_stable_across_a_restart(tmp_path, make_fake):
     app1 = create_app(db_path=db, model_factory=_world_factory(make_fake))
     c1 = TestClient(app1)
     assert c1.post("/api/session").json()["kind"] == "frontdoor"
-    r = c1.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    r0 = c1.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r0["kind"] == "say"
+    r = c1.post("/api/session/s/say", json={"text": "yes"}).json()  # the confirm beat
     assert r["kind"] == "say"
     _drive_to_done(c1)
     r2 = c1.post("/api/session/s/continue", json={}).json()
@@ -846,7 +859,9 @@ def test_preexisting_curated_rows_do_not_crash_the_house_composition(tmp_path, m
     app = create_app(db_path=db, model_factory=_world_factory(make_fake))
     client = TestClient(app)
     assert client.post("/api/session").json()["kind"] == "frontdoor"
-    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    r0 = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r0["kind"] == "say"
+    r = client.post("/api/session/s/say", json={"text": "yes"}).json()  # the confirm beat
     assert r["kind"] == "say"
     _drive_to_done(client)
 
@@ -894,7 +909,9 @@ def test_informed_reserve_over_http(tmp_path, make_fake):
     client = TestClient(app)
     fd = client.post("/api/session").json()
     assert fd["kind"] == "frontdoor"
-    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    r0 = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r0["kind"] == "say"
+    r = client.post("/api/session/s/say", json={"text": "yes"}).json()  # the confirm beat
     assert r["kind"] == "say" and r["text"] == _SCENARIO
     _drive_to_done(client)  # the fifth territory converges: every door is now windowed
 
@@ -1107,7 +1124,9 @@ def test_vessels_ride_frontdoor_and_close_payloads_as_bare_count(tmp_path, make_
     client = TestClient(app)
 
     assert client.post("/api/session").json()["kind"] == "frontdoor"
-    r = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    r0 = client.post("/api/session/s/say", json={"text": _SITUATION}).json()
+    assert r0["kind"] == "say"
+    r = client.post("/api/session/s/say", json={"text": "yes"}).json()  # the confirm beat
     assert r["kind"] == "say" and r["text"] == _SCENARIO
     _drive_to_done(client)
     r2 = client.post("/api/session/s/continue", json={}).json()

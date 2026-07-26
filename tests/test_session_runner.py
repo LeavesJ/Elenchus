@@ -1011,6 +1011,7 @@ def test_reopen_seam_on_reentering_the_interrupted_door(tmp_path, make_fake):
 from retnovation.content_loader import load_territory_text  # noqa: E402
 from retnovation.web import voice as _voice  # noqa: E402
 from retnovation.web.session_runner import (  # noqa: E402
+    _CONFIRM_COPY,
     _FRONTDOOR_ASK,
     _HONEST_FIT,
     _HONESTY_LOST_FIRST,
@@ -1087,10 +1088,15 @@ def _world_factory(make_fake, briefs=None, outcome=None, screens=None, maps=None
 
 
 def _open_world(reg, sid="s1", situation=_SITUATION, now=NOW):
-    """Cold start through the front door with free text; returns the forged opening say data."""
+    """Cold start through the front door with free text; returns the forged opening say data.
+    The default fake maps high-confidence/decision, so the honest-fit beat never intervenes and
+    the very next beat is THE CONFIRM BEAT (Spec-3 P1 §4a) — answer it affirmatively so this
+    helper still returns the forged opening, not the confirm ask."""
     tag, data = reg.start(sid, now=now)
     assert tag == "say" and data.get("frontdoor"), (tag, data)
     tag, data = reg.step(sid, situation)
+    assert tag == "say", (tag, data)
+    tag, data = reg.step(sid, "yes")  # she agrees this is the decision — nothing forged before this
     assert tag == "say", (tag, data)
     return data
 
@@ -1131,6 +1137,8 @@ def test_topic_intake_gets_the_conversion_beat_then_a_decision_proceeds(tmp_path
     assert tag == "say"
     assert "what's the next call" in data["text"]  # the authored conversion served
     tag, data = reg.step("s1", "I must decide whether to gate signup behind SSO by Friday")
+    assert tag == "say" and data["text"] != _SCENARIO  # the confirm beat rides first, not yet
+    tag, data = reg.step("s1", "yes")  # the confirm beat: she agrees this is the decision
     assert tag == "say" and data["text"] == _SCENARIO  # re-mapped as decision -> forged
     store = SittingStore(db)
     assert store.read_world(store.live_sitting()["id"]).startswith("I must decide")
@@ -1155,7 +1163,8 @@ def test_second_topic_falls_through_to_the_honest_fit_beat(tmp_path, make_fake):
     tag, data = reg.step("s1", "another question, still not a decision")
     desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
     assert data["text"] == _HONEST_FIT.format(desc=desc)  # fit beat, NOT a second conversion
-    tag, data = reg.step("s1", "fine, start there")
+    tag, data = reg.step("s1", "fine, start there")  # proceeds with the mapped territory
+    tag, data = reg.step("s1", "yes")  # the confirm beat: she agrees before it forges
     assert tag == "say" and data["text"] == _SCENARIO  # consent proceeds as today
 
 
@@ -1245,6 +1254,7 @@ def test_conversion_screen_failure_serves_the_static_and_never_deflects(tmp_path
     assert data["text"] == _STATIC_CONVERSION
     assert "out of scope" not in _STATIC_CONVERSION.lower()
     tag, data = reg.step("s1", "the call I face is X vs Y")
+    tag, data = reg.step("s1", "yes")  # the confirm beat: she agrees before it forges
     assert data["text"] == _SCENARIO  # the beat converted; the reply proceeded
 
 
@@ -1385,6 +1395,10 @@ def test_honest_fit_copy_rotates_across_serves(tmp_path, make_fake):
     reg.start("s1", now=NOW)
     tag, first = reg.step("s1", _SITUATION)
     assert "doors first?" in first["text"]  # parked at the fit beat
+    tag, data = reg.step("s1", "start there")  # proceeds with the mapped territory
+    assert tag == "say"  # the confirm beat
+    tag, data = reg.step("s1", "yes")  # she agrees before it forges
+    assert tag == "say"
     tag, _ = _drive(reg, "s1", opening="consent, and then a position")
     assert tag == "done"  # segment 1 converged
     assert reg.continue_session("s1", menu=True)[0] == "say"  # back through the front door
@@ -1409,6 +1423,10 @@ def test_front_door_free_text_forges_the_world_end_to_end(tmp_path, make_fake):
     assert data.get("theme")  # phase-1 persona theme rides the cold beat
 
     tag, data = reg.step("s1", _SITUATION)
+    assert tag == "say"
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    assert data["text"] == _CONFIRM_COPY.format(desc=desc)  # nothing forged until she agrees
+    tag, data = reg.step("s1", "yes")
     assert tag == "say" and data["text"] == _SCENARIO  # the forged scenario IS the opening (M6)
     assert data.get("bridge") == "[reflect]"  # the screened heard-you reflection (D9)
 
@@ -1430,11 +1448,14 @@ def test_front_door_free_text_forges_the_world_end_to_end(tmp_path, make_fake):
 
     turns = store.turns(sit)
     kinds = [t["kind"] for t in turns]
-    assert kinds[:4] == ["vera", "you", "bridge", "vera"]  # ask, her text, bridge, opening
+    # ask, her text, the confirm beat, her agreement, bridge, opening
+    assert kinds[:6] == ["vera", "you", "vera", "you", "bridge", "vera"]
     assert turns[0]["payload"]["text"] == _FRONTDOOR_ASK
     assert turns[1]["payload"]["text"] == _SITUATION
-    assert turns[2]["payload"]["text"] == "[reflect]"
-    assert turns[3]["payload"]["text"] == _SCENARIO
+    assert turns[2]["payload"]["text"] == _CONFIRM_COPY.format(desc=desc)
+    assert turns[3]["payload"]["text"] == "yes"
+    assert turns[4]["payload"]["text"] == "[reflect]"
+    assert turns[5]["payload"]["text"] == _SCENARIO
     import json as _json
 
     assert "gen:" not in _json.dumps([t["payload"] for t in turns])  # L-13 on the durable mirror
@@ -1477,7 +1498,9 @@ def test_front_door_low_confidence_honest_fit_then_text_proceeds(tmp_path, make_
     assert tag == "say"
     desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
     assert data["text"] == _HONEST_FIT.format(desc=desc)  # the pinned copy, verbatim
-    tag, data = reg.step("s1", "yes — start there")
+    tag, data = reg.step("s1", "yes — start there")  # proceeds with the MAPPED territory
+    assert tag == "say" and data["text"] == _CONFIRM_COPY.format(desc=desc)  # then confirm
+    tag, data = reg.step("s1", "yes")  # the confirm beat: she agrees before it forges
     assert tag == "say" and data["text"] == _SCENARIO  # proceeds with the MAPPED territory
     assert data.get("bridge") == "[reflect]"
     store = SittingStore(db)
@@ -1518,6 +1541,8 @@ def test_resume_parked_at_honest_fit_reserves_the_honest_fit_question(tmp_path, 
     )  # the block owns the question; the trailing transcript turn deduped
 
     tag, data = reg.step("s1", "yes — start there")  # consent semantics unchanged
+    assert tag == "say" and data["text"] == _CONFIRM_COPY.format(desc=desc)  # then confirm
+    tag, data = reg.step("s1", "yes")  # the confirm beat: she agrees before it forges
     assert tag == "say" and data["text"] == _SCENARIO
 
 
@@ -1670,6 +1695,8 @@ def test_resume_mid_front_door_same_process_reserves_the_ask(tmp_path, make_fake
     assert rdata["frontdoor"]["menu"]["nonce"] == nonce  # the SAME pending menu answers it
     # the live loop is intact: her text still forges the world
     tag, data = reg.step("s1", _SITUATION)
+    assert tag == "say"
+    tag, data = reg.step("s1", "yes")  # the confirm beat: she agrees before it forges
     assert tag == "say" and data["text"] == _SCENARIO
 
 
@@ -1703,6 +1730,8 @@ def test_restart_mid_front_door_resumes_honestly_with_the_world(tmp_path, make_f
     assert data["honesty"] == ""  # no segment was lost — the ask is simply re-served
     assert any(t["text"] == _SITUATION for t in data["turns"])  # her words, visible
     tag, data = reg2.step("s1", _SITUATION)  # the live loop works after the restart
+    assert tag == "say"
+    tag, data = reg2.step("s1", "yes")  # the confirm beat: she agrees before it forges
     assert tag == "say" and data["text"] == _SCENARIO
 
 
@@ -1833,6 +1862,8 @@ def test_fallback_rides_the_bridge_and_continue_retries_the_forge(tmp_path, make
     reg = SessionRegistry(db, model_factory=factory)
     reg.start("s1", now=NOW)
     tag, data = reg.step("s1", _SITUATION)
+    assert tag == "say"
+    tag, data = reg.step("s1", "yes")  # the confirm beat: she agrees before it forges
     assert tag == "say" and data["text"] == "[open]"  # the curated base's authored opening
     assert data.get("bridge") == (
         "I'll hold your situation — first, work this one; "
@@ -1959,6 +1990,8 @@ def test_return_visit_line_rides_the_cold_front_door(tmp_path, make_fake):
     # the judgment count grows; the regions clause keeps quoting the frozen village.
     tag, data = reg2.step("s1", _SITUATION)
     assert tag == "say"
+    tag, data = reg2.step("s1", "yes")  # the confirm beat: she agrees before it forges
+    assert tag == "say"
     tag, _ = _drive(reg2, "s1", opening="p2")
     assert tag == "done"
     reg2.close("s1")
@@ -2064,6 +2097,8 @@ def test_heard_you_screen_failure_does_not_leak_the_forge_registry_entry(tmp_pat
     tag, data = reg.start("s1", now=NOW)
     assert tag == "say" and data.get("frontdoor")
     tag, data = reg.step("s1", _SITUATION)
+    assert tag == "say"
+    tag, data = reg.step("s1", "yes")  # the confirm beat: she agrees before it forges
     assert tag == "error"  # the worker died loudly (honest path, unchanged)
     assert forge_registry == {}  # ...and took its registered entry with it
 
@@ -2283,6 +2318,8 @@ def test_forged_flow_never_leaks_gen_refs_on_the_wire(tmp_path, make_fake):
     tag, data = reg.start("s1", now=NOW)
     blobs.append({"text": data["text"], "menu": {"problems": data["menu"]["problems"]}})
     tag, data = reg.step("s1", _SITUATION)
+    blobs.append(data)
+    tag, data = reg.step("s1", "yes")  # the confirm beat: she agrees before it forges
     blobs.append(data)
     tag, data = _drive(reg, "s1", opening="my position")
     blobs.append({"landing": data.get("landing", ""), "next_title": data.get("next_title", "")})

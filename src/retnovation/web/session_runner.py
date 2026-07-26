@@ -151,6 +151,16 @@ _HONEST_FIT_VARIANTS = (
     "doors first?",
 )
 
+# The confirm beat (Spec-3 §4a, copy pinned). Nothing is forged until she agrees this is the
+# decision she is facing. `{desc}` is the mapper's `fit` — the sharpest pressable decision inside
+# HER situation, in her words — egress-screened before it rides (L-13). It names the DECISION,
+# never the frame or the move. It offers the correction explicitly, because the 2026-07-24
+# dogfood proved a correction is otherwise indistinguishable from evasion.
+_CONFIRM_COPY = (
+    "Before I build it — here's the decision I'd put to you: {desc}. "
+    "Is that the one you're facing? Say yes, or tell me what it actually is."
+)
+
 # The static heard-you bridge when the mapper's reflection fails its egress screen (D9).
 _STATIC_BRIDGE = "Understood — stand in it:"
 
@@ -550,6 +560,46 @@ class SessionRegistry:
                         if isinstance(value, int):
                             return forge_selection(eids[value], situation, clicked=True)
                         # any text proceeds with the MAPPED territory (branch kept simple)
+                    # THE CONFIRM BEAT (Spec-3 §4a): nothing is forged unconfirmed. The 2026-07-24
+                    # dogfood forged `proof_before_promise` at HIGH confidence on a go-to-market
+                    # question, and the correction that followed could not be distinguished from
+                    # evasion once the scenario existed. The gate lives HERE — outside the judgment
+                    # loop — so the loop stays sealed (L-5): there is no effort to evade yet.
+                    # Costs no model call: `fit` is already on the TerritoryMap.
+                    corrections = 0
+                    while True:
+                        fit_text = tmap.fit.strip()
+                        if fit_text and voice.egress_safe_reply(model, base, fit_text):
+                            desc = " ".join(fit_text.split()).rstrip(".")
+                        else:
+                            desc = " ".join(load_territory_text(eid).split()).rstrip(".")
+                        ch.frontdoor_pending = _CONFIRM_COPY.format(desc=desc)  # before the put
+                        ch.from_worker.put(("say", {"text": ch.frontdoor_pending}))
+                        value = ch.to_worker.get()
+                        ch.frontdoor_pending = None  # consumed
+                        if value is _ABANDON:
+                            raise _Abandoned()
+                        if isinstance(value, int):
+                            # A door click is its own consent — she picked the problem herself.
+                            return forge_selection(eids[value], situation, clicked=True)
+                        if _is_affirmative(value):
+                            break
+                        # A correction. Re-map on HER words and ask again. Capped: past the cap the
+                        # composer falls through to the mapped territory rather than dead-ending,
+                        # and the doors remain on offer throughout.
+                        corrections += 1
+                        situation = value
+                        if sit is not None:
+                            self._store.write_world(sit, situation, now)
+                        if corrections >= _MAX_CONFIRM_CORRECTIONS:
+                            break
+                        tmap = model.map_territories(situation, territories)
+                        ranked = [e for e in tmap.ranked if e in known] or [
+                            e for e, _ in territories
+                        ]
+                        eid = ranked[0]
+                        ch.mapped_rank = ranked
+                        base = next(e for e in open_exps if e.experience_id == eid)
                     sel = forge_selection(eid, situation)
                     try:
                         if ch.pending_bridge is None:
