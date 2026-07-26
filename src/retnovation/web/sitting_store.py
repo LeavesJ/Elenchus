@@ -21,6 +21,72 @@ from datetime import datetime, timedelta
 
 _UNSET = object()  # write_state sentinel: "leave this column alone"
 
+
+def _backfill_positions(c: sqlite3.Connection) -> int:
+    """Recover `position` for convergences logged before the column existed (Spec-3 §4c).
+
+    The words are in web_sitting_turn; only the link was missing. `log_converged` writes
+    `position` for NEW rows only, so these would have stayed NULL forever.
+
+    The mapping must filter on the landing's own stop_reason. A `landing` turn is appended for
+    EVERY terminal stop, but only `converged` produces a web_converged row — so a naive
+    Nth-landing rule slips on any sitting containing a plateau and writes the wrong words into
+    a memory. Sittings predating the stop_reason payload qualify only when their landing count
+    equals their convergence count; anything else keeps an honest NULL (L-16: never force a
+    verdict the record cannot support).
+
+    L-3: only fills NULLs. Never overwrites, never deletes. Idempotent."""
+    filled = 0
+    sittings = [
+        r[0]
+        for r in c.execute(
+            "SELECT DISTINCT sitting_id FROM web_converged WHERE position IS NULL"
+        ).fetchall()
+    ]
+    for sit in sittings:
+        rows = c.execute(
+            "SELECT rowid, position FROM web_converged WHERE sitting_id = ? "
+            "ORDER BY converged_at, rowid",
+            (sit,),
+        ).fetchall()
+        turns = c.execute(
+            "SELECT seq, kind, payload_json FROM web_sitting_turn WHERE sitting_id = ? "
+            "ORDER BY seq",
+            (sit,),
+        ).fetchall()
+        landings = [(seq, payload) for seq, kind, payload in turns if kind == "landing"]
+        reasons = []
+        for _, payload in landings:
+            try:
+                reasons.append(json.loads(payload).get("stop_reason"))
+            except (ValueError, TypeError):
+                reasons.append(None)
+        if all(reasons) and reasons:
+            chosen = [seq for (seq, _), r in zip(landings, reasons) if r == "converged"]
+        elif len(landings) == len(rows):
+            chosen = [seq for seq, _ in landings]  # legacy: unambiguous only on count equality
+        else:
+            continue  # unknowable — an honest NULL beats a wrong memory
+        if len(chosen) != len(rows):
+            continue
+        you = [(seq, payload) for seq, kind, payload in turns if kind == "you"]
+        for (rowid, existing), land_seq in zip(rows, chosen):
+            if existing is not None:
+                continue  # L-3: never overwrite
+            prior = [p for seq, p in you if seq < land_seq]
+            if not prior:
+                continue
+            try:
+                text = json.loads(prior[-1]).get("text")
+            except (ValueError, TypeError):
+                continue
+            if not text:
+                continue
+            c.execute("UPDATE web_converged SET position = ? WHERE rowid = ?", (text, rowid))
+            filled += 1
+    return filled
+
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS web_sitting (
   id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -101,6 +167,11 @@ class SittingStore:
                     c.execute("ALTER TABLE web_converged ADD COLUMN position TEXT")
                 except sqlite3.OperationalError:
                     pass
+                # Recover the words for convergences that predate the column (Spec-3 §4c).
+                # Runs at migration time like the landed_at backfill above — otherwise the fix
+                # is inert on an existing db until a fresh landing, and these rows would never
+                # get one. Guarded by `position IS NULL`, so it is a no-op on every later open.
+                _backfill_positions(c)
         except sqlite3.OperationalError:
             # An unopenable path must not crash the registry at construction — the WORKER surfaces
             # the db error per-session (its build_store fails the same way and emits `error`).
