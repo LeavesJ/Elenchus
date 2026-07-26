@@ -11,7 +11,14 @@ static. These guards are the arithmetic, pinned."""
 import re
 from pathlib import Path
 
+# _js_fn / _strip_comments are imported, never re-implemented: a second copy of the
+# comment-stripper is a second place for a guard to silently stop guarding. The bare module name
+# (not `tests.`) is what resolves here — `tests/` is not a package (no __init__.py), and pytest's
+# default prepend import mode puts the conftest's own directory on sys.path.
+from test_renderer_pipeline_static import _js_fn, _strip_comments
+
 TERRAIN = Path("src/retnovation/web/static/terrain3d.js")
+CEREMONIES = Path("src/retnovation/web/static/ceremonies.js")
 
 # --- the render pipeline, replicated exactly enough to assert on (see test_renderer_pipeline_static
 # for why: three r128 has no ColorManagement, so authored hexes are decoded by srgb() at build
@@ -107,4 +114,120 @@ def test_earned_outshines_unearned_by_at_least_three_to_one():
     assert ratio >= 3.0, (
         f"earned-vs-unearned is {ratio:.3f}:1, below the 3:1 floor — one memory must not read "
         f"as the same thing as no memory"
+    )
+
+
+def test_the_ember_is_a_group_whose_core_is_what_ceremonies_animate():
+    # ceremonies.js calls mesh.material.clone() and mutates emissiveIntensity in place. A Group
+    # has no .material, so handing it the group would throw at the first landing. The core mesh
+    # is also the RIGHT thing to animate: the cascade should kindle the flame, not inflate stone.
+    s = _strip_comments(_src())
+    assert "function emberFor(" in s, "the ember must be built through one seam"
+    body = _js_fn(s, "emberFor")
+    assert "THREE.Group" in body, "the ember is a group: plinth + ribs + core"
+    assert re.search(r"return\s*\{[^}]*\bcore\b", body), (
+        "emberFor must return its core mesh separately — that is what monoMesh binds to"
+    )
+    assert "monoMesh: " in s or "monoMesh =" in s
+
+
+def test_the_ember_group_is_the_pick_target_and_carries_the_house_index():
+    # The raycast walks up parents for userData.houseIndex, so stamping it on the GROUP makes
+    # every part of the ember clickable — stone included, not just the bright core.
+    s = _strip_comments(_src())
+    assert re.search(r"\.userData\.houseIndex\s*=", s)
+    assert "clickableMonoliths.push(" in s
+
+
+def test_the_ember_core_is_the_only_emissive_part():
+    # Structure is unlit; the earning is the light. If the plinth or ribs were emissive the
+    # object would read as a glowing lump rather than a vessel holding something.
+    s = _strip_comments(_src())
+    body = _js_fn(s, "emberFor")
+    assert body.count("emissive:") == 1, (
+        "exactly one part of the ember may be emissive — the core. Lighting the stone destroys "
+        "the read of a container with something inside it"
+    )
+
+
+def test_the_ember_stands_on_the_surface_instead_of_floating_half_its_height_above_it():
+    # A BoxGeometry mesh is centred on its own origin, which is the only reason both build sites
+    # used to position at `top + height/2`. The ember GROUP's origin is its BASE — every child
+    # sits at a positive local y — so carrying that arithmetic over launches every ember into
+    # the air. Both sites must place the group ON the surface it stands on.
+    s = _strip_comments(_src())
+    assert re.search(r"\.group\.position\.set\(\s*wx\s*,\s*facetTopY\s*,\s*wz\s*\)", s), (
+        "the isle ember's group must sit AT facetTopY — its origin is its base, not its centre"
+    )
+    assert re.search(r"\.group\.position\.set\(\s*sx\s*,\s*SEED_TOP_Y\s*,\s*sz\s*\)", s), (
+        "the seed ember's group must sit AT SEED_TOP_Y (scaling the group keeps the base put)"
+    )
+    assert re.search(r"\.group\.scale\.setScalar\(\s*SEED_SCALE\s*\)", s), (
+        "SEED_SCALE must ride the whole ember — scaling only the core would shrink the flame and "
+        "leave the stone full size"
+    )
+    assert "monoH" not in s, (
+        "the retired box height must be gone from both build sites — a surviving `+ monoH / 2` "
+        "is exactly the half-height float this guard exists to catch"
+    )
+
+
+def test_the_arrival_thread_attaches_to_the_embers_real_tip():
+    # tipByHouse feeds the per-isle arrival thread — the line that says these memories belong to
+    # one another. It used to record the BOX's top (facetTopY + monoH, 2.6 units up at bucket 2);
+    # the ember's top is under 0.9, so leaving it alone strands every thread ~1.8 units above the
+    # embers it joins. The replacement is derived from the SAME constants emberFor builds with,
+    # never a copied literal, so the thread cannot drift when the geometry moves.
+    s = _strip_comments(_src())
+    assert "function emberTipY(" in s, "the ember's tip must be one named, derived seam"
+    tip = _js_fn(s, "emberTipY")
+    assert "EMBER_CORE_Y" in tip and "EMBER_CORE_R" in tip and "bucket" in tip, (
+        "emberTipY must derive from the named core geometry, not restate a literal"
+    )
+    body = _js_fn(s, "emberFor")
+    assert "EMBER_CORE_Y" in body and "EMBER_CORE_R" in body, (
+        "emberFor must BUILD from the same constants emberTipY reads — two copies of 0.56 drift "
+        "apart the first time anyone resizes the core"
+    )
+    m = re.search(r"tipByHouse\[[^\]]+\]\s*=\s*\{[^}]*y:\s*([^,}]+)", s)
+    assert m and "emberTipY(" in m.group(1), (
+        f"the thread's attach point must be emberTipY(bucket) above the facet top, got "
+        f"{m.group(1).strip() if m else 'no tipByHouse assignment'}"
+    )
+    # The arithmetic, not merely the names. Bucket 3 is the wire's maximum (types._vitality_bucket),
+    # so this is the tallest ember that can exist. Measured against the vendored r128, the built
+    # group's bounding box tops out at exactly this value — IcosahedronGeometry(r, 0) is a
+    # polyhedron, so its highest VERTEX is EMBER_CORE_POLE * r above the centre, never r.
+    tip3 = _num("EMBER_CORE_Y", s) + _num("EMBER_CORE_POLE", s) * (
+        _num("EMBER_CORE_R", s) + _num("EMBER_CORE_R_STEP", s) * 3
+    )
+    assert 0.56 < tip3 < 1.0, (
+        f"the tallest ember's tip derives to {tip3:.3f}, outside its own body — the ribs top out "
+        f"at 0.553 and the whole object stands under a unit tall. The retired box reached 3.1 at "
+        f"this bucket, and a thread still pinned up there floats over the memories it joins"
+    )
+
+
+def test_vera_arrives_over_the_embers_world_height_not_its_local_offset():
+    # ceremonies.js:isleArrivalPoint puts Vera "just above the tallest monolith tip she's
+    # visiting", on BOTH ceremony paths. `.position` is always LOCAL, and monoMesh is now the
+    # core nested inside the ember group, so it reads 0.56 instead of the isle's real 10-17 —
+    # she would descend to sea level during the coming-home cascade, and nothing would throw to
+    # say so. World space is a requirement of the nesting, not a preference.
+    c = _strip_comments(CEREMONIES.read_text())
+    body = _js_fn(c, "isleArrivalPoint")
+    assert "getWorldPosition(" in body, (
+        "isleArrivalPoint must read the mesh's WORLD position — a nested core's .position.y is "
+        "a local offset, and reading it silently drops Vera to sea level"
+    )
+    assert not re.search(r"monoMesh\.position\.y", body), (
+        "no local .position.y read may survive in isleArrivalPoint"
+    )
+    assert re.search(r"var\s+_arrivalScratch\s*=\s*null", c), (
+        "the world-position scratch vector must be module-scope and lazily allocated (THREE may "
+        "be absent entirely — this module degrades rather than throwing at load)"
+    )
+    loop = body[body.index("for (") :]
+    assert "new " not in loop, (
+        "isleArrivalPoint runs per house on every ceremony — no allocation inside its loop"
     )

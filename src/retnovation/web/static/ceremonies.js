@@ -156,14 +156,25 @@ window.WXCeremony = (function () {
     return overlay;
   }
 
+  // one reused scratch vector for the world-space read below — allocated lazily, because THREE may
+  // be absent entirely (this module degrades rather than throwing at load), and never per house.
+  var _arrivalScratch = null;
+
   // where Vera arrives for a given set of houses on an isle: its center, hovering just above the
   // tallest monolith tip among them (their FINAL resting y — the hidden-state step never touches
   // position, only scale, so this is already the real value even mid-ceremony-setup).
+  // WORLD space, and it must stay world space: terrain3d.js's held ember NESTS monoMesh (the
+  // glowing core) inside a group standing on the facet top, so `.position` — always local — now
+  // reads 0.56 instead of the isle's real 10-17. Reading it directly would drop Vera to just above
+  // the sea for the whole coming-home cascade, and nothing would throw to say so.
   function isleArrivalPoint(isle, houseIndices, handles) {
     var maxY = null;
+    if (!_arrivalScratch && window.THREE) _arrivalScratch = new window.THREE.Vector3();
     for (var i = 0; i < houseIndices.length; i++) {
       var hh = handles.houses[houseIndices[i]];
-      if (hh && hh.monoMesh && (maxY === null || hh.monoMesh.position.y > maxY)) maxY = hh.monoMesh.position.y;
+      if (!hh || !hh.monoMesh || !_arrivalScratch) continue;
+      var wy = hh.monoMesh.getWorldPosition(_arrivalScratch).y;
+      if (maxY === null || wy > maxY) maxY = wy;
     }
     if (maxY === null) maxY = 0;
     return { x: isle.center.x, y: maxY + VERA_HOVER, z: isle.center.z };

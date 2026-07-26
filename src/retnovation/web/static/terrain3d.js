@@ -361,23 +361,76 @@ window.Terrain3D = (function () {
     var FACET_FR = 1.35;               // facet dome radius (binding)
     var GHOST_R = FACET_FR;            // the ghost outline reads as a facet-sized invitation
 
-    var facetGeomCache = {}, monoGeomCache = {}, monoMatCache = {};
+    var facetGeomCache = {};
     function facetGeomFor(sides) {
       if (!facetGeomCache[sides]) facetGeomCache[sides] = new THREE.CylinderGeometry(FACET_FR, FACET_FR * 1.08, 0.9, sides);
       return facetGeomCache[sides];
     }
-    function monoGeomFor(bucket) {
-      if (!monoGeomCache[bucket]) monoGeomCache[bucket] = new THREE.BoxGeometry(0.32, 1.6 + 0.5 * bucket, 0.32);
-      return monoGeomCache[bucket];
+
+    // The ember's core geometry, named once because TWO sites read it: emberFor() BUILDS the core
+    // from these, and emberTipY() derives where the arrival thread attaches. A literal copied into
+    // the second site strands every thread in mid-air the moment the first one is retuned.
+    var EMBER_CORE_Y = 0.56;       // core centre, LOCAL to the ember group (whose origin is its BASE)
+    var EMBER_CORE_R = 0.20;       // core radius at bucket 0
+    var EMBER_CORE_R_STEP = 0.035; // per vitality bucket (the wire's buckets run 0..3)
+    // IcosahedronGeometry(r, 0) is a POLYHEDRON, so its highest VERTEX sits at t/sqrt(1+t*t) * r
+    // for the golden ratio t — not at r. Measured against the vendored r128: a bucket-0 core
+    // tops out at 0.730, not 0.760.
+    var EMBER_CORE_POLE = 0.8507;
+    // Where a thread touches an ember: the CORE's top, not the stone's. Each rib is a torus laid
+    // FLAT by rotation.x = PI/2, so its 0.30 ring radius spreads sideways and the arc reaches only
+    // 0.52 + 0.035 (the tube) = 0.553 measured — while the core runs 0.730 (bucket 0) to 0.819
+    // (bucket 3, the wire's maximum). This is a seam because the isle thread and the ember body
+    // must agree; they cannot each keep their own copy of the number.
+    function emberTipY(bucket) {
+      return EMBER_CORE_Y + EMBER_CORE_POLE * (EMBER_CORE_R + EMBER_CORE_R_STEP * bucket);
     }
-    function monoMatFor(bucket) {
-      // warm glow family only: color/emissive always DUSK_BAND[9] (the doorway's warm hue); only
-      // intensity moves with bucket — bucket null->0 still reads as a dim ember, never grey.
-      if (!monoMatCache[bucket]) monoMatCache[bucket] = new THREE.MeshStandardMaterial({
-        color: srgb(DUSK_BAND[9]), emissive: srgb(DUSK_BAND[9]), emissiveIntensity: 0.6 + 0.5 * bucket,
-        flatShading: true, roughness: 0.55,
+
+    var emberGeomCache = {}, emberMatCache = {};
+    var STONE_MAT = null;
+
+    function emberStone() {
+      // Structure, deliberately UNLIT: DUSK_BAND[7] is the jetty/post stone. Shared across every
+      // ember (one material, many meshes) — the stone never animates, so nothing clones it.
+      if (!STONE_MAT) STONE_MAT = new THREE.MeshStandardMaterial({
+        color: srgb(DUSK_BAND[7]), flatShading: true, roughness: 0.95,
       });
-      return monoMatCache[bucket];
+      return STONE_MAT;
+    }
+
+    function emberFor(bucket) {
+      // A held ember: a stone plinth, three ribs curving up, and a glowing core cradled between
+      // them. The core is returned separately because ceremonies.js binds to it as `monoMesh` —
+      // it calls .material.clone() and mutates emissiveIntensity, which a Group cannot answer.
+      // That is also the better beat: the cascade kindles the flame, it does not inflate stone.
+      // The warm glow family is unchanged: color/emissive always DUSK_BAND[9] (the doorway's warm
+      // hue); only intensity moves with bucket — bucket null->0 still reads dim, never grey.
+      if (!emberGeomCache[bucket]) {
+        emberGeomCache[bucket] = {
+          plinth: new THREE.CylinderGeometry(0.30, 0.38, 0.34, 6),
+          rib: new THREE.TorusGeometry(0.30, 0.035, 5, 10, Math.PI * 0.72),
+          core: new THREE.IcosahedronGeometry(EMBER_CORE_R + EMBER_CORE_R_STEP * bucket, 0),
+        };
+      }
+      if (!emberMatCache[bucket]) emberMatCache[bucket] = new THREE.MeshStandardMaterial({
+        color: srgb(DUSK_BAND[9]), emissive: srgb(DUSK_BAND[9]),
+        emissiveIntensity: 0.6 + 0.5 * bucket, flatShading: true, roughness: 0.45,
+      });
+      var g = emberGeomCache[bucket];
+      var group = new THREE.Group();
+      var plinth = new THREE.Mesh(g.plinth, emberStone());
+      plinth.position.y = 0.17;
+      group.add(plinth);
+      for (var r = 0; r < 3; r++) {
+        var rib = new THREE.Mesh(g.rib, emberStone());
+        rib.position.y = 0.52;
+        rib.rotation.set(Math.PI * 0.5, 0, (r * 2 * Math.PI) / 3);
+        group.add(rib);
+      }
+      var core = new THREE.Mesh(g.core, emberMatCache[bucket]);
+      core.position.y = EMBER_CORE_Y;
+      group.add(core);
+      return { group: group, core: core };
     }
     // the six shared facet materials (isle.slot % 6) — never a per-facet material (draw-call budget)
     var facetMats = [];
@@ -451,17 +504,20 @@ window.Terrain3D = (function () {
           }
 
           var bucket = facet.bucket == null ? 0 : facet.bucket;
-          var monoH = 1.6 + 0.5 * bucket;
           var facetTopY = baseY + 0.9;
-          var monoMesh = new THREE.Mesh(monoGeomFor(bucket), monoMatFor(bucket));
-          monoMesh.position.set(wx, facetTopY + monoH / 2, wz);
-          monoMesh.userData.houseIndex = facet.houseIndex; // the GLOBAL house index (Task 4's raycast target)
-          monoMesh.userData.clusterSlot = cluster.slot;
-          monoMesh.userData.isleSlot = isle.slot;
-          world.add(monoMesh);
-          clickableMonoliths.push(monoMesh);
+          var ember = emberFor(bucket);
+          var monoMesh = ember.core; // ceremonies.js binds here — it must stay a Mesh, never the Group
+          // The GROUP's origin is its BASE (its children sit at local y 0.17/0.52/0.56), so it
+          // stands ON the facet's top face. `facetTopY + h / 2` was BoxGeometry's centred-origin
+          // arithmetic and would now launch every ember half its own height into the air.
+          ember.group.position.set(wx, facetTopY, wz);
+          ember.group.userData.houseIndex = facet.houseIndex; // the GLOBAL house index — the raycast walks up to this
+          ember.group.userData.clusterSlot = cluster.slot;
+          ember.group.userData.isleSlot = isle.slot;
+          world.add(ember.group);
+          clickableMonoliths.push(ember.group); // the whole ember picks, stone included
           litHouses++;
-          tipByHouse[facet.houseIndex] = { x: wx, y: facetTopY + monoH, z: wz };
+          tipByHouse[facet.houseIndex] = { x: wx, y: facetTopY + emberTipY(bucket), z: wz };
           handlesHouses[facet.houseIndex] = {
             facetMesh: facetMesh, ringMesh: ringMeshForHouse, monoMesh: monoMesh,
             clusterSlot: cluster.slot, isleSlot: isle.slot,
@@ -515,15 +571,15 @@ window.Terrain3D = (function () {
         var lap = Math.floor(mk / 6), ang = (mk % 6) * SEED_RING_STEP;
         var ringR = SEED_RING_R * (1 + lap * 0.6);
         var sx = seed.x + Math.cos(ang) * ringR, sz = seed.z + Math.sin(ang) * ringR;
-        var sMonoH = (1.6 + 0.5 * sBucket) * SEED_SCALE;
-        var sMono = new THREE.Mesh(monoGeomFor(sBucket), monoMatFor(sBucket));
-        sMono.scale.setScalar(SEED_SCALE);
-        sMono.position.set(sx, SEED_TOP_Y + sMonoH / 2, sz);
-        sMono.userData.houseIndex = houseIndex; // the GLOBAL house index
-        sMono.userData.clusterSlot = sSlot;
-        sMono.userData.isleSlot = null; // seed-hosted: no isle, per the review-pinned shape
-        world.add(sMono);
-        clickableMonoliths.push(sMono);
+        var sEmber = emberFor(sBucket);
+        var sMono = sEmber.core; // ceremonies.js binds here — it must stay a Mesh, never the Group
+        sEmber.group.scale.setScalar(SEED_SCALE); // the SEED_SCALE now rides the whole ember
+        sEmber.group.position.set(sx, SEED_TOP_Y, sz); // origin is the base, so scaling keeps it planted
+        sEmber.group.userData.houseIndex = houseIndex; // the GLOBAL house index
+        sEmber.group.userData.clusterSlot = sSlot;
+        sEmber.group.userData.isleSlot = null; // seed-hosted: no isle, per the review-pinned shape
+        world.add(sEmber.group);
+        clickableMonoliths.push(sEmber.group); // the whole ember picks, stone included
         litHouses++;
         handlesHouses[houseIndex] = {
           facetMesh: null, ringMesh: null, monoMesh: sMono, clusterSlot: sSlot, isleSlot: null,
