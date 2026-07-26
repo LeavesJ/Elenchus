@@ -164,10 +164,12 @@ window.Terrain3D = (function () {
       return t;
     }
     function radial(st) {
-      var c = document.createElement("canvas"); c.width = c.height = 128;
-      var g = c.getContext("2d"), gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+      // 256 rather than 128 (P0 T8): the sun-glow stretches this to 130 world units, where a
+      // 128px falloff quantises into a visible disc edge instead of reading as atmosphere.
+      var c = document.createElement("canvas"); c.width = c.height = 256;
+      var g = c.getContext("2d"), gr = g.createRadialGradient(128, 128, 0, 128, 128, 128);
       for (var i = 0; i < st.length; i++) gr.addColorStop(st[i][0], st[i][1]);
-      g.fillStyle = gr; g.fillRect(0, 0, 128, 128); return canvasTex(c);
+      g.fillStyle = gr; g.fillRect(0, 0, 256, 256); return canvasTex(c);
     }
     var warmTex = radial([[0, rgba(255, 205, 140, 0.9)], [0.5, rgbaHex(DUSK_BAND[8], 0.35)], [1, rgbaHex(DUSK_BAND[8], 0)]]);
     var cloudTex = radial([[0, rgbaHex(DUSK_BAND[11], 0.55)], [0.6, rgbaHex(DUSK_BAND[11], 0.22)], [1, rgbaHex(DUSK_BAND[11], 0)]]);
@@ -197,7 +199,10 @@ window.Terrain3D = (function () {
     // frame and its authored warm amber would otherwise be replaced outright by the fog colour
     // before the additive blend. The OTHER sprite(warmTex, ...) call below (the dock lamp halo)
     // stays fogged on purpose: it sits close to the camera and is legitimately world content.
-    sprite(warmTex, 130, -210, 10, -300, 0.4).material.fog = false;
+    // Opacity 0.4 -> 0.15 (P0 T8): this is an ADDITIVE sprite, so its contribution is fixed
+    // while the sky behind it fell by up to 6.5x when the decode was corrected. What read as
+    // atmospheric scattering against a pale mauve sky reads as a glaring disc against true dusk.
+    sprite(warmTex, 130, -210, 10, -300, 0.15).material.fog = false;
 
     // stars — kept from the prior valley scene, unchanged in spirit. Backdrop per this file's own
     // doctrine ("sky stays outside the world group's sway (Spec-2 §3: 'everything but sky/stars')"),
