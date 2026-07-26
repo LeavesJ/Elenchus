@@ -139,9 +139,14 @@ window.Terrain3D = (function () {
     // so lit rock came out roughly an order of magnitude down and lost its form to black.
     // Raising intensity is the right lever, not exposure: exposure is global and would re-brighten
     // the unlit sky sphere, undoing the value floor the decode just bought.
-    scene.add(new THREE.HemisphereLight(srgb(DUSK_BAND[2]), srgb(DUSK_BAND[6]), 1.15));
-    scene.add(new THREE.AmbientLight(srgb(DUSK_BAND[1]), 0.55));
-    var duskLight = new THREE.DirectionalLight(srgb(DUSK_BAND[3]), 1.30);
+    // KEY must exceed FILL or the form stays flat at any brightness. The first re-light scaled
+    // all three by the same x3.4, which fixed the darkness and preserved the flatness: key/fill
+    // stayed at 0.76, exactly where it was when the pipeline was broken. Omnidirectional light
+    // fills the very shadows that flat-shaded facets need in order to read as facets, so the
+    // isles came out as dull uniform masses. Now key/fill = 2.32.
+    scene.add(new THREE.HemisphereLight(srgb(DUSK_BAND[2]), srgb(DUSK_BAND[6]), 0.70));
+    scene.add(new THREE.AmbientLight(srgb(DUSK_BAND[1]), 0.25));
+    var duskLight = new THREE.DirectionalLight(srgb(DUSK_BAND[3]), 2.20);
     duskLight.position.set(-42, 52, -26); scene.add(duskLight);
     var world = new THREE.Group(); scene.add(world); // idle sway applies to this group only
 
@@ -626,7 +631,18 @@ window.Terrain3D = (function () {
       if (THREE.EffectComposer && THREE.RenderPass && THREE.UnrealBloomPass) {
         composer = new THREE.EffectComposer(renderer);
         composer.addPass(new THREE.RenderPass(scene, camera));
-        var bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(W, H), 0.55, 0.5, 0.62); // lowkey bloom
+        // radius 0.5 was the DEGENERATE value: UnrealBloomPass weights each mip by
+        // mix(factor, 1.2 - factor, radius), which at exactly 0.5 collapses to a constant 0.6 for
+        // all five mips regardless of factor — the mip weighting is discarded and bloom becomes
+        // flat haze with no bright core. Low radius favours the tight mips (a concentrated core),
+        // high radius the wide ones (a diffuse halo); 0.32 gives a core with a modest halo.
+        //
+        // threshold 0.62 -> 0.46 because 0.62 sat ABOVE the entry-level reward. A bucket-1
+        // monolith — ONE convergence, the first memory on every isle and the most common one
+        // anyone holds — tone-maps to luma 0.540 and so never crossed it. Only 2+ convergences
+        // glowed, i.e. the reward vocabulary excluded the first reward. 0.46 clears bucket 1
+        // while still sitting well above the lit rock, so structure does not bloom.
+        var bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(W, H), 0.55, 0.32, 0.46);
         // RenderPass already tone-mapped into the composer buffer; this pass blits that buffer to
         // screen through a MeshBasicMaterial, whose shader tone-maps AGAIN. Two ACES passes crush
         // chroma at the bright end (sun-glow 23->13, horizon 19->11). Recovers colour, NOT
