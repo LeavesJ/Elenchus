@@ -131,9 +131,17 @@ window.Terrain3D = (function () {
     var az = 0.9, pol = 1.05, rad = HOME_RAD, dragging = false, lx = 0, ly = 0;
     var introActive = true, INTRO = 2.0; // reveal beat: fly-in as the camera arrives
 
-    scene.add(new THREE.HemisphereLight(srgb(DUSK_BAND[2]), srgb(DUSK_BAND[6]), 0.34));
-    scene.add(new THREE.AmbientLight(srgb(DUSK_BAND[1]), 0.16));
-    var duskLight = new THREE.DirectionalLight(srgb(DUSK_BAND[3]), 0.38);
+    // Intensities re-tuned for the CORRECTED decode (P0 T8, founder-gated). The old values
+    // (0.34 / 0.16 / 0.38) were chosen against the broken pipeline, where authored hexes were
+    // consumed as linear and everything rendered 4-9x too bright. Fixing the decode darkened the
+    // world TWICE over: material albedo fell 4.2-9.5x AND these lights' own colours fell
+    // 1.7-8.9x (a light colour is an authored hex too). Reflected light is albedo x irradiance,
+    // so lit rock came out roughly an order of magnitude down and lost its form to black.
+    // Raising intensity is the right lever, not exposure: exposure is global and would re-brighten
+    // the unlit sky sphere, undoing the value floor the decode just bought.
+    scene.add(new THREE.HemisphereLight(srgb(DUSK_BAND[2]), srgb(DUSK_BAND[6]), 1.15));
+    scene.add(new THREE.AmbientLight(srgb(DUSK_BAND[1]), 0.55));
+    var duskLight = new THREE.DirectionalLight(srgb(DUSK_BAND[3]), 1.30);
     duskLight.position.set(-42, 52, -26); scene.add(duskLight);
     var world = new THREE.Group(); scene.add(world); // idle sway applies to this group only
 
