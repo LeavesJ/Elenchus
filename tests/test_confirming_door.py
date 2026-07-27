@@ -28,10 +28,98 @@ def test_a_correction_is_not_affirmative():
 
 
 def test_a_substantive_reply_is_not_affirmative():
-    # Anything with real content is a correction or a position, never a bare yes. Erring here
-    # costs one re-map; erring the other way forges an unagreed scenario.
+    # A reply that TURNS is a correction or a position, never a yes. Erring here costs one re-map;
+    # erring the other way forges an unagreed scenario.
     assert not _is_affirmative("yes but the real problem is the co-founder equity split")
     assert not _is_affirmative("I need to decide whether to sign by Friday")
+
+
+def test_an_agreement_that_restates_the_question_is_still_agreement():
+    # THE 2026-07-27 DOGFOOD, verbatim. The beat had his decision exactly right ("whether to
+    # commit to launching the idea with your friend or take one of the internship or full-time
+    # offers"). He answered this. The bare-only rule read it as a CORRECTION, so the correction
+    # branch overwrote his situation WITH THIS SENTENCE (session_runner.py: `situation = value`,
+    # then write_world), re-mapped territories on a string carrying no situation at all, and
+    # forged a curated scenario about pricing an analytics tier. His real decision was destroyed
+    # by his own agreement. Proven on his live db: web_world for the open sitting reads exactly
+    # 'Yes, this is the decision I want to make.'
+    assert _is_affirmative("Yes, this is the decision I want to make.")
+
+
+def test_an_affirmative_lead_is_agreement_even_when_it_carries_words():
+    # Leading with agreement cannot forge something unagreed — he said yes. The worst case is that
+    # an elaboration is not folded in, which leaves his ORIGINAL situation standing. That is
+    # strictly smaller harm than replacing it with a sentence that names no situation.
+    for t in [
+        "yes this is it",
+        "Yeah, that's the one.",
+        "correct, that is the decision I'm facing",
+        "yep exactly that",
+        "Sure, go ahead and build it.",
+        "that's right, that's what I'm deciding",
+    ]:
+        assert _is_affirmative(t), t
+
+
+def test_a_yes_that_turns_is_still_a_correction():
+    # The safety property the bare-only rule existed to protect, kept. A yes followed by a pivot
+    # carries new material the forge must map, so it must NOT short-circuit to agreement.
+    for t in [
+        "yes but the real problem is the co-founder equity split",
+        "yeah, actually it's about pricing",
+        "yes, although the real decision is whether to hire",
+        "sure, except it's really about the co-founder",
+        "ok but instead I want to talk about the internship",
+        "right, however what I actually face is the funding round",
+        "yes, not that one — the other offer",
+    ]:
+        assert not _is_affirmative(t), t
+
+
+def test_an_ambiguous_opener_is_not_treated_as_a_lead():
+    # The beat asks "say yes, or tell me what it actually is", so a reply that OPENS with a word
+    # which is only sometimes agreement is answering the second half. "right now ..." and "go
+    # with ..." are situations, not consent, and reading them as yes would forge the PREVIOUS
+    # mapping — the very thing this gate exists to prevent. Those words stay valid as a whole
+    # bare reply ("right", "go"); they are just not allowed to LEAD a longer sentence.
+    for t in [
+        "right now I'm deciding between the internship and the startup",
+        "go with the internship offer I think",
+        "continue building the thing with my friend",
+        "proceed to the equity question instead of this one",
+    ]:
+        assert not _is_affirmative(t), t
+    for t in ["right", "go", "continue", "proceed"]:
+        assert _is_affirmative(t), t
+
+
+def test_an_agreement_opener_that_reverses_on_its_last_word_is_a_correction():
+    # "you got it wrong" opens with an agreement phrase and negates it at the end. A lead check
+    # that only looked at the opener would read this as consent and forge the mapping he was
+    # rejecting — a false yes, the one direction this gate must never fail in.
+    for t in [
+        "you got it wrong",
+        "absolutely not",
+        "definitely not that one",
+        "precisely the opposite",
+        "yes, you misunderstood me",
+        "sure, nevermind that",
+    ]:
+        assert not _is_affirmative(t), t
+
+
+def test_the_other_common_ways_of_saying_yes():
+    # Each opener missing from the lead set does not merely cost a re-map — it REPLACES the
+    # learner's situation with the sentence they agreed in. These are pinned for that reason.
+    for t in [
+        "you got it",
+        "absolutely, that is the decision",
+        "precisely that",
+        "that is the one",
+        "this is it, exactly",
+        "confirmed, build it",
+    ]:
+        assert _is_affirmative(t), t
 
 
 def test_empty_and_whitespace_are_not_affirmative():
@@ -61,6 +149,34 @@ def _fn(src: str, name: str) -> str:
 def _strip_comments(src: str) -> str:
     """A guard a commented-out fix can still pass is not a guard."""
     return re.sub(r"^\s*#[^\n]*$", "", src, flags=re.M)
+
+
+def test_agreement_never_rewrites_the_world():
+    """The 2026-07-27 failure was not the predicate alone — it was what the correction branch does.
+
+    `situation = value` followed by `write_world` REPLACES the learner's stated situation with
+    whatever they just typed. That is right for a real correction and catastrophic for a
+    misread agreement: on his live db, `web_world` for the open sitting ended up holding the
+    literal string 'Yes, this is the decision I want to make.', his actual decision gone, and the
+    forge then built a curated pricing scenario off a sentence naming no situation at all.
+
+    So the ordering is load-bearing: the affirmative check must `break` BEFORE anything assigns to
+    `situation`. Nothing downstream can recover a world that has already been overwritten.
+    """
+    body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
+    i = body.index("_is_affirmative(")
+    assign = re.search(r"^\s*situation = value\s*$", body[i:], flags=re.M)
+    assert assign, "the correction branch must still be readable as `situation = value`"
+    between = body[i : i + assign.start()]
+    assert re.search(r"^\s*break\s*$", between, flags=re.M), (
+        "the affirmative check must break out of the confirm loop BEFORE `situation = value`. "
+        "Agreement that falls through to the correction branch overwrites the learner's stated "
+        "situation with the sentence they agreed in, and the forge then builds from nothing."
+    )
+    world_at = body.find("write_world", i)
+    assert world_at > i + assign.start(), (
+        "write_world must persist only a real correction, never an agreement"
+    )
 
 
 def test_confirm_beat_precedes_the_forge():
