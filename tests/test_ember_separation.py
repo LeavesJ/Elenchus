@@ -149,6 +149,14 @@ def test_the_ember_core_is_the_only_emissive_part():
         "exactly one part of the ember may be emissive — the core. Lighting the stone destroys "
         "the read of a container with something inside it"
     )
+    # The stone's material is built in its own function, OUTSIDE emberFor's body, so the count
+    # above cannot see it. Without this second half, lighting the plinth and ribs — the exact
+    # mutation that is supposed to be caught here — walks straight past the guard.
+    stone = _js_fn(s, "emberStone")
+    assert "emissive" not in stone, (
+        "the ember's stone is STRUCTURE and must stay unlit — emissive stone turns the vessel "
+        f"back into a glowing lump. Found in emberStone: {stone.strip()[:120]}"
+    )
 
 
 def test_the_ember_stands_on_the_surface_instead_of_floating_half_its_height_above_it():
