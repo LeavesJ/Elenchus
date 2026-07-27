@@ -65,23 +65,19 @@ window.WXCeremony = (function () {
   }
 
   // ---- beat builders: each returns {start, dur, run(easedProgress), after?} -------------------
-  function beatFacetBloom(mesh, start, dur) {
+  // ONE swell, three call sites: a facet blooming and an ember kindling are the same motion —
+  // hidden at 0.01, growing to the mesh's OWN built rest scale (restScalar, so a seed ember still
+  // lands on its SEED_SCALE). The monolith used to own a second beat that also ROSE: a BoxGeometry
+  // slab started flush with the facet's top face and pushed up out of it, which read right for
+  // stone emerging from stone. That is wrong for the held ember — the core is cradled inside a
+  // plinth and ribs, so lifting it would drag the flame up through its own vessel — and it had in
+  // fact already stopped happening, silently: IcosahedronGeometry carries no `.parameters.height`,
+  // so the rise arithmetic evaluated to zero while its comment still claimed the movement. The
+  // cascade kindles the flame; it does not inflate stone. Each call site's own argument names
+  // which object is swelling, so the beat does not need two names for one behaviour.
+  function beatSwellToRest(mesh, start, dur) {
     var rest = restScalar(mesh);
     return { start: start, dur: dur, run: function (e) { mesh.scale.setScalar(0.01 + (rest - 0.01) * e); } };
-  }
-
-  function beatMonolithRise(mesh, start, dur) {
-    var rest = restScalar(mesh);
-    var finalY = mesh.position.y; // untouched by the hidden-state step — already the resting value
-    var h = (mesh.geometry && mesh.geometry.parameters && mesh.geometry.parameters.height) || 0;
-    var startY = finalY - (h * rest) / 2; // grounded flush with the facet's top face, at the SCALED height
-    return {
-      start: start, dur: dur,
-      run: function (e) {
-        mesh.scale.setScalar(0.01 + (rest - 0.01) * e);
-        mesh.position.y = startY + (finalY - startY) * e;
-      },
-    };
   }
 
   function beatThreadDraw(line, start, dur) {
@@ -239,7 +235,7 @@ window.WXCeremony = (function () {
     // the reduced beat: seed-hosted new houses, monolith rise only — not on Vera's itinerary
     for (var sg = 0; sg < seedGroup.length; sg++) {
       var shh = handles.houses[seedGroup[sg]];
-      if (shh && shh.monoMesh) beats.push(beatMonolithRise(shh.monoMesh, sg * BLOOM_STAGGER_MS, BLOOM_MS));
+      if (shh && shh.monoMesh) beats.push(beatSwellToRest(shh.monoMesh, sg * BLOOM_STAGGER_MS, BLOOM_MS));
     }
 
     var t = 0, veraFrom = handles.vera.home;
@@ -258,8 +254,8 @@ window.WXCeremony = (function () {
       for (var gi = 0; gi < group.length; gi++) {
         var ghh = handles.houses[group[gi]];
         var st = bloomStart + gi * BLOOM_STAGGER_MS;
-        if (ghh.facetMesh) beats.push(beatFacetBloom(ghh.facetMesh, st, BLOOM_MS));
-        if (ghh.monoMesh) beats.push(beatMonolithRise(ghh.monoMesh, st, BLOOM_MS));
+        if (ghh.facetMesh) beats.push(beatSwellToRest(ghh.facetMesh, st, BLOOM_MS));
+        if (ghh.monoMesh) beats.push(beatSwellToRest(ghh.monoMesh, st, BLOOM_MS));
       }
       var bloomTotal = (group.length - 1) * BLOOM_STAGGER_MS + BLOOM_MS;
 
@@ -329,7 +325,21 @@ window.WXCeremony = (function () {
     var members = [];
     for (var g = 0; g < groupHouses.length; g++) {
       var ghh = handles.houses[groupHouses[g]];
-      var meshes = [ghh.facetMesh, ghh.ringMesh, ghh.monoMesh];
+      // THE EMBER DRIFTS AS ONE OBJECT. `delta` is a WORLD offset, and facetMesh/ringMesh are
+      // direct children of `world`, so adding it to their `.position` is right. monoMesh is NOT:
+      // terrain3d.js binds it to the ember's CORE MESH, nested inside the ember group (it must be
+      // a Mesh so this file can clone its material). A nested mesh's `.position` is a LOCAL offset,
+      // so adding a world delta to it slides the lit core sideways OUT of its own plinth and ribs
+      // for the whole drift and snaps it back at the end — a silent, self-healing wrong that
+      // nothing throws on. Drift its PARENT, the ember group, which is a child of `world` and so
+      // shares the space facetMesh and ringMesh live in. A monoMesh parented directly to `world`
+      // (the pre-ember shape, and any future un-nesting) is still driven directly.
+      var emberBody = null;
+      if (ghh.monoMesh) {
+        var mp = ghh.monoMesh.parent;
+        emberBody = mp && mp !== handles.world ? mp : ghh.monoMesh;
+      }
+      var meshes = [ghh.facetMesh, ghh.ringMesh, emberBody];
       for (var m = 0; m < meshes.length; m++) {
         if (meshes[m]) members.push({ mesh: meshes[m], finalX: meshes[m].position.x, finalZ: meshes[m].position.z });
       }

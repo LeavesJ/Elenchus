@@ -202,9 +202,33 @@ def test_the_arrival_thread_attaches_to_the_embers_real_tip():
         _num("EMBER_CORE_R", s) + _num("EMBER_CORE_R_STEP", s) * 3
     )
     assert 0.56 < tip3 < 1.0, (
-        f"the tallest ember's tip derives to {tip3:.3f}, outside its own body — the ribs top out "
-        f"at 0.553 and the whole object stands under a unit tall. The retired box reached 3.1 at "
-        f"this bucket, and a thread still pinned up there floats over the memories it joins"
+        f"the tallest ember's tip derives to {tip3:.3f}, outside its own body — the ribs arc from "
+        f"0.340 to 0.675 and the whole object stands under a unit tall. The retired box reached "
+        f"3.1 at this bucket, and a thread still pinned up there floats over the memories it joins"
+    )
+
+
+def test_the_confluence_drift_moves_the_ember_body_never_the_nested_core():
+    # playConfluence slides a merging isle's objects in from their old bearing by adding a WORLD
+    # delta to each mesh's `.position`. facetMesh and ringMesh are direct children of `world`, so
+    # that is right for them. monoMesh is NOT: it is the core nested inside the ember group, and a
+    # nested mesh's `.position` is a local offset — driving it directly slides the lit core
+    # sideways out of its own plinth and ribs for the whole drift, then restores it. The final
+    # state is correct and nothing throws, so this defect is invisible to every runtime check and
+    # to the suite; a static guard is the only thing that can hold it.
+    c = _strip_comments(CEREMONIES.read_text())
+    body = _js_fn(c, "playConfluence")
+    m = re.search(r"var\s+meshes\s*=\s*\[([^\]]*)\]", body)
+    assert m, "playConfluence must still build its drift list as one readable `meshes` array"
+    drift = m.group(1)
+    assert "monoMesh" not in drift, (
+        "the confluence drift list must not carry monoMesh — it is the core nested inside the "
+        "ember group, so a world-space delta applied to it slides the flame off its own stone. "
+        f"Drift the group (monoMesh.parent) instead. Got: [{drift.strip()}]"
+    )
+    assert re.search(r"\.parent\b", body), (
+        "the drift must reach the ember GROUP through monoMesh.parent — the child of `world` that "
+        "shares a coordinate space with facetMesh and ringMesh"
     )
 
 

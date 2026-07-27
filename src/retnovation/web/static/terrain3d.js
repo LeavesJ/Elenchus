@@ -373,15 +373,24 @@ window.Terrain3D = (function () {
     var EMBER_CORE_Y = 0.56;       // core centre, LOCAL to the ember group (whose origin is its BASE)
     var EMBER_CORE_R = 0.20;       // core radius at bucket 0
     var EMBER_CORE_R_STEP = 0.035; // per vitality bucket (the wire's buckets run 0..3)
+    // The plinth is centred at half its own height, which is what puts the group's origin exactly
+    // at the ember's base (measured minY 0.0000) and lets both build sites plant it on a surface.
+    // The ribs then SPRING FROM THE PLINTH'S TOP FACE — derived, never a second literal, so a
+    // retuned plinth cannot leave three stone arcs hovering in the air above it.
+    var EMBER_PLINTH_H = 0.34;
+    var EMBER_RIB_Y = EMBER_PLINTH_H;
     // IcosahedronGeometry(r, 0) is a POLYHEDRON, so its highest VERTEX sits at t/sqrt(1+t*t) * r
     // for the golden ratio t — not at r. Measured against the vendored r128: a bucket-0 core
     // tops out at 0.730, not 0.760.
     var EMBER_CORE_POLE = 0.8507;
-    // Where a thread touches an ember: the CORE's top, not the stone's. Each rib is a torus laid
-    // FLAT by rotation.x = PI/2, so its 0.30 ring radius spreads sideways and the arc reaches only
-    // 0.52 + 0.035 (the tube) = 0.553 measured — while the core runs 0.730 (bucket 0) to 0.819
-    // (bucket 3, the wire's maximum). This is a seam because the isle thread and the ember body
-    // must agree; they cannot each keep their own copy of the number.
+    // Where a thread touches an ember: the CORE's top, not the stone's — the thread joins memories
+    // to one another, so it should land on the lit part, not on the vessel. That is also simply
+    // the highest point: measured against the vendored r128, the three ribs arc from 0.340 up to
+    // 0.675, while the core crowns at 0.730 (bucket 0) through 0.819 (bucket 3, the wire's
+    // maximum). So the flame always stands clear of its own cradle — by 0.055 at bucket 0 and by
+    // 0.144 at bucket 3, which means a richer memory visibly rises further out of the stone that
+    // holds it. This is a seam because the isle thread and the ember body must agree; they cannot
+    // each keep their own copy of the number.
     function emberTipY(bucket) {
       return EMBER_CORE_Y + EMBER_CORE_POLE * (EMBER_CORE_R + EMBER_CORE_R_STEP * bucket);
     }
@@ -407,7 +416,7 @@ window.Terrain3D = (function () {
       // hue); only intensity moves with bucket — bucket null->0 still reads dim, never grey.
       if (!emberGeomCache[bucket]) {
         emberGeomCache[bucket] = {
-          plinth: new THREE.CylinderGeometry(0.30, 0.38, 0.34, 6),
+          plinth: new THREE.CylinderGeometry(0.30, 0.38, EMBER_PLINTH_H, 6),
           rib: new THREE.TorusGeometry(0.30, 0.035, 5, 10, Math.PI * 0.72),
           core: new THREE.IcosahedronGeometry(EMBER_CORE_R + EMBER_CORE_R_STEP * bucket, 0),
         };
@@ -419,12 +428,17 @@ window.Terrain3D = (function () {
       var g = emberGeomCache[bucket];
       var group = new THREE.Group();
       var plinth = new THREE.Mesh(g.plinth, emberStone());
-      plinth.position.y = 0.17;
+      plinth.position.y = EMBER_PLINTH_H / 2; // centred on its own height => the group's origin is the base
       group.add(plinth);
       for (var r = 0; r < 3; r++) {
         var rib = new THREE.Mesh(g.rib, emberStone());
-        rib.position.y = 0.52;
-        rib.rotation.set(Math.PI * 0.5, 0, (r * 2 * Math.PI) / 3);
+        rib.position.y = EMBER_RIB_Y;
+        // Each rib is a partial torus standing UPRIGHT in its own vertical plane, and the three
+        // planes are spread 120 degrees apart about the vertical axis — so they read as arcs
+        // rising around the core and closing over it, which is what makes the object a vessel
+        // rather than a lump. Rotating on X instead would lay every rib FLAT into one horizontal
+        // collar at a single height (measured: a 0.067-tall ring), cradling nothing.
+        rib.rotation.set(0, (r * 2 * Math.PI) / 3, 0);
         group.add(rib);
       }
       var core = new THREE.Mesh(g.core, emberMatCache[bucket]);
