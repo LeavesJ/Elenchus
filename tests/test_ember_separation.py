@@ -106,9 +106,10 @@ def test_earned_outshines_unearned_by_at_least_three_to_one():
     # FIRST on every isle — must be unmistakably brighter than the marker for nothing at all.
     peak = _num("GHOST_OPACITY") + _num("GHOST_PULSE_AMP")
     ghost = _aces([x * peak for x in _linear(_band(18))], _exposure())
-    m = re.search(r"emissiveIntensity:\s*([0-9.]+)\s*\+\s*([0-9.]+)\s*\*\s*bucket", _src())
-    assert m, "the monolith's emissive ramp must stay readable as `base + step * bucket`"
-    bucket1 = float(m.group(1)) + float(m.group(2)) * 1
+    # The ramp lives behind ONE named seam (emberRestEmissive) because two readers need it: the
+    # material the ember is built with, and the idle breath, which must modulate around each
+    # ember's own built rest value rather than around whatever the material happens to hold.
+    bucket1 = _num("EMBER_EMISSIVE_BASE") + _num("EMBER_EMISSIVE_STEP") * 1
     mono = _aces([x * bucket1 for x in _linear(_band(9))], _exposure())
     ratio = (max(_lum(mono), _lum(ghost)) + 0.05) / (min(_lum(mono), _lum(ghost)) + 0.05)
     assert ratio >= 3.0, (
@@ -205,6 +206,58 @@ def test_the_arrival_thread_attaches_to_the_embers_real_tip():
         f"the tallest ember's tip derives to {tip3:.3f}, outside its own body — the ribs arc from "
         f"0.340 to 0.675 and the whole object stands under a unit tall. The retired box reached "
         f"3.1 at this bucket, and a thread still pinned up there floats over the memories it joins"
+    )
+
+
+def test_the_earned_object_breathes_faster_than_the_placeholder():
+    # Criterion 3: the idle motion belongs to what was earned. Emptiness may be present; it may
+    # not be the liveliest thing on the isle. Compare the two sine rates directly.
+    s = _strip_comments(_src())
+    ghost = re.search(r"ghostMat\.opacity\s*=[^;]*Math\.sin\(t \*\s*([0-9.]+)\)", s)
+    ember = re.search(r"emberBreath[^;]*Math\.sin\(t \*\s*([0-9.]+)\)", s)
+    assert ghost and ember, "both the ghost pulse and the ember breath must be time-based"
+    assert float(ember.group(1)) > float(ghost.group(1)), (
+        "the earned object must breathe faster than the placeholder — the world should not "
+        "animate its emptiness more than its memories"
+    )
+
+
+def test_the_breath_modulates_each_embers_own_built_rest_value():
+    # The materials are CACHED PER BUCKET (draw-call budget), so every ember of a bucket shares one
+    # material instance. Reading the rest intensity back out of that shared material at run time
+    # means the second ember of a bucket samples a value the first one already modulated. Stamping
+    # the BUILT value on each core at construction is what keeps a bucket-3 memory reading brighter
+    # than a bucket-1 one instead of the ramp slowly flattening into itself.
+    s = _strip_comments(_src())
+    assert "function emberRestEmissive(" in s, "the emissive ramp must be one named seam"
+    assert re.search(r"restEmissive\s*=\s*emberRestEmissive\(", s), (
+        "each core must carry its own BUILT rest emissive, derived from the same seam the "
+        "material is built from — never sampled back out of the shared material at run time"
+    )
+    loop = re.search(r"emissiveIntensity\s*=\s*([^;]*emberBreath[^;]*);", s)
+    assert loop and "restEmissive" in loop.group(1), (
+        f"the breath must scale the stamped rest value, got {loop.group(1) if loop else 'no write'}"
+    )
+
+
+def test_a_memory_keeps_breathing_after_its_ceremony_has_played():
+    # ceremonies.js's ownMaterial() CLONES a mesh's material on first touch and leaves the
+    # __ceremonyOwnMat flag set forever, and relightIsle walks the isle's WHOLE thread — so after
+    # a single landing every ember on that isle owns a private material permanently. A breath that
+    # skips ceremony-owned meshes would therefore switch itself off, isle by isle, the first time
+    # each one is landed on: dead on precisely the worlds that have been used. The breath must
+    # stand down only while a ceremony is actually IN FLIGHT.
+    s = _strip_comments(_src())
+    # Window both sides of the breath: the ceremony gate guards it from ABOVE, the write is below.
+    at = s.index("emberBreath")
+    body = s[max(0, at - 600) : at + 700]
+    assert not re.search(r"__ceremonyOwnMat", body), (
+        "the breath must not skip on __ceremonyOwnMat — that flag is permanent, so the idle "
+        "motion would die on every isle the moment it is first landed on"
+    )
+    assert re.search(r"WXCeremony[^;]*active\(\)", body), (
+        "the breath must stand down while a ceremony is IN FLIGHT (WXCeremony.active()), so it "
+        "does not fight the relight beat for the same emissiveIntensity"
     )
 
 

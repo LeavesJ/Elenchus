@@ -379,6 +379,17 @@ window.Terrain3D = (function () {
     // retuned plinth cannot leave three stone arcs hovering in the air above it.
     var EMBER_PLINTH_H = 0.34;
     var EMBER_RIB_Y = EMBER_PLINTH_H;
+    // How brightly a memory burns, by how much has been earned into it. ONE seam, because two
+    // readers need the same answer: the material an ember is BUILT with, and the idle breath,
+    // which modulates around each core's own built value. The breath must not read the number
+    // back out of the material — materials are cached PER BUCKET (draw-call budget), so every
+    // ember of a bucket shares one instance, and the second one to look would sample a value the
+    // first had already modulated.
+    var EMBER_EMISSIVE_BASE = 0.6;
+    var EMBER_EMISSIVE_STEP = 0.5;
+    function emberRestEmissive(bucket) {
+      return EMBER_EMISSIVE_BASE + EMBER_EMISSIVE_STEP * bucket;
+    }
     // IcosahedronGeometry(r, 0) is a POLYHEDRON, so its highest VERTEX sits at t/sqrt(1+t*t) * r
     // for the golden ratio t — not at r. Measured against the vendored r128: a bucket-0 core
     // tops out at 0.730, not 0.760.
@@ -423,7 +434,7 @@ window.Terrain3D = (function () {
       }
       if (!emberMatCache[bucket]) emberMatCache[bucket] = new THREE.MeshStandardMaterial({
         color: srgb(DUSK_BAND[9]), emissive: srgb(DUSK_BAND[9]),
-        emissiveIntensity: 0.6 + 0.5 * bucket, flatShading: true, roughness: 0.45,
+        emissiveIntensity: emberRestEmissive(bucket), flatShading: true, roughness: 0.45,
       });
       var g = emberGeomCache[bucket];
       var group = new THREE.Group();
@@ -443,6 +454,9 @@ window.Terrain3D = (function () {
       }
       var core = new THREE.Mesh(g.core, emberMatCache[bucket]);
       core.position.y = EMBER_CORE_Y;
+      // The core carries its OWN built rest intensity so the idle breath modulates around it
+      // rather than around whatever the shared per-bucket material currently holds.
+      core.userData.restEmissive = emberRestEmissive(bucket);
       group.add(core);
       return { group: group, core: core };
     }
@@ -477,6 +491,7 @@ window.Terrain3D = (function () {
     var ghostMat = new THREE.LineBasicMaterial({ color: srgb(DUSK_BAND[18]), transparent: true, opacity: GHOST_OPACITY, blending: THREE.AdditiveBlending, depthWrite: false });
 
     var clickableMonoliths = [];
+    var emberCores = []; // the lit cores only — what the idle breath animates (§5c criterion 3)
     var litHouses = 0;
 
     // --- _handles plumbing (underscore-private; Phase C T3's ceremonies module relies on the
@@ -530,6 +545,7 @@ window.Terrain3D = (function () {
           ember.group.userData.isleSlot = isle.slot;
           world.add(ember.group);
           clickableMonoliths.push(ember.group); // the whole ember picks, stone included
+          emberCores.push(ember.core); // only the flame breathes; the stone is structure
           litHouses++;
           tipByHouse[facet.houseIndex] = { x: wx, y: facetTopY + emberTipY(bucket), z: wz };
           handlesHouses[facet.houseIndex] = {
@@ -594,6 +610,7 @@ window.Terrain3D = (function () {
         sEmber.group.userData.isleSlot = null; // seed-hosted: no isle, per the review-pinned shape
         world.add(sEmber.group);
         clickableMonoliths.push(sEmber.group); // the whole ember picks, stone included
+        emberCores.push(sEmber.core); // only the flame breathes; the stone is structure
         litHouses++;
         handlesHouses[houseIndex] = {
           facetMesh: null, ringMesh: null, monoMesh: sMono, clusterSlot: sSlot, isleSlot: null,
@@ -760,6 +777,24 @@ window.Terrain3D = (function () {
       // own): emptiness may be present, never the liveliest thing on the isle. Deterministic,
       // time-based, and shared by every isle's LineLoop through this one material.
       ghostMat.opacity = GHOST_OPACITY + GHOST_PULSE_AMP * Math.sin(t * 0.55);
+      // The ember breathes, and it breathes FASTER and deeper than the placeholder does (§5c
+      // criterion 3): the living thing on an isle is the memory, never the empty invitation.
+      // Each core scales around its OWN stamped rest value, so the bucket ramp is modulated and
+      // never flattened — a bucket-3 memory still outshines a bucket-1 one at every phase.
+      // Materials are cached per bucket, so cores of the same bucket write the same number to the
+      // same instance: idempotent, and they breathe together by design. We stand down only while
+      // a ceremony is IN FLIGHT, because the relight beat is driving these same intensities then.
+      // Deliberately NOT gated on __ceremonyOwnMat: that flag is set once and never cleared, and
+      // relightIsle touches every ember on the isle, so gating on it would switch the idle motion
+      // off permanently on exactly the isles that have been lived in.
+      var breathing = !(window.WXCeremony && window.WXCeremony.active());
+      if (breathing) {
+        var emberBreath = 1 + 0.09 * Math.sin(t * 1.10);
+        for (var eb = 0; eb < emberCores.length; eb++) {
+          var ec = emberCores[eb];
+          ec.material.emissiveIntensity = ec.userData.restEmissive * emberBreath;
+        }
+      }
       // Vera's idle breathe (Spec-2 §7): opacity only — her group's transform never changes here
       veraBreathe.opacity = 0.75 + 0.25 * Math.sin(t * 1.1);
       // fly-in reveal: start wide + high, ease to the resting pose (rr==rad, pp==pol once ige==1)
