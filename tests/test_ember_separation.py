@@ -208,6 +208,39 @@ def test_the_arrival_thread_attaches_to_the_embers_real_tip():
     )
 
 
+def test_the_ember_ribs_stand_upright_and_spring_from_the_plinths_top_face():
+    # Criterion 4 of this slice is that the ember reads as a CONTAINER — a vessel with the earning
+    # lit inside it. Rotating the rib torus on X lays all three FLAT into one horizontal collar at
+    # a single height (measured against the vendored r128: a 0.067-tall ring), which cradles
+    # nothing and is what shipped first, while emberFor's own comment already claimed "ribs curving
+    # up". Upright arcs, spread about the VERTICAL axis, are what make it a vessel: measured
+    # 0.340 -> 0.675, with the core crowning above them at 0.730 (bucket 0) to 0.819 (bucket 3).
+    s = _strip_comments(_src())
+    body = _js_fn(s, "emberFor")
+    # `.*` to the closing `);`, never `[^)]*` — the Y argument contains its own parentheses, and a
+    # character class that cannot cross `)` stops inside them and silently reports two axes.
+    rot = re.search(r"rib\.rotation\.set\((.*)\);", body)
+    assert rot, "the ribs' orientation must stay readable as a single rib.rotation.set(...) call"
+    axes = [a.strip() for a in rot.group(1).split(",")]
+    assert len(axes) == 3 and axes[0] == "0", (
+        f"the ribs must stand in their own vertical planes — rotation.set's X argument is "
+        f"{axes[0]!r}, and Math.PI * 0.5 there lays every rib flat into one horizontal collar"
+    )
+    assert "Math.PI" in axes[1] and "r" in axes[1], (
+        f"the three ribs must be spread about the VERTICAL axis so they stand in three different "
+        f"planes; the Y argument is {axes[1]!r}"
+    )
+    # And they must spring from the plinth's top face, derived — a second literal here leaves three
+    # stone arcs hovering in mid-air the first time the plinth is retuned.
+    assert re.search(r"rib\.position\.y\s*=\s*EMBER_RIB_Y", body), (
+        "the ribs' height must be the named EMBER_RIB_Y, not a literal"
+    )
+    assert re.search(r"EMBER_RIB_Y\s*=\s*EMBER_PLINTH_H\b", s), (
+        "EMBER_RIB_Y must be DERIVED from EMBER_PLINTH_H — the ribs spring from the plinth's top "
+        "face, and two independent literals drift apart the first time either moves"
+    )
+
+
 def test_the_confluence_drift_moves_the_ember_body_never_the_nested_core():
     # playConfluence slides a merging isle's objects in from their old bearing by adding a WORLD
     # delta to each mesh's `.position`. facetMesh and ringMesh are direct children of `world`, so
