@@ -126,8 +126,19 @@ def test_the_ember_is_a_group_whose_core_is_what_ceremonies_animate():
     assert "function emberFor(" in s, "the ember must be built through one seam"
     body = _js_fn(s, "emberFor")
     assert "THREE.Group" in body, "the ember is a group: plinth + ribs + core"
-    assert re.search(r"return\s*\{[^}]*\bcore\b", body), (
-        "emberFor must return its core mesh separately — that is what monoMesh binds to"
+    ret = re.search(r"return\s*\{([^}]*)\}", body)
+    assert ret, "emberFor must return its parts through one object literal"
+    # Merely finding the WORD `core` in the returned literal is not a guard: `core: group` matches
+    # that just as happily, and it is precisely the mutation this test exists to catch — it would
+    # bind monoMesh to the Group and throw inside ownMaterial() at the first landing. Pin the
+    # binding to the mesh itself, and pin that the mesh is what THREE.Mesh actually built.
+    assert re.search(r"\bcore\s*:\s*core\b", ret.group(1)), (
+        f"emberFor must return the core MESH as `core` — a Group has no .material, so binding it "
+        f"there throws the moment a ceremony clones the material. Got: {{{ret.group(1).strip()}}}"
+    )
+    assert re.search(r"\bvar\s+core\s*=\s*new\s+THREE\.Mesh\(", body), (
+        "the returned `core` must be the mesh built from the core geometry, not an alias of "
+        "anything else in scope"
     )
     assert "monoMesh: " in s or "monoMesh =" in s
 
