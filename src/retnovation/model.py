@@ -245,12 +245,16 @@ class FakeLiftModel:
         return self._expressed[framed_output]
 
 
-# Shared Opus 4.8 request params (claude-api reference): adaptive thinking + high effort,
-# no sampling parameters (temperature/top_p are removed on 4.8 and 400).
+# Shared Opus 5 request params (claude-api reference): adaptive thinking + high effort, no
+# sampling parameters (temperature/top_p are removed on Opus 4.7 onward and 400). Both stay
+# valid verbatim on Opus 5 — its two breaking changes are that thinking is ON when the field is
+# OMITTED (we set it explicitly, so nothing moves) and that `thinking: {"type": "disabled"}` is
+# rejected above `high` effort. We never disable thinking and never exceed `high`, so neither
+# bites. Do NOT raise either constant to `xhigh`/`max` without re-reading that second rule.
 _PARAMS = {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}}
 
-# Medium effort for the batched egress screen only (claude-api: effort is low|medium|high, default
-# high; adaptive thinking stays ON). MEASURED: with adaptive thinking, high is already fast on the
+# Medium effort for the batched egress screen only (claude-api: Opus 5 takes low|medium|high|xhigh|
+# max, default high; adaptive thinking stays ON). MEASURED: with adaptive thinking, high is already fast on the
 # simple calls (classify_entry ~1.3s, concierge_turn ~1.5s) — lowering them buys nothing and slightly
 # hurts, so they keep _PARAMS. The real latency win was BATCHING the egress (4 serial per-move
 # checks ~11s -> one screen ~2.5s, §screen_moves), not effort. Medium shaves the screen 3.6->2.5s
@@ -359,14 +363,14 @@ def _require(resp):
 
 
 class AnthropicModel:
-    """Real adapter over Claude Opus 4.8. Doctrine lives in content/prompts/; this is plumbing.
+    """Real adapter over Claude Opus 5. Doctrine lives in content/prompts/; this is plumbing.
 
     The doctrine prompts (loaded from content/) carry the disband rules: never name the frame,
     never hand the answer, never grade the conclusion; sharper = a gap closed with a supplied
     mechanism. This class only renders the rubric, calls the model, and parses the result.
     """
 
-    def __init__(self, api_key: str | None = None, model: str = "claude-opus-4-8", client=None):
+    def __init__(self, api_key: str | None = None, model: str = "claude-opus-5", client=None):
         self._model = model
         self._api_key = api_key
         self._client = client
