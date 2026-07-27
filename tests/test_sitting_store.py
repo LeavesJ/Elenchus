@@ -151,6 +151,32 @@ def test_world_round_trip_and_upsert(tmp_path):
     assert st.read_world("no-such-sitting") is None
 
 
+def test_world_timestamps_are_isoformat_and_timezone_aware(tmp_path):
+    """`updated_at` is a TEXT column, so nothing stops two encodings coexisting in it.
+
+    read_world() selects only `situation`, which is why a malformed timestamp here is silent:
+    no crash, no wrong answer, just a row that sorts and filters wrong the first time anyone
+    adds an ORDER BY or a date range to this table. That is the L-32 class — one column, two
+    meanings, discovered later. Pin the encoding to what write_world() actually emits
+    (`now.isoformat()`), so a future edit to SQLite's `datetime('now')` — which yields a
+    space-separated, offset-less string that sorts BEFORE every ISO row of the same day —
+    fails here instead of in the data.
+    """
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.write_world(sid, "her situation", NOW)
+    with sqlite3.connect(tmp_path / "s.db") as c:
+        stored = c.execute(
+            "SELECT updated_at FROM web_world WHERE sitting_id=?", (sid,)
+        ).fetchone()[0]
+    parsed = datetime.fromisoformat(stored)  # raises on the datetime('now') encoding
+    assert parsed.tzinfo is not None, (
+        f"web_world.updated_at must carry an offset, got {stored!r} — an offset-less stamp is "
+        f"read as local time by anything that parses it, which silently shifts it by hours"
+    )
+    assert parsed == NOW, f"the stored instant must round-trip, got {parsed} for {NOW}"
+
+
 def test_generated_problem_round_trip(tmp_path):
     st = _store(tmp_path)
     sid = st.create_sitting(NOW)
