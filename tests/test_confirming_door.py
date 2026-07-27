@@ -164,18 +164,24 @@ def test_agreement_never_rewrites_the_world():
     `situation`. Nothing downstream can recover a world that has already been overwritten.
     """
     body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
-    i = body.index("_is_affirmative(")
-    assign = re.search(r"^\s*situation = value\s*$", body[i:], flags=re.M)
-    assert assign, "the correction branch must still be readable as `situation = value`"
-    between = body[i : i + assign.start()]
-    assert re.search(r"^\s*break\s*$", between, flags=re.M), (
-        "the affirmative check must break out of the confirm loop BEFORE `situation = value`. "
-        "Agreement that falls through to the correction branch overwrites the learner's stated "
-        "situation with the sentence they agreed in, and the forge then builds from nothing."
+    # Scope to the confirm loop itself: an assignment ANYWHERE above the affirmative check erases
+    # the world, so the region that must stay clean is the loop head, not "somewhere after".
+    loop = body[body.index("corrections = 0") : body.index("sel = forge_selection(")]
+    aff = loop.index("_is_affirmative(")
+    brk = re.search(r"^\s*break\s*$", loop[aff:], flags=re.M)
+    assert brk, "the affirmative check must break out of the confirm loop"
+    head = loop[: aff + brk.start()]
+    assert not re.search(r"^\s*situation\s*=", head, flags=re.M), (
+        "nothing may assign to `situation` before the affirmative check breaks. Agreement that "
+        "reaches the correction branch overwrites the learner's stated situation with the "
+        "sentence they agreed in, and the forge then builds from a string naming no situation."
     )
-    world_at = body.find("write_world", i)
-    assert world_at > i + assign.start(), (
-        "write_world must persist only a real correction, never an agreement"
+    assert "write_world" not in head, (
+        "write_world must persist only a real correction, never an agreement — a world overwritten "
+        "here is gone from durable state, not merely from this turn"
+    )
+    assert re.search(r"^\s*situation = value\s*$", loop, flags=re.M), (
+        "the correction branch must still re-map on her words"
     )
 
 
