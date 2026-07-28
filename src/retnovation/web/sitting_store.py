@@ -21,6 +21,18 @@ from datetime import datetime, timedelta
 
 _UNSET = object()  # write_state sentinel: "leave this column alone"
 
+# What became of a decision, NOT whether it was right. Every member describes the decision's
+# fate and none of them carries a verdict, which is what lets an outcome sit beside a memory
+# without grading it (invariant 5: state moves on rigor and trajectory, never correctness).
+# `too_early` is a first-class answer, not a refusal to answer — it is the honest reading for
+# most decisions most of the time, and having it here is what makes asking early safe.
+OUTCOME_KINDS = frozenset({"held", "reversed", "overtaken", "too_early"})
+
+# How old a convergence must be before the memory bubble asks what happened. Not a config key
+# (one caller, one value — a knob nobody turns is a false promise of flexibility); a named
+# constant so the guard and the bubble read the same number.
+OUTCOME_ASK_AFTER_DAYS = 14
+
 
 def _backfill_positions(c: sqlite3.Connection) -> int:
     """Recover `position` for convergences logged before the column existed (Spec-3 §4c).
@@ -127,7 +139,8 @@ CREATE TABLE IF NOT EXISTS web_sitting_state (
   inflight_json TEXT, theme_json TEXT, territory_rank_json TEXT, landed_at TEXT);
 CREATE TABLE IF NOT EXISTS web_converged (
   sitting_id TEXT NOT NULL, ref TEXT NOT NULL, converged_at TEXT NOT NULL,
-  experience_id TEXT NOT NULL DEFAULT '', position TEXT);
+  experience_id TEXT NOT NULL DEFAULT '', position TEXT,
+  outcome TEXT, outcome_kind TEXT, outcome_at TEXT);
 CREATE TABLE IF NOT EXISTS web_world (
   sitting_id TEXT PRIMARY KEY, situation TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS web_generated_problem (
@@ -199,6 +212,17 @@ class SittingStore:
                     c.execute("ALTER TABLE web_converged ADD COLUMN position TEXT")
                 except sqlite3.OperationalError:
                     pass
+                # Same pattern: dbs created before the outcome record lack these three. The
+                # convergence already holds the situation, the position, and when — this adds
+                # what HAPPENED to that decision afterwards, which arrives weeks later or never.
+                # All three stay NULL until someone answers, and a memory without an outcome is
+                # not a broken memory (unlike `position`, there is nothing to backfill: the
+                # information does not exist anywhere in the record, only in the person).
+                for _col in ("outcome TEXT", "outcome_kind TEXT", "outcome_at TEXT"):
+                    try:
+                        c.execute(f"ALTER TABLE web_converged ADD COLUMN {_col}")
+                    except sqlite3.OperationalError:
+                        pass
                 # Recover the words for convergences that predate the column (Spec-3 §4c).
                 # Runs at migration time like the landed_at backfill above — otherwise the fix
                 # is inert on an existing db until a fresh landing, and these rows would never
@@ -545,6 +569,48 @@ class SittingStore:
                 (sitting_id, ref, now.isoformat(), experience_id, position),
             )
 
+    def record_outcome(
+        self,
+        sitting_id: str,
+        ref: str,
+        converged_at: datetime,
+        outcome: str,
+        outcome_kind: str,
+        now: datetime,
+    ) -> None:
+        """Attach what HAPPENED to one convergence's decision. Annotates, never rewrites: the
+        situation, the position and `converged_at` are untouched, so the memory the learner
+        committed to stays exactly as they left it (L-4 — recalled, never regraded).
+
+        `outcome_kind` is constrained to four FATES, not four verdicts. held / reversed /
+        overtaken / too_early say what became of the decision; none of them say whether it was
+        right. That is deliberate and load-bearing: invariant 5 moves state on rigor and
+        trajectory, never correctness, and the moment this column can hold "worked" the record
+        starts grading conclusions and the whole loop's stance collapses. Free text carries the
+        nuance; the tag stays neutral so it can be counted.
+
+        Keyed on (sitting_id, ref, converged_at) rather than ref alone. A curated ref can
+        reconverge after the 24h window, so a ref string is not a row identity — the same trap
+        `memory()` guards with house_at. Keying on ref alone would stamp one memory's outcome
+        onto a different sitting's memory of the same territory.
+
+        Re-recording overwrites in place and re-stamps `outcome_at`: a decision's fate is not
+        final the first time you ask, and the record should carry the latest reading plus when
+        it was taken, not a pile of contradictory rows."""
+        if outcome_kind not in OUTCOME_KINDS:
+            raise ValueError(
+                f"outcome_kind must be one of {sorted(OUTCOME_KINDS)}, got {outcome_kind!r} — "
+                f"the tag records what became of the decision, never whether it was right"
+            )
+        if self._inert:
+            return
+        with self._conn() as c:
+            c.execute(
+                "UPDATE web_converged SET outcome=?, outcome_kind=?, outcome_at=? "
+                "WHERE sitting_id=? AND ref=? AND converged_at=?",
+                (outcome, outcome_kind, now.isoformat(), sitting_id, ref, converged_at.isoformat()),
+            )
+
     def converged_within(self, now: datetime, hours: int = 24) -> set[str]:
         """Refs converged within the rolling window — across sittings and processes. A rolling
         window, NOT a calendar date: the founder's incident straddled UTC midnight mid-evening
@@ -567,7 +633,8 @@ class SittingStore:
             return []
         with self._conn() as c:
             rows = c.execute(
-                "SELECT sitting_id, ref, converged_at, experience_id, position FROM web_converged "
+                "SELECT sitting_id, ref, converged_at, experience_id, position, "
+                "outcome, outcome_kind, outcome_at FROM web_converged "
                 "ORDER BY converged_at, rowid"
             ).fetchall()
         return [
@@ -577,8 +644,11 @@ class SittingStore:
                 "converged_at": at,
                 "experience_id": eid,
                 "position": position,
+                "outcome": outcome,
+                "outcome_kind": outcome_kind,
+                "outcome_at": outcome_at,
             }
-            for s, r, at, eid, position in rows
+            for s, r, at, eid, position, outcome, outcome_kind, outcome_at in rows
         ]
 
     def domain_slots(self) -> list[dict]:

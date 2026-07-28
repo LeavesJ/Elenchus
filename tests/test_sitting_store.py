@@ -177,6 +177,89 @@ def test_world_timestamps_are_isoformat_and_timezone_aware(tmp_path):
     assert parsed == NOW, f"the stored instant must round-trip, got {parsed} for {NOW}"
 
 
+# --- The outcome record (the fourth field): what actually happened to the decision -------------
+
+
+def test_outcome_starts_empty_and_round_trips(tmp_path):
+    """A convergence records the situation, the position, and when. The outcome is what happened
+    to that decision afterwards, and it arrives much later or never — so it is nullable by
+    construction and a memory without one is not a broken memory."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="I sign.")
+    row = st.converged_log()[0]
+    assert row["outcome"] is None and row["outcome_kind"] is None and row["outcome_at"] is None
+
+    st.record_outcome(sid, "veldra:a", NOW, "They took the gated version.", "held", LATER)
+    row = st.converged_log()[0]
+    assert row["outcome"] == "They took the gated version."
+    assert row["outcome_kind"] == "held"
+    assert row["outcome_at"] == LATER.isoformat()
+    # the original three fields are untouched — an outcome annotates a memory, never rewrites it
+    assert row["position"] == "I sign." and row["converged_at"] == NOW.isoformat()
+
+
+def test_outcome_kind_is_constrained_to_the_four_fates(tmp_path):
+    """`outcome_kind` describes what happened to the DECISION, never whether it was right.
+    held / reversed / overtaken / too_early carry no verdict — that is what keeps invariant 5
+    intact once outcomes exist. An unconstrained free-text kind would drift into good/bad the
+    first time someone typed 'worked', and then the record grades conclusions."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, position="I sign.")
+    for kind in ("held", "reversed", "overtaken", "too_early"):
+        st.record_outcome(sid, "veldra:a", NOW, "what happened", kind, LATER)
+        assert st.converged_log()[0]["outcome_kind"] == kind
+    for bad in ("worked", "correct", "good", "failed", "", "HELD"):
+        try:
+            st.record_outcome(sid, "veldra:a", NOW, "x", bad, LATER)
+        except ValueError:
+            continue
+        raise AssertionError(f"{bad!r} must be rejected — it grades the conclusion")
+
+
+def test_outcome_is_updatable_because_outcomes_change(tmp_path):
+    """A decision's fate is not final the first time you ask. Re-recording overwrites in place
+    and re-stamps outcome_at, so the record always carries the latest reading plus when it was
+    taken — never a pile of contradictory rows."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, position="I sign.")
+    st.record_outcome(sid, "veldra:a", NOW, "too soon to say", "too_early", LATER)
+    later2 = LATER + timedelta(days=60)
+    st.record_outcome(sid, "veldra:a", NOW, "they walked; I reversed it", "reversed", later2)
+    rows = st.converged_log()
+    assert len(rows) == 1, "an outcome updates the convergence, it never appends a second row"
+    assert rows[0]["outcome"] == "they walked; I reversed it"
+    assert rows[0]["outcome_kind"] == "reversed" and rows[0]["outcome_at"] == later2.isoformat()
+
+
+def test_outcome_targets_one_convergence_not_every_row_sharing_a_ref(tmp_path):
+    """A curated ref can reconverge after the 24h window, so `ref` alone is not a row identity —
+    the same trap memory() already guards with house_at. The write is keyed on the convergence's
+    own converged_at as well, or recording an outcome on one memory silently stamps it onto a
+    different sitting's memory of the same territory."""
+    st = _store(tmp_path)
+    s1, s2 = st.create_sitting(NOW), st.create_sitting(NOW + timedelta(days=40))
+    st.log_converged(s1, "veldra:a", NOW, position="first")
+    st.log_converged(s2, "veldra:a", NOW + timedelta(days=40), position="second")
+    st.record_outcome(s2, "veldra:a", NOW + timedelta(days=40), "the later one", "held", LATER)
+    first, second = st.converged_log()
+    assert first["outcome"] is None, "the earlier convergence must be untouched"
+    assert second["outcome"] == "the later one"
+
+
+def test_outcome_timestamps_are_isoformat_and_timezone_aware(tmp_path):
+    """Same encoding contract as web_world.updated_at, and for the same reason: a TEXT column
+    that accepts two encodings sorts and filters wrong the first time anyone ranges over it."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, position="I sign.")
+    st.record_outcome(sid, "veldra:a", NOW, "what happened", "held", LATER)
+    parsed = datetime.fromisoformat(st.converged_log()[0]["outcome_at"])
+    assert parsed.tzinfo is not None and parsed == LATER
+
+
 def test_generated_problem_round_trip(tmp_path):
     st = _store(tmp_path)
     sid = st.create_sitting(NOW)
