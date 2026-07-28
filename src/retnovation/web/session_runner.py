@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import re
 import threading
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -63,11 +64,108 @@ _AFFIRMATIVE = frozenset(
 )
 _MAX_CONFIRM_CORRECTIONS = 2
 
+# A yes that TURNS is a correction, not agreement. These are the words that reverse whatever came
+# before them, so a reply carrying one must go to the re-map even if it opened with "yes".
+_CONTRAST = (
+    "but",
+    "although",
+    "though",
+    "however",
+    "actually",
+    "instead",
+    "rather",
+    "except",
+    "not",
+    "no",
+    "nope",
+    "isn't",
+    "aren't",
+    "wasn't",
+    "opposite",
+    # "you got it WRONG" opens with an agreement phrase and reverses it on the last word. Without
+    # these the lead check reads it as consent and forges the mapping he was rejecting.
+    "wrong",
+    "incorrect",
+    "mistaken",
+    "misunderstood",
+    "nvm",
+    "nevermind",
+)
+_CONTRAST_RE = re.compile(r"\b(?:" + "|".join(re.escape(w) for w in _CONTRAST) + r")\b")
+# Only these may LEAD a longer sentence and still count as agreement. The rest of _AFFIRMATIVE
+# ("right", "go", "continue", "proceed", "k", "ya") are agreement only as the WHOLE reply: the
+# beat asks "say yes, or tell me what it actually is", and "right now I'm deciding between the
+# internship and the startup" is answering the second half. Reading that as consent would forge
+# the PREVIOUS mapping, which is exactly the failure this gate exists to prevent.
+_AFFIRMATIVE_LEAD = (
+    "yes",
+    "yeah",
+    "yep",
+    "yup",
+    "aye",
+    "okay",
+    "ok",
+    "sure",
+    "correct",
+    "exactly",
+    "agreed",
+    "confirmed",
+    "that's it",
+    "thats it",
+    "that is it",
+    "that's right",
+    "thats right",
+    "sounds right",
+    # Common agreement openers that are NOT in the bare set. They belong here for one reason: a
+    # phrasing this gate fails to recognise does not merely cost a re-map, it REPLACES the
+    # learner's stated situation with the sentence they agreed in. Every opener missing from this
+    # list is another way to erase a world, so the list is deliberately generous at the front and
+    # the contrast check above carries the safety.
+    "absolutely",
+    "definitely",
+    "precisely",
+    "affirmative",
+    "you got it",
+    "that's the one",
+    "thats the one",
+    "that is the one",
+    "that's it exactly",
+    "this is it",
+)
+# Longest-first, so "that's right" is tested before any shorter member that prefixes it.
+_AFFIRMATIVE_LEAD_RE = re.compile(
+    r"^(?:"
+    + "|".join(re.escape(w) for w in sorted(_AFFIRMATIVE_LEAD, key=len, reverse=True))
+    + r")(?![\w'])"
+)
+
 
 def _is_affirmative(text: str) -> bool:
-    """True only for a BARE agreement. Anything carrying its own content is a correction."""
-    t = " ".join((text or "").split()).strip().lower().rstrip(".!")
-    return bool(t) and t in _AFFIRMATIVE
+    """True for agreement, whether bare or LEADING.
+
+    Bare-only was the original rule (Spec-3 §4a) and it destroyed a real sitting on 2026-07-27.
+    The beat had his decision exactly right and he answered "Yes, this is the decision I want to
+    make." That is not in the bare set, so the confirm loop took it as a CORRECTION: it assigned
+    `situation = value`, persisted that sentence as his world, re-mapped territories on a string
+    naming no situation at all, and forged a curated pricing scenario. His stated decision was
+    erased by his own agreement, and nothing in the transcript said so.
+
+    Leading with an affirmative cannot forge something unagreed — he said yes. The residual harm
+    is only that an elaboration after the yes is not folded in, which leaves his ORIGINAL
+    situation standing: strictly smaller than replacing it with a sentence carrying no situation.
+
+    The safety property is kept where it actually lives: a yes that TURNS ("yes but ...", "yeah,
+    actually ...") carries new material the forge must map, so it stays a correction. Still local
+    and pure — the happy path pays no model call.
+    """
+    t = " ".join((text or "").split()).strip().lower().rstrip(".!?")
+    if not t:
+        return False
+    if t in _AFFIRMATIVE:
+        return True
+    if _CONTRAST_RE.search(t):
+        return False
+    return bool(_AFFIRMATIVE_LEAD_RE.match(t))
 
 
 # Chained sittings: a poison-pill put on an ORPHANED segment's to_worker queue (continue/close over

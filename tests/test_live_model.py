@@ -13,7 +13,7 @@ _HAS_KEY = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKE
 @pytest.mark.live
 @pytest.mark.skipif(not _HAS_KEY, reason="no Anthropic credential in env")
 def test_live_intake_on_selected_experience(tmp_path):
-    """Smoke: a real Opus 4.8 call classifies every rubric code on a REAL selected experience.
+    """Smoke: a real Opus 5 call classifies every rubric code on a REAL selected experience.
     Setup mirrors test_voice_live._first_open_exp — the production selection path (store → propose →
     select), NOT a hand-built shortcut: the old spec=None 'fixed experience' call rotted silently
     when select_experience gained `corpus`, because this key-gated test never runs offline (L-22)."""
