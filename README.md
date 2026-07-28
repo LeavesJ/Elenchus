@@ -18,7 +18,7 @@ assessment → state → cadence`) is standing and green, wrapped by a conversat
 **engaged-agent** web surface whose 3D world you now **land on** as your home — and whose
 houses are now an accessible record of your own judgments (see below). Curated content
 covers five open-ended decision territories; the content-expansion pass (more territories,
-more role registers) is the gate before any external use. Suite: **579 passing / 30
+more role registers) is the gate before any external use. Suite: **685 passing / 30
 skipped**; the graded engine core (`orchestration`, `assessment/`) is held byte-stable —
 the surface work rides additive seams around it. The world's visual form is mid-redesign;
 its *meaning* (below) is settled. See `docs/DEVLOG.md` and `docs/superpowers/` for the
