@@ -44,12 +44,27 @@
   /* The memory bubble (Spec-1 5b/5c): a clicked house's recollection overlays the world — the
      shell's existing panel vocabulary (vera bubble bg/border, muted labels, the teal action
      button) reused, not a new idiom. Homebase stays live underneath; closing just hides this. */
+  /* max-height + scroll: a committed position can run many paragraphs (the real ones do), and
+     an unbounded panel grows past the viewport in BOTH directions from a centred transform —
+     which silently pushed the outcome ask and its buttons off-screen where nothing could reach
+     them. Found by opening a real memory, not by a test: the markup was present and correct. */
   #memory{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:20;
-    width:88vw;max-width:420px;background:#0f1a2b;border:1px solid #1b2b44;border-radius:14px;
+    width:88vw;max-width:420px;max-height:82vh;overflow-y:auto;overscroll-behavior:contain;
+    background:#0f1a2b;border:1px solid #1b2b44;border-radius:14px;
     padding:16px 18px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
   #memory[hidden]{display:none}
   .mem-label{color:#8aa0bf;font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin:10px 0 4px}
   .mem-label:first-child{margin-top:0}
+  /* The outcome ask: the same panel vocabulary, deliberately quiet. It is an invitation next to
+     a memory, not a form the world demands you fill in — so no accent, no required marker. */
+  .mem-ask{font-size:13px;line-height:1.45;margin:0 0 8px}
+  .mem-outcome{width:100%;box-sizing:border-box;background:#0b1422;color:#dbe6f5;
+    border:1px solid #1b2b44;border-radius:8px;padding:8px 10px;font:inherit;font-size:14px;resize:vertical}
+  .mem-outcome:focus{outline:none;border-color:#2b4a70}
+  .mem-fates{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .mem-fate{background:#12263c;color:#cfe0f5;border:1px solid #1b2b44;border-radius:999px;
+    padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+  .mem-fate:hover{background:#17324f;border-color:#2b4a70}
   .mem-line{color:#e8eef7}
   .mem-muted{color:#8aa0bf;font-style:italic}
   .mem-when{color:#8aa0bf;font-size:12px;margin-top:12px}
@@ -158,11 +173,44 @@ async function goContinue(btn,body){
 let opening = false;
 function openMemory(i){
   if(opening) return; opening = true;
+  memIndex = i;
   post('/api/session/single/memory',{index:i}).then(r=>{
     opening = false;
     if(r.kind==='memory') showMemory(r);
     else if(r.kind==='nudge') muted(r.message||'');
   }).catch(()=>{ opening=false; });
+}
+// Which memory the open bubble is showing — recordOutcome posts against it. The server still
+// resolves the index by-ref through the same drift guard as the read, so a stale value here
+// degrades to an honest "unavailable", never a wrong write.
+let memIndex = -1;
+// The four fates, in the learner's words. Every label says what BECAME of the decision and
+// none of them says whether it was right — that is the whole point of the tag (invariant 5).
+const FATES = [['held','I held to it'],['reversed','I reversed it'],
+  ['overtaken','Events overtook it'],['too_early','Too early to tell']];
+function fateLabel(k){ for(const [v,l] of FATES) if(v===k) return l; return ''; }
+function outcomeBlock(m){
+  if(m.outcome){
+    return '<div class="mem-label">What happened</div><div class="mem-line">'+esc(m.outcome)+'</div>'
+      + (m.outcome_kind ? '<div class="mem-when">'+esc(fateLabel(m.outcome_kind))+'</div>' : '');
+  }
+  if(!m.ask_outcome) return '';
+  return '<div class="mem-label">What happened?</div>'
+    + '<div class="mem-muted mem-ask">You decided this a while ago. If you know how it turned out, '
+    + 'say so in your own words — this is recorded beside the memory, never scored.</div>'
+    + '<textarea id="mem-outcome" class="mem-outcome" rows="3" placeholder="What actually happened."></textarea>'
+    + '<div class="mem-fates">'
+    + FATES.map(([v,l])=>'<button class="mem-fate" onclick="recordOutcome(\''+v+'\')">'+l+'</button>').join('')
+    + '</div>';
+}
+function recordOutcome(kind){
+  const box = document.getElementById('mem-outcome');
+  const text = box ? box.value.trim() : '';
+  if(!text){ if(box) box.focus(); return; }
+  post('/api/session/single/outcome',{index:memIndex,outcome:text,kind:kind}).then(r=>{
+    if(r.kind==='memory') showMemory(r);       // re-read, so we render what actually landed
+    else if(r.kind==='nudge') muted(r.message||'');
+  }).catch(()=>{});
 }
 function showMemory(m){
   const p = document.getElementById('memory');
@@ -176,6 +224,7 @@ function showMemory(m){
       + '<div class="mem-label">What you said</div><div class="mem-line">'
       + (m.position ? esc(m.position) : '<span class="mem-muted">your words weren\'t captured for older judgments</span>')+'</div>'
       + '<div class="mem-when">'+ago+(m.origin?(' · from your '+esc(m.origin)+' sitting'):'')+'</div>'
+      + outcomeBlock(m)
       + '<button class="mem-close" onclick="hideMemory()">close</button>';
   }
   p.hidden = false;
