@@ -1,1 +1,1 @@
-"""Retnovation — a retention-and-deployment engine over a rented model."""
+"""Elenchus — a retention-and-deployment engine over a rented model."""

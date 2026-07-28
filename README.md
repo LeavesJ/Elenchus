@@ -1,4 +1,4 @@
-# Retnovation
+# Elenchus
 
 A retention-and-deployment engine. Not a tutor: it owns every encounter *after* you first meet the
 material and makes the knowledge stay, and stay usable. **Rent capability, gate doctrine.**

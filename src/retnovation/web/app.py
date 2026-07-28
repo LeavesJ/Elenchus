@@ -201,7 +201,7 @@ class _NoStoreStaticFiles(StaticFiles):
 
 
 def create_app(db_path: str, model_factory=None) -> FastAPI:
-    app = FastAPI(title="Retnovation — Cartographer MVP")
+    app = FastAPI(title="Elenchus — Cartographer MVP")
 
     reg = SessionRegistry(db_path, model_factory or (lambda: _default_model()))
     build = _build_stamp()

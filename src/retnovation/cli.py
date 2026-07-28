@@ -52,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     except NotImplementedError:
         print(
-            "Retnovation step-1 harness: the live Opus 5 adapter is not wired yet "
+            "Elenchus step-1 harness: the live Opus 5 adapter is not wired yet "
             "(deferred). The six-link loop is proven by the test suite — run `pytest`. "
             "Interactive runs arrive with the model adapter."
         )
