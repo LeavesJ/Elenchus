@@ -993,6 +993,94 @@ def test_memory_route_serves_the_bubble_and_422s_bad_types(tmp_path, make_fake):
     assert client.post("/api/session/single/memory", json={"index": "zero"}).status_code == 422
 
 
+def test_the_ask_gate_opens_only_on_an_aged_unanswered_memory():
+    """The gate is a pure predicate so it can be tested at every boundary without waiting 14
+    days or faking a clock through three layers. Three ways to stay shut, one way to open."""
+    from datetime import datetime, timedelta, timezone
+
+    from retnovation.web.session_runner import _should_ask_outcome
+
+    now = datetime(2026, 7, 28, tzinfo=timezone.utc)
+    fresh = (now - timedelta(days=13)).isoformat()
+    aged = (now - timedelta(days=14)).isoformat()
+
+    assert _should_ask_outcome(aged, None, now) is True
+    assert _should_ask_outcome(fresh, None, now) is False, "13 days is under the threshold"
+    assert _should_ask_outcome(aged, "they signed", now) is False, "already answered"
+    assert _should_ask_outcome("", None, now) is False, "no timestamp -> never ask"
+    assert _should_ask_outcome("not-a-date", None, now) is False, "unparseable -> never ask"
+
+
+def test_a_fresh_memory_is_not_asked_what_happened(tmp_path, make_fake):
+    """The ask is delayed by construction. A decision made minutes ago has no outcome yet, and
+    asking immediately would train the answer 'too early' into every record."""
+    client = _world_client(tmp_path, make_fake)
+    client.post("/api/session")
+    _drive_to_done(client)
+    r = client.post("/api/session/single/memory", json={"index": 0}).json()
+    assert r["kind"] == "memory"
+    assert r["outcome"] is None
+    assert r["ask_outcome"] is False, "a same-day convergence must not be asked"
+
+
+def test_recording_an_outcome_round_trips_through_the_bubble(tmp_path, make_fake):
+    """The click sends an INDEX and the outcome text. No ref, no sitting id, no experience id
+    crosses the wire in either direction (L-13) — the server resolves the index by-ref exactly
+    as the memory read does."""
+    import json
+
+    client = _world_client(tmp_path, make_fake)
+    client.post("/api/session")
+    _drive_to_done(client)
+    r = client.post(
+        "/api/session/single/outcome",
+        json={"index": 0, "outcome": "They signed the gated version.", "kind": "held"},
+    )
+    assert r.status_code == 200, r.text
+    blob = json.dumps(r.json())
+    assert "gen:" not in blob and "veldra:" not in blob and "house_refs" not in blob
+
+    back = client.post("/api/session/single/memory", json={"index": 0}).json()
+    assert back["outcome"] == "They signed the gated version."
+    assert back["outcome_kind"] == "held"
+    assert back["ask_outcome"] is False, "an answered memory is never asked again"
+    # the memory itself is untouched — an outcome annotates, it does not rewrite
+    assert back["position"] and back["situation"]
+
+
+def test_an_outcome_kind_that_grades_the_conclusion_is_rejected(tmp_path, make_fake):
+    """The four fates carry no verdict. If this route ever accepts 'worked' or 'correct', the
+    record starts grading conclusions and invariant 5 is gone — so the rejection lives at the
+    boundary, not in a docstring."""
+    client = _world_client(tmp_path, make_fake)
+    client.post("/api/session")
+    _drive_to_done(client)
+    for bad in ("worked", "correct", "good", "right", ""):
+        r = client.post(
+            "/api/session/single/outcome", json={"index": 0, "outcome": "x", "kind": bad}
+        )
+        assert r.status_code == 422, f"{bad!r} must be refused at the wire, got {r.status_code}"
+
+
+def test_the_outcome_never_reaches_the_engine():
+    """The hard one. An outcome is evidence sitting BESIDE a memory, never an input to judgment.
+    The moment assessment or state can read it, the loop grades conclusions by what happened —
+    which is exactly the thing this project refuses to do (invariant 5), and worse, it would do
+    it silently. Structural, because a comment cannot enforce it."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "src" / "retnovation"
+    for rel in ("assessment", "state.py", "orchestration.py", "scheduler.py"):
+        target = root / rel
+        files = sorted(target.rglob("*.py")) if target.is_dir() else [target]
+        for f in files:
+            src = f.read_text()
+            assert "outcome_kind" not in src and "record_outcome" not in src, (
+                f"{f.name} references the outcome record — the engine must never see what "
+                f"happened, or rigor-and-trajectory scoring becomes outcome scoring"
+            )
+
+
 def test_memory_chrome_is_recollective_never_evaluative():
     """Spec-1 5c (L-4): the memory surface's static strings recall, never grade."""
     from pathlib import Path

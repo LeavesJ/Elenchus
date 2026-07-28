@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
@@ -40,6 +41,16 @@ class _Cont(BaseModel):
 
 class _Memory(BaseModel):
     index: int
+
+
+class _Outcome(BaseModel):
+    """What became of the decision. `kind` is a Literal so a grading word ('worked', 'correct')
+    is refused by FastAPI with a 422 before it ever reaches the store — the constraint that
+    keeps outcomes from becoming verdicts lives at the boundary, not in a docstring."""
+
+    index: int
+    outcome: str
+    kind: Literal["held", "reversed", "overtaken", "too_early"]
 
 
 def _default_model():
@@ -149,6 +160,10 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
             "position": data["position"],
             "when": data["when"],
             "origin": data.get("origin", ""),
+            # The fourth field, projected explicitly like the rest — nulls until answered.
+            "outcome": data.get("outcome"),
+            "outcome_kind": data.get("outcome_kind"),
+            "ask_outcome": bool(data.get("ask_outcome")),
         }
     if tag == "close":  # user-driven end: the honest close + the frozen-at-convergence village —
         # terrain regions plus one house per convergence (living sitting §2f; ordinal-only, L-13)
@@ -244,5 +259,11 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
     def memory(sid: str, body: _Memory) -> dict:
         # Spec-1 5d: the click sends an INDEX; the server resolves it by-ref (L-13).
         return _emit(reg, *reg.memory(_SID, body.index))
+
+    @app.post("/api/session/{sid}/outcome")
+    def outcome(sid: str, body: _Outcome) -> dict:
+        # Same index-only contract as the read (L-13). Returns the re-read memory, so the
+        # client renders the annotated record rather than assuming the write landed.
+        return _emit(reg, *reg.record_outcome(_SID, body.index, body.outcome, body.kind))
 
     return app

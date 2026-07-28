@@ -19,7 +19,7 @@ from ..scheduler import propose_open_ended
 from ..terrain import compose_houses, convergence_order, project_terrain
 from ..types import EntryClass, Outcome, Regime, Selection, Work
 from . import voice
-from .sitting_store import SittingStore
+from .sitting_store import OUTCOME_ASK_AFTER_DAYS, OUTCOME_KINDS, SittingStore
 from .slots import resolve_slots
 from .vessels import vessel_count
 
@@ -138,6 +138,26 @@ _AFFIRMATIVE_LEAD_RE = re.compile(
     + "|".join(re.escape(w) for w in sorted(_AFFIRMATIVE_LEAD, key=len, reverse=True))
     + r")(?![\w'])"
 )
+
+
+def _should_ask_outcome(converged_at: str, outcome: str | None, now: datetime) -> bool:
+    """Whether the bubble asks what became of this decision.
+
+    Three ways to stay shut, one to open: already answered, too recent, or a timestamp we
+    cannot read. The unparseable case is deliberately a NO — an unreadable date is a reason to
+    say nothing, never a reason to interrogate someone about a memory we cannot even place.
+
+    Pure and local so the gate can be tested at every boundary without waiting out the delay
+    or threading a fake clock through three layers."""
+    if outcome:
+        return False
+    try:
+        at = datetime.fromisoformat(converged_at)
+    except (TypeError, ValueError):
+        return False
+    if at.tzinfo is None:
+        return False
+    return (now - at).days >= OUTCOME_ASK_AFTER_DAYS
 
 
 def _is_affirmative(text: str) -> bool:
@@ -1924,8 +1944,45 @@ class SessionRegistry:
                 "position": row["position"],  # None for legacy rows -> chrome placeholder
                 "when": when,
                 "origin": origin,
+                # The fourth field. Absent on every memory until someone answers, and the ask
+                # is age-gated so a decision made this week is never interrogated about its
+                # outcome. Recalled beside the memory, never folded into it (L-4).
+                "outcome": row.get("outcome"),
+                "outcome_kind": row.get("outcome_kind"),
+                "ask_outcome": _should_ask_outcome(
+                    when, row.get("outcome"), datetime.now(timezone.utc)
+                ),
             },
         )
+
+    def record_outcome(self, session_id: str, index: int, outcome: str, kind: str):
+        """Attach what happened to the memory at `index`. Resolves the index by-ref through the
+        SAME drift guard as the read: a stale index must never stamp one decision's outcome
+        onto another's memory, and the failure mode has to be an honest refusal rather than a
+        wrong write. No model call — this is the learner's own words, stored verbatim."""
+        if kind not in OUTCOME_KINDS:
+            return ("nudge", {"message": _MEMORY_UNKNOWN_NUDGE})
+        home = self._store.latest_homebase()
+        refs = home.get("house_refs") or []
+        ats = home.get("house_at") or []
+        if isinstance(index, bool) or not isinstance(index, int) or not (0 <= index < len(refs)):
+            return ("nudge", {"message": _MEMORY_UNKNOWN_NUDGE})
+        rows = self._store.converged_log()
+        if index >= len(rows):
+            return ("memory", {"unavailable": True})
+        row = rows[index]
+        at_mismatch = bool(ats) and index < len(ats) and row["converged_at"] != ats[index]
+        if row["ref"] != refs[index] or at_mismatch:
+            return ("memory", {"unavailable": True})  # drift guard — never the wrong memory
+        self._store.record_outcome(
+            row["sitting_id"],
+            row["ref"],
+            datetime.fromisoformat(row["converged_at"]),
+            outcome,
+            kind,
+            datetime.now(timezone.utc),
+        )
+        return self.memory(session_id, index)
 
     def _memory_situation(self, ref: str, experience_id: str = "") -> str | None:
         """The situation text for a convergence ref: the SERVED forged scenario for a gen: ref;
