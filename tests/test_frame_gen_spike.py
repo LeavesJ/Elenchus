@@ -2,9 +2,9 @@ import os
 
 import pytest
 
-from retnovation.content_loader import load_mush_frames, load_spike_prompt
-from retnovation.model import FakeModel, IntakeClassification
-from retnovation.types import (
+from elenchus.content_loader import load_mush_frames, load_spike_prompt
+from elenchus.model import FakeModel, IntakeClassification
+from elenchus.types import (
     CandidateFrame,
     ConvergenceCheck,
     GeneratedOutput,
@@ -83,7 +83,7 @@ def test_fakemodel_generate_scenarios_returns_prompts():
 @pytest.mark.live
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
 def test_live_generate_scenarios_returns_prompts():
-    from retnovation.model import AnthropicModel
+    from elenchus.model import AnthropicModel
 
     out = AnthropicModel().generate_scenarios(
         "You must set the subscription price for your software in a saturated market. Decide."
@@ -130,14 +130,14 @@ class FakeSpikeModel:
 
 
 def test_curated_exemplars_renders_the_five():
-    from retnovation.frame_gen_spike import curated_exemplars
+    from elenchus.frame_gen_spike import curated_exemplars
 
     ex = curated_exemplars()
     assert len(ex.strip()) > 50  # non-empty exemplar text derived from the curated library
 
 
 def test_run_arm_produces_lift_verdicts(tmp_path):
-    from retnovation.frame_gen_spike import run_arm
+    from elenchus.frame_gen_spike import run_arm
 
     frames = [CandidateFrame(frame_code="good", frame_detail="d", injection="inj")]
     rows = run_arm(
@@ -155,7 +155,7 @@ def test_run_arm_produces_lift_verdicts(tmp_path):
 
 
 def test_format_report_has_both_arms(tmp_path):
-    from retnovation.frame_gen_spike import format_report, run_arm
+    from elenchus.frame_gen_spike import format_report, run_arm
 
     frames = [CandidateFrame(frame_code="good", frame_detail="d", injection="inj")]
     arm1 = run_arm(
@@ -170,7 +170,7 @@ def test_format_report_has_both_arms(tmp_path):
 def test_summary_counts_the_three_way_and_excludes_errors():
     """L-28: the go count is HARD-LIFT ∧ CONFIDENTLY-NOVEL; convergent and uncertain are their own
     buckets; errored/inconclusive stay out of the denominator."""
-    from retnovation.frame_gen_spike import _summary
+    from elenchus.frame_gen_spike import _summary
 
     rows = [
         {"category": "HARD-LIFT", "verdict": "novel"},
@@ -193,7 +193,7 @@ def test_summary_surfaces_unscored_hard_lift_rows_no_silent_drop():
     """L-28 partition seam: a HARD-LIFT row that never ran the gate (verdict=None — e.g. the ungated
     mush arm, or a hand-built/resumed row) must be COUNTED in hard_lift_unscored, never silently
     dropped from all three buckets. novel+convergent+uncertain+unscored must total hard_lift."""
-    from retnovation.frame_gen_spike import _summary
+    from elenchus.frame_gen_spike import _summary
 
     rows = [
         {"category": "HARD-LIFT", "verdict": "novel"},
@@ -225,7 +225,7 @@ def test_summary_surfaces_unscored_hard_lift_rows_no_silent_drop():
 )
 def test_novelty_gate_derivation_table(restates, conf, expected):
     """The 3-way verdict is DERIVED in code from restates_nearest × confidence (L-1 seam)."""
-    from retnovation.frame_gen_spike import _apply_novelty_gate
+    from elenchus.frame_gen_spike import _apply_novelty_gate
 
     class _M:
         def frame_convergence(self, frame_detail, curated):
@@ -244,7 +244,7 @@ def test_novelty_gate_derivation_table(restates, conf, expected):
 
 
 def test_spike_problem_set_is_wellformed():
-    from retnovation.frame_gen_spike import PROBLEMS
+    from elenchus.frame_gen_spike import PROBLEMS
 
     assert 4 <= len(PROBLEMS) <= 6
     assert all(isinstance(p, str) and len(p.strip()) > 40 for p in PROBLEMS)
@@ -252,7 +252,7 @@ def test_spike_problem_set_is_wellformed():
 
 def test_spikemodel_wrapper_enlarges_budget_and_delegates():
     """L-17: the wrapper hands generate_output a decision-sized budget; everything else delegates."""
-    from retnovation.frame_gen_spike import _SpikeModel
+    from elenchus.frame_gen_spike import _SpikeModel
 
     seen = {}
 
@@ -273,7 +273,7 @@ def test_spikemodel_wrapper_enlarges_budget_and_delegates():
 def test_spikemodel_rate_preference_coerces_invalid_to_tie():
     """The model sometimes emits a non-tie preference with magnitude 0 (fails the cross-field
     validator); the wrapper retries then coerces to a conservative tie rather than crashing."""
-    from retnovation.frame_gen_spike import _SpikeModel
+    from elenchus.frame_gen_spike import _SpikeModel
 
     class M:
         def rate_preference(self, prompt, a, b):
@@ -288,7 +288,7 @@ def test_spikemodel_rate_preference_coerces_invalid_to_tie():
 
 def test_run_arm_records_error_row_on_frame_failure(tmp_path):
     """A single frame's failure records an error row and does not kill the run (experiment resilience)."""
-    from retnovation.frame_gen_spike import run_arm
+    from elenchus.frame_gen_spike import run_arm
 
     class Boom:
         def generate_frames(self, p, e):

@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
-_log = logging.getLogger("retnovation.web")
+_log = logging.getLogger("elenchus.web")
 
 K_SLOTS = 24
 

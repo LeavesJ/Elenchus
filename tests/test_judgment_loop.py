@@ -1,6 +1,6 @@
-from retnovation.assessment import judgment_loop
-from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
-from retnovation.types import (
+from elenchus.assessment import judgment_loop
+from elenchus.model import FakeModel, IntakeClassification, ResponseClassification
+from elenchus.types import (
     Experience,
     Frame,
     FrameState,
@@ -195,7 +195,7 @@ def test_plateau_stops_on_two_distinct_unmoved_targets():
 
 
 def test_grader_dispute_demotes_a_sharper_call_in_the_full_loop():
-    from retnovation.types import SharperVerdict
+    from elenchus.types import SharperVerdict
 
     intake = IntakeClassification(
         frame_states={

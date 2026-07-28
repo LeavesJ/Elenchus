@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from retnovation.types import (
+from elenchus.types import (
     AdmissionRecord,
     AdmittedAs,
     Gates,
@@ -48,7 +48,7 @@ def test_mined_candidate_to_candidate_frame():
 
 
 def test_screen_summary_from_result_and_marginal_lift_is_derived():
-    from retnovation.types import LiftResult, ScenarioVerdict
+    from elenchus.types import LiftResult, ScenarioVerdict
 
     lr = LiftResult(
         frame_code="f",

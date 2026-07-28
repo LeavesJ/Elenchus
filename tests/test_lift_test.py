@@ -1,6 +1,6 @@
-from retnovation.lift_test import run_lift_test, un_randomize
-from retnovation.model import FakeLiftModel
-from retnovation.types import (
+from elenchus.lift_test import run_lift_test, un_randomize
+from elenchus.model import FakeLiftModel
+from elenchus.types import (
     CandidateFrame,
     GeneratedOutput,
     InjectionExpressed,

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from retnovation.surface import format_problem_menu, format_receipt
-from retnovation.types import NextExperienceSpec, Proposal, Regime, SelectionReceipt
+from elenchus.surface import format_problem_menu, format_receipt
+from elenchus.types import NextExperienceSpec, Proposal, Regime, SelectionReceipt
 
 NOW = datetime(2026, 6, 25, tzinfo=timezone.utc)
 
@@ -66,8 +66,8 @@ def test_problem_menu_never_names_a_frame():
 def test_format_receipt_labels_margin_cross_drive():
     from datetime import datetime, timezone
 
-    from retnovation.surface import format_receipt
-    from retnovation.types import SelectionReceipt
+    from elenchus.surface import format_receipt
+    from elenchus.types import SelectionReceipt
 
     r = SelectionReceipt(
         frame="f",

@@ -3,11 +3,11 @@ proving a second regime runs through the same plumbing (deterministic, model-fre
 
 from datetime import datetime, timezone
 
-from retnovation.aim import aim, derive_core
-from retnovation.model import FakeModel, IntakeClassification
-from retnovation.orchestration import run_session
-from retnovation.persistence import Store
-from retnovation.types import CheckableAssessment, NextExperienceSpec, Regime, Work
+from elenchus.aim import aim, derive_core
+from elenchus.model import FakeModel, IntakeClassification
+from elenchus.orchestration import run_session
+from elenchus.persistence import Store
+from elenchus.types import CheckableAssessment, NextExperienceSpec, Regime, Work
 
 
 def _now():

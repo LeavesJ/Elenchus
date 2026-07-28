@@ -2,10 +2,10 @@ import os
 
 import pytest
 
-from retnovation.aim import aim, derive_core
-from retnovation.experience import select_experience
-from retnovation.model import AnthropicModel, IntakeClassification
-from retnovation.types import FrameState, Regime, TrapState
+from elenchus.aim import aim, derive_core
+from elenchus.experience import select_experience
+from elenchus.model import AnthropicModel, IntakeClassification
+from elenchus.types import FrameState, Regime, TrapState
 
 _HAS_KEY = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"))
 
@@ -19,9 +19,9 @@ def test_live_intake_on_selected_experience(tmp_path):
     when select_experience gained `corpus`, because this key-gated test never runs offline (L-22)."""
     from datetime import datetime, timezone
 
-    from retnovation.cli import build_store
-    from retnovation.content_loader import load_library, load_progression
-    from retnovation.scheduler import propose_open_ended
+    from elenchus.cli import build_store
+    from elenchus.content_loader import load_library, load_progression
+    from elenchus.scheduler import propose_open_ended
 
     store = build_store(str(tmp_path / "live_intake.db"))
     try:
@@ -49,8 +49,8 @@ def test_live_grade_answer_smoke():
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
         pytest.skip("no ANTHROPIC_API_KEY")
-    from retnovation.model import AnthropicModel
-    from retnovation.types import CheckableQuestion, CheckType, Experience, CheckableSet
+    from elenchus.model import AnthropicModel
+    from elenchus.types import CheckableQuestion, CheckType, Experience, CheckableSet
 
     q = CheckableQuestion(
         question_id="q1",
@@ -74,8 +74,8 @@ def test_live_grade_answer_smoke():
 @pytest.mark.live
 @pytest.mark.skipif(not _HAS_KEY, reason="no Anthropic credential in env")
 def test_live_grade_sharper_smoke():
-    from retnovation.model import AnthropicModel
-    from retnovation.types import (
+    from elenchus.model import AnthropicModel
+    from elenchus.types import (
         Experience,
         Frame,
         Mode,
@@ -148,7 +148,7 @@ def test_live_novelty_confident_novel_is_reachable():
     confident-novel. 0/3 => the necessity bar is STRANGLING (loosen the prompt, §3A(b)), NOT the
     model failing symmetric confidence. This is the L-9 anti-synthetic-lie teeth — offline can't
     prove the confident-novel cell is reachable at all."""
-    from retnovation.frame_gen_spike import _curated_frames
+    from elenchus.frame_gen_spike import _curated_frames
 
     m, curated = AnthropicModel(), _curated_frames()
     hits, seen = 0, []
@@ -168,7 +168,7 @@ def test_live_novelty_confident_novel_is_reachable():
 def test_live_novelty_over_admit_guard():
     """Honesty guard (spec §5.1): a genuine restatement re-skinned onto a new subject must NEVER be
     confident-novel — that is the over-admit failure the reachability change re-arms."""
-    from retnovation.frame_gen_spike import _curated_frames
+    from elenchus.frame_gen_spike import _curated_frames
 
     m, curated = AnthropicModel(), _curated_frames()
     for detail in _RESTATEMENTS:
@@ -186,7 +186,7 @@ def test_live_novelty_convergent_and_boundary():
     design_for_the_teardown half-restates embed_credentials -> assert not-confident-novel (a
     low-confidence boundary OR a convergent call both pass; low is the recorded expectation, not a
     hard assert)."""
-    from retnovation.frame_gen_spike import _curated_frames
+    from elenchus.frame_gen_spike import _curated_frames
 
     m, curated = AnthropicModel(), _curated_frames()
     paraphrase = (

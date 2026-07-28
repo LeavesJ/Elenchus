@@ -1,10 +1,10 @@
 """The dock's moored vessels = genuinely-owned ledger rows ONLY (Spec-2 §6, D-S2-4):
 corpus provenance != 'seed', non-gen refs, clamp 20. Empty harbor is true by predicate."""
 
-from retnovation.cli import build_store
-from retnovation.persistence import Store
-from retnovation.types import CorpusEntry, LedgerEntry
-from retnovation.web.vessels import vessel_count
+from elenchus.cli import build_store
+from elenchus.persistence import Store
+from elenchus.types import CorpusEntry, LedgerEntry
+from elenchus.web.vessels import vessel_count
 
 
 def test_fresh_worker_seeded_db_has_an_empty_harbor(tmp_path):

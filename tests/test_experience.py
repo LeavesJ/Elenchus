@@ -1,7 +1,7 @@
-from retnovation.aim import aim, derive_core
-from retnovation.experience import SELECTORS, select_experience
-from retnovation.persistence import Store
-from retnovation.types import CorpusEntry, LearnerState, NextExperienceSpec, Regime
+from elenchus.aim import aim, derive_core
+from elenchus.experience import SELECTORS, select_experience
+from elenchus.persistence import Store
+from elenchus.types import CorpusEntry, LearnerState, NextExperienceSpec, Regime
 
 SEED_REFS = (
     "veldra:license_fork_risk",
@@ -43,7 +43,7 @@ def test_select_experience_dispatches_open_ended_and_gates(tmp_path):
 
 
 def test_select_experience_dispatches_cs_technical(tmp_path):
-    from retnovation.types import Core
+    from elenchus.types import Core
 
     spec = NextExperienceSpec(
         target_frames=["safety_vs_liveness"], ledger_ref="", regime=Regime.cs_technical
@@ -59,13 +59,13 @@ def test_select_experience_dispatches_cs_technical(tmp_path):
 
 
 def test_fixed_experience_is_retired():
-    import retnovation.experience as experience_mod
+    import elenchus.experience as experience_mod
 
     assert not hasattr(experience_mod, "FIXED_EXPERIENCE")
 
 
 def test_select_experience_attaches_a_corpus_scene_and_overrides_prompt(tmp_path):
-    from retnovation.types import CorpusEntry, NextExperienceSpec, Regime, Scene
+    from elenchus.types import CorpusEntry, NextExperienceSpec, Regime, Scene
 
     store = Store(tmp_path / "sc.db")
     _seed_corpus(store)
@@ -95,7 +95,7 @@ def test_select_experience_attaches_a_corpus_scene_and_overrides_prompt(tmp_path
 
 
 def test_select_experience_without_a_scene_is_unchanged(tmp_path):
-    from retnovation.types import NextExperienceSpec, Regime
+    from elenchus.types import NextExperienceSpec, Regime
 
     store = Store(tmp_path / "ns.db")
     _seed_corpus(store)  # corpus has no scenes

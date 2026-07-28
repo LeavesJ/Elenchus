@@ -1,7 +1,7 @@
 import pytest
 
-from retnovation.model import AnthropicModel, ModelError
-from retnovation.types import GeneratedOutput, InjectionExpressed, PreferenceRating
+from elenchus.model import AnthropicModel, ModelError
+from elenchus.types import GeneratedOutput, InjectionExpressed, PreferenceRating
 
 
 class _Resp:
@@ -108,7 +108,7 @@ def test_check_injection_expressed_refusal_raises():
 
 
 def test_fake_lift_model_scripts_the_three_methods():
-    from retnovation.model import FakeLiftModel
+    from elenchus.model import FakeLiftModel
 
     fake = FakeLiftModel(
         outputs={("p", False): GeneratedOutput(text="C"), ("p", True): GeneratedOutput(text="F")},

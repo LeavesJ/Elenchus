@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
-from retnovation.crystallization import crystallization_candidates
-from retnovation.types import (
+from elenchus.crystallization import crystallization_candidates
+from elenchus.types import (
     Core,
     CoreKind,
     Experience,

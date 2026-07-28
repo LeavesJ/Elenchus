@@ -1,9 +1,9 @@
-from retnovation.model import (
+from elenchus.model import (
     AnthropicModel,
     FakeModel,
     IntakeClassification,
 )
-from retnovation.types import (
+from elenchus.types import (
     ConverseTurn,
     EgressScreen,
     EntryClass,
@@ -15,7 +15,7 @@ from retnovation.types import (
     Rubric,
     Trap,
 )
-from retnovation.web import voice
+from elenchus.web import voice
 
 
 def _fake():
@@ -538,7 +538,7 @@ def test_concierge_converse_is_frame_blind_and_carries_stop_reason():
 def test_require_names_truncation_distinctly():
     # A thinking-eats-the-budget truncation must not masquerade as a refusal: the founder-dogfood
     # brick (2026-07-01) surfaced as the generic message and cost a live diagnosis to attribute.
-    from retnovation.model import ModelError, _require
+    from elenchus.model import ModelError, _require
 
     import pytest as _pytest
 
@@ -551,7 +551,7 @@ def test_graded_classifier_budgets_have_thinking_headroom():
     tokens on a real founder opening against a 2048 cap — one longer adaptive-thinking excursion
     crosses it, parsed_output=None, and the session BRICKS terminally. Intake + response get the
     same 4096 headroom as the egress screen; entry stays 2048 (measured ~19 tokens)."""
-    from retnovation.model import _IntakeWire, ResponseClassification
+    from elenchus.model import _IntakeWire, ResponseClassification
 
     stub = _StubClient(parsed=_IntakeWire(frames=[], traps=[]))
     m = AnthropicModel(client=stub)
@@ -618,7 +618,7 @@ def test_concierge_turn_brief_carries_arc_line_only_on_probe():
 def test_arc_doctrine_lives_only_in_the_probe_prompt():
     """MF-2: voice_craft rides into EVERY author — the press/arc stance must live in concierge.md
     (probe-only). Sentinel: the section header. land/converse must never see it."""
-    from retnovation.content_loader import load_prompt
+    from elenchus.content_loader import load_prompt
 
     assert "The arc of the press" in load_prompt("concierge")
     assert "The arc of the press" not in load_prompt("voice_craft")
@@ -641,7 +641,7 @@ def test_arc_doctrine_lives_only_in_the_probe_prompt():
 
 
 def test_render_turns_default_window_is_six():
-    from retnovation.model import _render_turns
+    from elenchus.model import _render_turns
 
     turns = [("student", f"t{i}") for i in range(10)]
     out = _render_turns(turns)
@@ -650,7 +650,7 @@ def test_render_turns_default_window_is_six():
 
 
 def test_render_turns_wider_window_keeps_more():
-    from retnovation.model import _render_turns
+    from elenchus.model import _render_turns
 
     turns = [("student", f"t{i}") for i in range(25)]
     out = _render_turns(turns, limit=20)
@@ -659,14 +659,14 @@ def test_render_turns_wider_window_keeps_more():
 
 
 def test_render_turns_empty_is_blank():
-    from retnovation.model import _render_turns
+    from elenchus.model import _render_turns
 
     assert _render_turns([]) == ""
     assert _render_turns([], limit=20) == ""
 
 
 def test_concierge_converse_prompt_defers_a_fresh_pressure_to_the_next_chapter():
-    from retnovation.content_loader import load_prompt
+    from elenchus.content_loader import load_prompt
 
     p = load_prompt("concierge_converse")
     assert "next chapter" in p.lower()
@@ -675,7 +675,7 @@ def test_concierge_converse_prompt_defers_a_fresh_pressure_to_the_next_chapter()
 def test_concierge_converse_empty_by_default_contract():
     """User-steered chapters F1: the structured next_pressure field leans EMPTY by default; a
     re-argument of the landed call is not a fresh pressure."""
-    from retnovation.content_loader import load_prompt
+    from elenchus.content_loader import load_prompt
 
     low = load_prompt("concierge_converse").lower()
     assert "next_pressure" in low

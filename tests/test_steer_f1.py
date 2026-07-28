@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from retnovation.content_loader import load_steer_fixtures
+from elenchus.content_loader import load_steer_fixtures
 
 
 def test_f1_fixtures_load_and_validate():
@@ -26,7 +26,7 @@ def test_live_steer_f1():
     """F1 is the whole ballgame: the false-non-empty rate over re-litigations/chatter stays under
     the recorded baseline. Read the PRINTED turns before treating a red as real (judge noise /
     L-24 529s). Re-run under threshold on ANY concierge_converse.md or model change (spec §4)."""
-    from retnovation.model import AnthropicModel
+    from elenchus.model import AnthropicModel
 
     fx = load_steer_fixtures()
     model = AnthropicModel()

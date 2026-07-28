@@ -9,7 +9,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from retnovation.web.sitting_store import SittingStore
+from elenchus.web.sitting_store import SittingStore
 
 NOW = datetime(2026, 7, 1, 21, 0, 0, tzinfo=timezone.utc)
 LATER = NOW + timedelta(hours=1)
@@ -464,9 +464,9 @@ def test_compose_houses_over_a_real_store_is_one_house_per_convergence_row(tmp_p
     saga-grouping collapse."""
     from datetime import datetime, timedelta, timezone
 
-    from retnovation.terrain import compose_houses, project_terrain
-    from retnovation.types import LearnerState
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.terrain import compose_houses, project_terrain
+    from elenchus.types import LearnerState
+    from elenchus.web.sitting_store import SittingStore
 
     store = SittingStore(str(tmp_path / "retrofit.db"))
     wall = datetime.now(timezone.utc)

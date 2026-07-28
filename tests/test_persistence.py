@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from retnovation.persistence import Store
-from retnovation.types import (
+from elenchus.persistence import Store
+from elenchus.types import (
     FrameStrength,
     LearnerState,
     LedgerEntry,
@@ -55,7 +55,7 @@ def test_queue_len_is_non_consuming(tmp_path):
 
 
 def test_concepts_roundtrip_and_never_deleted(tmp_path):
-    from retnovation.types import SpacedItem
+    from elenchus.types import SpacedItem
 
     s = Store(tmp_path / "c.db")
     st = LearnerState()
@@ -77,7 +77,7 @@ def test_concepts_roundtrip_and_never_deleted(tmp_path):
 
 
 def test_corpus_scene_roundtrip_and_none_default(tmp_path):
-    from retnovation.types import CorpusEntry, Scene
+    from elenchus.types import CorpusEntry, Scene
 
     s = Store(tmp_path / "sc.db")
     s.upsert_corpus(
@@ -110,7 +110,7 @@ def test_corpus_scene_roundtrip_and_none_default(tmp_path):
 def test_corpus_scene_column_is_migrated_onto_an_old_table(tmp_path):
     import sqlite3
 
-    from retnovation.types import CorpusEntry, Scene
+    from elenchus.types import CorpusEntry, Scene
 
     db = tmp_path / "old.db"
     # an OLD corpus table without scene_json
@@ -140,8 +140,8 @@ def test_corpus_scene_column_is_migrated_onto_an_old_table(tmp_path):
 
 def test_storage_fields_round_trip_and_strength_derives(tmp_path):
     from datetime import datetime, timedelta, timezone
-    from retnovation.persistence import Store
-    from retnovation.types import FrameStrength, LearnerState, Strength
+    from elenchus.persistence import Store
+    from elenchus.types import FrameStrength, LearnerState, Strength
 
     t0 = datetime(2026, 6, 24, tzinfo=timezone.utc)
     s = Store(tmp_path / "p.db")
@@ -168,7 +168,7 @@ def test_storage_fields_round_trip_and_strength_derives(tmp_path):
 def test_old_db_without_new_columns_migrates(tmp_path):
     import sqlite3
     from datetime import datetime, timezone
-    from retnovation.persistence import Store
+    from elenchus.persistence import Store
 
     t0 = datetime(2026, 6, 24, tzinfo=timezone.utc)
     # simulate a pre-migration frames table (no evidence_count/breadth columns)
@@ -187,21 +187,21 @@ def test_old_db_without_new_columns_migrates(tmp_path):
     loaded = Store(db).load_state(t0)  # __init__ migrates, load derives
     assert loaded.frames["f"].evidence_count == 0  # old row → no storage evidence
     assert loaded.frames["f"].breadth == set()
-    from retnovation.types import Strength
+    from elenchus.types import Strength
 
     assert loaded.frames["f"].strength is Strength.weak  # derived from zero evidence
 
 
 def test_decay_frame_is_gone(tmp_path):
-    from retnovation.persistence import Store
+    from elenchus.persistence import Store
 
     assert not hasattr(Store(tmp_path / "x.db"), "decay_frame")
 
 
 def test_trap_gallery_round_trips_and_is_idempotent(tmp_path):
     from datetime import datetime, timezone
-    from retnovation.persistence import Store
-    from retnovation.types import LearnerState, TrapOccurrence
+    from elenchus.persistence import Store
+    from elenchus.types import LearnerState, TrapOccurrence
 
     t0 = datetime(2026, 6, 24, tzinfo=timezone.utc)
     s = Store(tmp_path / "tg.db")
@@ -221,8 +221,8 @@ def test_trap_gallery_round_trips_and_is_idempotent(tmp_path):
 
 
 def test_queue_round_trips_experience_id(tmp_path):
-    from retnovation.persistence import Store
-    from retnovation.types import NextExperienceSpec, Regime
+    from elenchus.persistence import Store
+    from elenchus.types import NextExperienceSpec, Regime
 
     s = Store(tmp_path / "q.db")
     s.queue_push(
@@ -239,8 +239,8 @@ def test_queue_round_trips_experience_id(tmp_path):
 def test_selection_log_decision_columns_fresh_and_old_db(tmp_path):
     import sqlite3
     from datetime import datetime, timezone
-    from retnovation.persistence import Store
-    from retnovation.types import (
+    from elenchus.persistence import Store
+    from elenchus.types import (
         NextExperienceSpec,
         Outcome,
         Regime,
@@ -300,8 +300,8 @@ def test_selection_log_decision_columns_fresh_and_old_db(tmp_path):
 
 def test_core_decision_log_roundtrip(tmp_path):
     from datetime import datetime, timezone
-    from retnovation.persistence import Store
-    from retnovation.types import CoreCandidate, CoreKind, CoreVerdict
+    from elenchus.persistence import Store
+    from elenchus.types import CoreCandidate, CoreKind, CoreVerdict
 
     now = datetime(2026, 6, 25, tzinfo=timezone.utc)
     store = Store(tmp_path / "c.db")

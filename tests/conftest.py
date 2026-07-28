@@ -7,8 +7,8 @@ import pytest
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
-from retnovation.model import FakeModel, IntakeClassification, ResponseClassification  # noqa: E402
-from retnovation.types import (  # noqa: E402
+from elenchus.model import FakeModel, IntakeClassification, ResponseClassification  # noqa: E402
+from elenchus.types import (  # noqa: E402
     FrameState,
     Outcome,
     Selection,

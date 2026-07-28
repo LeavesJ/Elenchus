@@ -1,5 +1,5 @@
-from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
-from retnovation.types import ConverseTurn, FrameState, TrapState
+from elenchus.model import FakeModel, IntakeClassification, ResponseClassification
+from elenchus.types import ConverseTurn, FrameState, TrapState
 
 
 def test_converseturn_defaults_empty():
@@ -49,8 +49,8 @@ def test_fake_model_raises_when_script_exhausted():
 
 
 def test_fake_model_grade_answer_is_scripted():
-    from retnovation.model import FakeModel, IntakeClassification
-    from retnovation.types import CheckableGrade, CheckableQuestion, CheckType
+    from elenchus.model import FakeModel, IntakeClassification
+    from elenchus.types import CheckableGrade, CheckableQuestion, CheckType
 
     q = CheckableQuestion(
         question_id="q1",
@@ -69,8 +69,8 @@ def test_fake_model_grade_answer_is_scripted():
 
 
 def test_fake_model_grade_sharper_scripted_then_default_agree():
-    from retnovation.model import FakeModel, IntakeClassification
-    from retnovation.types import SharperVerdict
+    from elenchus.model import FakeModel, IntakeClassification
+    from elenchus.types import SharperVerdict
 
     m = FakeModel(
         IntakeClassification(frame_states={}, trap_states={}),

@@ -11,7 +11,7 @@ memory. L-3: the migration only ADDS; it never overwrites or deletes."""
 import json
 import sqlite3
 
-from retnovation.web.sitting_store import SittingStore
+from elenchus.web.sitting_store import SittingStore
 
 
 def _seed(path, turns, convergences):

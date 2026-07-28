@@ -1,18 +1,18 @@
 from datetime import datetime, timedelta, timezone
 
-from retnovation.aim import aim, derive_core
-from retnovation.assessment.judgment_loop import assess
-from retnovation.cli import build_store
-from retnovation.content_loader import load_experience, load_library, load_progression, load_rubric
-from retnovation.generator import angle_count
-from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
-from retnovation.orchestration import run_session
-from retnovation.persistence import Store
-from retnovation.policy import select_next
-from retnovation.run_elicitation import load_probe_experience
-from retnovation.state import derive_due
-from retnovation.surface import format_problem_menu
-from retnovation.types import (
+from elenchus.aim import aim, derive_core
+from elenchus.assessment.judgment_loop import assess
+from elenchus.cli import build_store
+from elenchus.content_loader import load_experience, load_library, load_progression, load_rubric
+from elenchus.generator import angle_count
+from elenchus.model import FakeModel, IntakeClassification, ResponseClassification
+from elenchus.orchestration import run_session
+from elenchus.persistence import Store
+from elenchus.policy import select_next
+from elenchus.run_elicitation import load_probe_experience
+from elenchus.state import derive_due
+from elenchus.surface import format_problem_menu
+from elenchus.types import (
     FrameState,
     FrameStrength,
     LearnerState,

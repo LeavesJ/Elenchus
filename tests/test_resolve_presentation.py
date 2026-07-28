@@ -1,7 +1,7 @@
 import re
 
-from retnovation.content_loader import CONTENT_ROOT, load_experience
-from retnovation.web import voice
+from elenchus.content_loader import CONTENT_ROOT, load_experience
+from elenchus.web import voice
 
 _GEAR = ["reflect", "re-point", "STOP pressing"]  # markers of the 3 comprehension behaviors
 
@@ -52,7 +52,7 @@ def test_registers_do_not_reuse_the_live_frame_vocabulary():
     # tagged problem (len>=6 content-words = the move-bearing words; short common words excluded),
     # so the guard tracks the corpus and catches register DRIFT, not just a fixed list. The allowlist
     # covers benign long *world* words both legitimately share (not the move itself).
-    from retnovation.content_loader import load_library
+    from elenchus.content_loader import load_library
 
     # The complete set of benign world/common words the registers and the move-statements share on
     # the current corpus; the distinctive move-words (reversible, optionality, provision, boundary,

@@ -1,9 +1,9 @@
 import pytest
 import yaml
 
-from retnovation.persistence import Store
-from retnovation.types import CorpusEntry, LedgerEntry
-from retnovation.veldra_ingest import SeedEntry, ingest, load_seed
+from elenchus.persistence import Store
+from elenchus.types import CorpusEntry, LedgerEntry
+from elenchus.veldra_ingest import SeedEntry, ingest, load_seed
 
 
 def _seed_entries():
@@ -108,9 +108,9 @@ def test_load_seed_rejects_non_list(tmp_path):
 
 
 def test_seed_scene_threads_into_the_corpus(tmp_path):
-    from retnovation.persistence import Store
-    from retnovation.types import Scene
-    from retnovation.veldra_ingest import SeedEntry, ingest
+    from elenchus.persistence import Store
+    from elenchus.types import Scene
+    from elenchus.veldra_ingest import SeedEntry, ingest
 
     store = Store(tmp_path / "ing.db")
     seeds = [

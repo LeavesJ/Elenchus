@@ -5,8 +5,8 @@ import pytest
 pytest.importorskip("anthropic")
 pytestmark = pytest.mark.live
 
-from retnovation.model import AnthropicModel  # noqa: E402
-from retnovation.types import EntryClass  # noqa: E402
+from elenchus.model import AnthropicModel  # noqa: E402
+from elenchus.types import EntryClass  # noqa: E402
 
 _PROMPT = (
     "You hold unusual pricing power in a concentrated market. One move could lock in a "
@@ -65,12 +65,12 @@ def _first_open_exp(db_path):
     tests. Shared so the no-op and leak-catch tests screen against identical real content."""
     from datetime import datetime, timezone
 
-    from retnovation.aim import aim, derive_core
-    from retnovation.cli import build_store
-    from retnovation.content_loader import load_library, load_progression
-    from retnovation.experience import select_experience
-    from retnovation.scheduler import propose_open_ended
-    from retnovation.types import Regime
+    from elenchus.aim import aim, derive_core
+    from elenchus.cli import build_store
+    from elenchus.content_loader import load_library, load_progression
+    from elenchus.experience import select_experience
+    from elenchus.scheduler import propose_open_ended
+    from elenchus.types import Regime
 
     store = build_store(db_path)
     try:
@@ -88,7 +88,7 @@ def _voice(exp):
     """The composed presentation voice (persona+role+craft) the production path prepends. Post-cutover
     the gear + persona live HERE, not in concierge.md, so @live tests of gear/persona behavior must
     pass it to model.concierge_turn (exp=None -> vera+craft, no role layer)."""
-    from retnovation.web import voice
+    from elenchus.web import voice
 
     return voice.resolve_presentation("founder_ceo", exp)["voice"]
 
@@ -99,7 +99,7 @@ def test_echo_gate_does_not_flag_a_faithful_revoice(tmp_path):
     model against the REAL frames+traps, must PASS a faithful re-voice (same challenge, no named
     move) — else Echo silently falls back to the verbatim push every turn and D3 is never fixed.
     Every offline substring fake misses this; only the real judge over real content catches it."""
-    from retnovation.web import voice
+    from elenchus.web import voice
 
     exp = _first_open_exp(str(tmp_path / "live.db"))
     m = AnthropicModel()
@@ -124,7 +124,7 @@ def test_echo_gate_catches_a_named_move(tmp_path):
     move, emptying the diff even though the leak WAS flagged. Measured on fixed texts: leak 6/6,
     push 0/6 at BOTH efforts — the screen is solid; the push draw was the variance. The set-diff
     mechanic itself is pinned by the no-op test + the offline _PerMoveModel tests."""
-    from retnovation.web import voice
+    from elenchus.web import voice
 
     exp = _first_open_exp(str(tmp_path / "live2.db"))
     m = AnthropicModel()
@@ -180,7 +180,7 @@ def test_concierge_turn_acknowledges_an_objection(tmp_path):
 def test_concierge_turn_never_names_the_move_and_no_invented_name(tmp_path):
     """Moat: a faithful engaged turn passes the egress (no added revelation vs the push); and Vera
     does not address the user by a fabricated name (the 'Sam' dogfood artifact)."""
-    from retnovation.web import voice
+    from elenchus.web import voice
 
     exp = _first_open_exp(str(tmp_path / "moat.db"))
     m = AnthropicModel()
@@ -243,7 +243,7 @@ def test_gear_reanchors_an_off_track_analogy(tmp_path):
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
 def test_gear_still_passes_egress_after_doctrine_change(tmp_path):
     """The added doctrine must not make a faithful engaged turn leak: no added revelation vs the push."""
-    from retnovation.web import voice
+    from elenchus.web import voice
 
     exp = _first_open_exp(str(tmp_path / "gear3.db"))
     m = AnthropicModel()
@@ -259,7 +259,7 @@ def test_gear_still_passes_egress_after_doctrine_change(tmp_path):
 def test_close_does_not_ratify_an_off_track_analogy(tmp_path):
     """obs #5: a close over a dialogue where the student stayed in an analogy and never engaged the
     concrete decision must NOT mirror the fantasy back as 'your position' — and it stays egress-safe."""
-    from retnovation.web import voice
+    from elenchus.web import voice
 
     exp = _first_open_exp(str(tmp_path / "close.db"))
     m = AnthropicModel()
@@ -294,8 +294,8 @@ def test_close_does_not_ratify_an_off_track_analogy(tmp_path):
 def test_ceo_and_cto_registers_diverge_and_neither_leaks_the_move():
     """The CEO/CTO proof, operationalized: the SAME student reply through a CEO-tagged and a
     CTO-tagged problem yields role idiom that diverges, and neither register names a move-word."""
-    from retnovation.content_loader import load_experience
-    from retnovation.web import voice
+    from elenchus.content_loader import load_experience
+    from elenchus.web import voice
 
     m = AnthropicModel()
     ceo = load_experience("decision_under_stakes")
@@ -359,7 +359,7 @@ _VERDICT_TOKENS = (
 
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
 def test_land_arrives_without_verdict_or_named_move(tmp_path):
-    from retnovation.web import voice
+    from elenchus.web import voice
 
     exp = _first_open_exp(str(tmp_path / "land.db"))
     m = AnthropicModel()
@@ -378,7 +378,7 @@ def test_land_arrives_without_verdict_or_named_move(tmp_path):
 
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
 def test_land_is_honest_when_the_student_never_engaged(tmp_path):
-    from retnovation.web import voice
+    from elenchus.web import voice
 
     exp = _first_open_exp(str(tmp_path / "land_budget.db"))
     m = AnthropicModel()
@@ -394,7 +394,7 @@ def test_land_is_honest_when_the_student_never_engaged(tmp_path):
 
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
 def test_converse_winds_down_does_not_re_demand_a_position(tmp_path):
-    from retnovation.web import voice
+    from elenchus.web import voice
 
     exp = _first_open_exp(str(tmp_path / "conv.db"))
     m = AnthropicModel()
@@ -460,7 +460,7 @@ def test_restatement_draws_no_ack_opener(tmp_path):
 def test_ack_on_settled_ground_survives_the_probe_gate(tmp_path):
     """MF-1 teeth: a GOOD ack naming movement on a PREVIOUSLY-settled thread must pass the real
     push-diff gate (else voice.turn silently discards the feature's output)."""
-    from retnovation.web import voice
+    from elenchus.web import voice
 
     exp = _first_open_exp(str(tmp_path / "gate.db"))
     m = AnthropicModel()

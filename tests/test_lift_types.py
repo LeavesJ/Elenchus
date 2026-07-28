@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from retnovation.types import LiftResult, PreferenceRating, ScenarioVerdict
+from elenchus.types import LiftResult, PreferenceRating, ScenarioVerdict
 
 
 def _sv(sid, expressed=True, dist=2, pref=1):

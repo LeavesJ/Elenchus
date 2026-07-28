@@ -1,4 +1,4 @@
-from retnovation import content_loader
+from elenchus import content_loader
 
 
 def test_load_prompt_reads_named_template(tmp_path):

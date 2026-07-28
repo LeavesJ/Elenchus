@@ -17,8 +17,8 @@ from pathlib import Path
 # default prepend import mode puts the conftest's own directory on sys.path.
 from test_renderer_pipeline_static import _js_fn, _strip_comments
 
-TERRAIN = Path("src/retnovation/web/static/terrain3d.js")
-CEREMONIES = Path("src/retnovation/web/static/ceremonies.js")
+TERRAIN = Path("src/elenchus/web/static/terrain3d.js")
+CEREMONIES = Path("src/elenchus/web/static/ceremonies.js")
 
 # --- the render pipeline, replicated exactly enough to assert on (see test_renderer_pipeline_static
 # for why: three r128 has no ColorManagement, so authored hexes are decoded by srgb() at build

@@ -16,7 +16,7 @@ from .types import CorpusEntry, LedgerEntry, Scene
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SEED = _REPO_ROOT / "data" / "seed" / "veldra_ledger.yaml"
-DEFAULT_DB = _REPO_ROOT / "data" / "retnovation.db"
+DEFAULT_DB = _REPO_ROOT / "data" / "elenchus.db"
 
 
 class SeedEntry(BaseModel):

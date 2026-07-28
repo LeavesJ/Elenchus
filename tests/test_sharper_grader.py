@@ -1,9 +1,9 @@
 from datetime import datetime, timezone
 
-from retnovation.assessment.sharper_grader import audit_sharper
-from retnovation.model import FakeModel, IntakeClassification
-from retnovation.state import update_state
-from retnovation.types import (
+from elenchus.assessment.sharper_grader import audit_sharper
+from elenchus.model import FakeModel, IntakeClassification
+from elenchus.state import update_state
+from elenchus.types import (
     Assessment,
     Experience,
     Frame,

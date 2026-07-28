@@ -10,13 +10,13 @@ from .orchestration import run_session
 from .persistence import Store
 from .types import CorpusEntry, LedgerEntry, Regime
 
-DEFAULT_DB = Path("data/retnovation.db")
+DEFAULT_DB = Path("data/elenchus.db")
 
 
 def build_store(db_path: str | Path = DEFAULT_DB) -> Store:
     store = Store(db_path)
     # Seed an abstracted ledger + corpus entry for every authored open_ended experience so the
-    # gated generator runs on a fresh DB. `retnovation-ingest` overwrites these placeholders with
+    # gated generator runs on a fresh DB. `elenchus-ingest` overwrites these placeholders with
     # the real (confidential, gitignored) corpus when run.
     existing_ledger = {e.id for e in store.load_ledger()}
     for exp in load_library():

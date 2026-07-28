@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "retnovation"
+name = "elenchus"
 version = "0.1.0"
 description = "A retention-and-deployment engine: a thin doctrine layer over a rented model."
 requires-python = ">=3.12"
@@ -21,8 +21,8 @@ dev = [
 web = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
 
 [project.scripts]
-retnovation = "retnovation.cli:main"
-retnovation-ingest = "retnovation.veldra_ingest:main"
+elenchus = "elenchus.cli:main"
+elenchus-ingest = "elenchus.veldra_ingest:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

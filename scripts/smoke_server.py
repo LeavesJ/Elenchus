@@ -20,7 +20,7 @@ sys.path.insert(0, str(_ROOT / "src"))
 sys.path.insert(0, str(_ROOT / "tests"))
 
 from conftest import make_world_model  # noqa: E402 — needs the sys.path insert above
-from retnovation.web.app import create_app  # noqa: E402
+from elenchus.web.app import create_app  # noqa: E402
 
 _DEFAULT_DB = _ROOT / "data" / "smoke.db"
 

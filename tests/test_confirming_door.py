@@ -8,7 +8,7 @@ converged, writing a permanent memory of a decision he never made.
 The fix is a gate BEFORE the forge, not an exit inside the loop (L-5: the loop stays sealed —
 the gate fires while no scenario exists, so there is no effort to evade yet)."""
 
-from retnovation.web.session_runner import _is_affirmative
+from elenchus.web.session_runner import _is_affirmative
 
 
 def test_plain_agreement_is_affirmative():
@@ -130,7 +130,7 @@ def test_empty_and_whitespace_are_not_affirmative():
 import re  # noqa: E402
 from pathlib import Path  # noqa: E402
 
-RUNNER = Path("src/retnovation/web/session_runner.py")
+RUNNER = Path("src/elenchus/web/session_runner.py")
 
 
 def _fn(src: str, name: str) -> str:
@@ -203,7 +203,7 @@ def test_confirm_beat_screens_fit_before_serving_it():
 
 
 def test_confirm_copy_never_deflects_and_never_grades():
-    from retnovation.web.session_runner import _CONFIRM_COPY
+    from elenchus.web.session_runner import _CONFIRM_COPY
 
     low = _CONFIRM_COPY.lower()
     assert "out of scope" not in low  # founder constraint, structurally unservable
@@ -265,7 +265,7 @@ def test_content_gap_is_recorded_with_her_words(tmp_path):
     import sqlite3
     from datetime import datetime, timezone
 
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = tmp_path / "g.db"
     s = SittingStore(str(db))
@@ -289,7 +289,7 @@ def test_content_gap_is_inert_on_a_memory_store():
     # :memory: stores are inert by design; a gap write must not raise.
     from datetime import datetime, timezone
 
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     SittingStore(":memory:").log_content_gap(
         situation="x",
@@ -339,7 +339,7 @@ def test_every_front_door_forge_path_is_consented():
 def test_confirm_beat_carries_no_identifier_to_the_client():
     # L-13: the confirm beat is a NEW learner-facing surface, so it gets the same sweep as every
     # other one. `fit` is her own words; a ref/eid/frame code must never ride with it.
-    from retnovation.web.app import _emit
+    from elenchus.web.app import _emit
 
     data = {"text": "Before I build it — here's the decision I'd put to you: the price you set."}
     out = _emit(object(), "say", data)

@@ -1,7 +1,7 @@
 """Pure slot-resolution rules (Spec 2 §4): first-touch claiming, inheritance, confluence,
 earned existence (P4), retirement permanence, exhaustion. No store, no engine — pure."""
 
-from retnovation.web.slots import K_SLOTS, Confluence, resolve_slots
+from elenchus.web.slots import K_SLOTS, Confluence, resolve_slots
 
 T0 = "2026-07-22T00:00:00+00:00"
 T1 = "2026-07-23T00:00:00+00:00"

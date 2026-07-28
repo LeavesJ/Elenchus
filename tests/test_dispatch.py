@@ -1,6 +1,6 @@
-from retnovation.assessment import get_assessor, ASSESSORS
-from retnovation.assessment import judgment_loop
-from retnovation.types import Regime
+from elenchus.assessment import get_assessor, ASSESSORS
+from elenchus.assessment import judgment_loop
+from elenchus.types import Regime
 
 
 def test_open_ended_dispatches_to_judgment_loop():
@@ -9,7 +9,7 @@ def test_open_ended_dispatches_to_judgment_loop():
 
 
 def test_cs_technical_is_registered():
-    from retnovation.assessment import checkable_scorer
+    from elenchus.assessment import checkable_scorer
 
     assert get_assessor(Regime.cs_technical) is checkable_scorer.assess
     assert Regime.cs_technical in ASSESSORS

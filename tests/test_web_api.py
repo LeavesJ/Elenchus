@@ -3,15 +3,15 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
-from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
-from retnovation.types import (
+from elenchus.model import FakeModel, IntakeClassification, ResponseClassification
+from elenchus.types import (
     ConverseTurn,
     EntryClass,
     EntryClassification,
     FrameState,
     TrapState,
 )
-from retnovation.web.app import create_app
+from elenchus.web.app import create_app
 
 # Phase C T4: single-sourced world fake (tests/conftest.py) — `_world_factory` delegates to it.
 from conftest import _SCENARIO, make_world_model
@@ -386,7 +386,7 @@ def test_chained_sitting_builds_two_houses(tmp_path):
     """The hard behavioral gate: a fresh db, two chained convergences, one End — the village terrain
     reflects BOTH sessions' state (more/renderable-r0 vs the single-session baseline). Uses a
     problem-agnostic always-closing fake so ANY auto-picked second problem converges."""
-    from retnovation.model import FakeModel
+    from elenchus.model import FakeModel
 
     def factory():
         m = FakeModel(
@@ -436,7 +436,7 @@ def test_chained_sitting_builds_two_houses(tmp_path):
 def test_choose_marker_and_seam_ride_the_endpoints(tmp_path, make_fake):
     """Durable sittings §2b at the HTTP layer: choosing a door persists what the user did;
     the continue response carries the seam text the shell renders."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "wt-api.db")
     app = create_app(db_path=db, model_factory=make_fake)
@@ -688,8 +688,8 @@ def test_load_payload_wire_sweep_over_engine_composed_bytes(tmp_path, make_fake)
     has teeth on the new fields, not just the old ones."""
     import json
 
-    from retnovation.web.app import _emit
-    from retnovation.web.session_runner import SessionRegistry
+    from elenchus.web.app import _emit
+    from elenchus.web.session_runner import SessionRegistry
 
     # Seed EXACTLY as the close sweep does (same factory, same script) — driven directly against a
     # SessionRegistry so terrain/houses are engine-composed and persisted into record_json, and the
@@ -780,7 +780,7 @@ def test_reserve_convergence_adds_a_new_house(tmp_path, make_fake):
     longer group them."""
     from datetime import datetime, timedelta, timezone
 
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "hr.db")
     store = SittingStore(db)
@@ -817,7 +817,7 @@ def test_reserve_convergence_adds_a_new_house(tmp_path, make_fake):
 def test_houses_are_stable_across_a_restart(tmp_path, make_fake):
     """Ordering by converged_at is append-stable: a new registry over the same db serves the
     SAME houses in the SAME order the first process froze at the landing."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "hs.db")
     app1 = create_app(db_path=db, model_factory=_world_factory(make_fake))
@@ -849,7 +849,7 @@ def test_preexisting_curated_rows_do_not_crash_the_house_composition(tmp_path, m
     ref/region-0 fallback (one house each), never a crash."""
     from datetime import datetime, timedelta, timezone
 
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "hc.db")
     store = SittingStore(db)
@@ -890,7 +890,7 @@ def test_informed_reserve_over_http(tmp_path, make_fake):
     and both choices; work_anyway forges a real segment."""
     from datetime import datetime, timedelta, timezone
 
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "reserve.db")
     store = SittingStore(db)
@@ -954,7 +954,7 @@ def test_shell_renders_the_front_door_and_living_sitting_affordances():
 
 def test_emit_say_projects_the_steer_label():
     """User-steered chapters §2c: a converse say with a steer label projects next_kind/desc/title."""
-    from retnovation.web.app import _emit
+    from elenchus.web.app import _emit
 
     out = _emit(
         None,
@@ -969,7 +969,7 @@ def test_emit_say_projects_the_steer_label():
 
 def test_emit_say_without_a_label_is_unchanged():
     """A plain say (opening/probe/re-invite) carries no label — the projection must not invent one."""
-    from retnovation.web.app import _emit
+    from elenchus.web.app import _emit
 
     out = _emit(None, "say", {"text": "reply"})
     assert out == {"kind": "say", "text": "reply"}
@@ -998,7 +998,7 @@ def test_the_ask_gate_opens_only_on_an_aged_unanswered_memory():
     days or faking a clock through three layers. Three ways to stay shut, one way to open."""
     from datetime import datetime, timedelta, timezone
 
-    from retnovation.web.session_runner import _should_ask_outcome
+    from elenchus.web.session_runner import _should_ask_outcome
 
     now = datetime(2026, 7, 28, tzinfo=timezone.utc)
     fresh = (now - timedelta(days=13)).isoformat()
@@ -1069,7 +1069,7 @@ def test_the_outcome_never_reaches_the_engine():
     it silently. Structural, because a comment cannot enforce it."""
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1] / "src" / "retnovation"
+    root = Path(__file__).resolve().parents[1] / "src" / "elenchus"
     for rel in ("assessment", "state.py", "orchestration.py", "scheduler.py"):
         target = root / rel
         files = sorted(target.rglob("*.py")) if target.is_dir() else [target]
@@ -1085,7 +1085,7 @@ def test_memory_chrome_is_recollective_never_evaluative():
     """Spec-1 5c (L-4): the memory surface's static strings recall, never grade."""
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[1] / "src" / "retnovation" / "web" / "static"
+    root = Path(__file__).resolve().parents[1] / "src" / "elenchus" / "web" / "static"
     html = (root / "index.html").read_text()
     start = html.index("function showMemory")
     block = html[start : html.index("function hideMemory")]
@@ -1190,8 +1190,8 @@ def test_vessels_ride_frontdoor_and_close_payloads_as_bare_count(tmp_path, make_
     row is seeded directly on the world db before driving the landing."""
     import json as _json
 
-    from retnovation.persistence import Store
-    from retnovation.types import CorpusEntry, LedgerEntry
+    from elenchus.persistence import Store
+    from elenchus.types import CorpusEntry, LedgerEntry
 
     db = str(tmp_path / "world.db")
     store = Store(db)

@@ -1,5 +1,5 @@
-from retnovation import content_loader
-from retnovation.types import Mode
+from elenchus import content_loader
+from elenchus.types import Mode
 
 
 def test_load_founder_ceo_map():
@@ -23,7 +23,7 @@ def test_load_experience_meta():
 
 
 def test_load_min_angle_count_and_denylists():
-    from retnovation.content_loader import load_min_angle_count, load_denylist
+    from elenchus.content_loader import load_min_angle_count, load_denylist
 
     assert load_min_angle_count() == 8
     fw = load_denylist("framework_denylist")
@@ -33,8 +33,8 @@ def test_load_min_angle_count_and_denylists():
 
 
 def test_load_experience_and_library_build_full_experiences():
-    from retnovation.content_loader import load_experience, load_library
-    from retnovation.types import Experience, Regime
+    from elenchus.content_loader import load_experience, load_library
+    from elenchus.types import Experience, Regime
 
     lib = load_library()
     assert lib, "content/rubrics should hold at least one experience"
@@ -47,7 +47,7 @@ def test_load_experience_and_library_build_full_experiences():
 
 
 def test_load_path_type_and_content_map():
-    from retnovation.content_loader import load_path_type, load_content_map
+    from elenchus.content_loader import load_path_type, load_content_map
 
     assert load_path_type("founder_ceo") == "posture"
     assert load_path_type("cs_systems") == "domain"
@@ -56,7 +56,7 @@ def test_load_path_type_and_content_map():
 
 
 def test_load_spacing_returns_policy():
-    from retnovation.content_loader import load_spacing
+    from elenchus.content_loader import load_spacing
 
     sp = load_spacing()
     assert sp["initial_interval_days"] == 1
@@ -65,8 +65,8 @@ def test_load_spacing_returns_policy():
 
 
 def test_load_checkable_library_builds_cs_experiences():
-    from retnovation.content_loader import load_checkable_experience, load_checkable_library
-    from retnovation.types import Experience, Regime, CheckType
+    from elenchus.content_loader import load_checkable_experience, load_checkable_library
+    from elenchus.types import Experience, Regime, CheckType
 
     lib = load_checkable_library()
     assert lib, "content/checkables should hold at least one cs experience"
@@ -148,7 +148,7 @@ def test_license_continuity_declares_the_commitment_decision_frame():
 
 
 def test_load_progression_returns_weights_and_threshold():
-    from retnovation.content_loader import load_progression
+    from elenchus.content_loader import load_progression
 
     p = load_progression()
     assert p["wU"] == 1.0 and p["wR"] == 1.0 and p["wT"] == 1.5 and p["wL"] == 0.5
@@ -156,7 +156,7 @@ def test_load_progression_returns_weights_and_threshold():
 
 
 def test_load_progression_has_theta_ledger_refs():
-    from retnovation.content_loader import load_progression
+    from elenchus.content_loader import load_progression
 
     cfg = load_progression()
     assert cfg["theta_ledger_refs"] == 2
@@ -164,8 +164,8 @@ def test_load_progression_has_theta_ledger_refs():
 
 
 def test_load_lift_config_and_scenarios():
-    from retnovation.content_loader import load_lift_config, load_lift_scenarios
-    from retnovation.types import LiftScenario
+    from elenchus.content_loader import load_lift_config, load_lift_scenarios
+    from elenchus.types import LiftScenario
 
     cfg = load_lift_config()
     assert cfg["theta_dist"] == 1 and cfg["min_scenarios"] == 3
@@ -177,7 +177,7 @@ def test_load_lift_config_and_scenarios():
 
 
 def test_lift_scenario_accepts_optional_candidate():
-    from retnovation.types import LiftScenario
+    from elenchus.types import LiftScenario
 
     s = LiftScenario(scenario_id="s1", prompt="p", posture="founder_ceo", candidate="frame_x")
     assert s.candidate == "frame_x"
@@ -187,7 +187,7 @@ def test_lift_scenario_accepts_optional_candidate():
 
 def test_load_lift_candidates_parses_example(tmp_path):
     import textwrap
-    from retnovation.content_loader import load_lift_candidates
+    from elenchus.content_loader import load_lift_candidates
 
     root = tmp_path / "content"
     (root / "lift").mkdir(parents=True)

@@ -3,7 +3,7 @@ import pytest
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
-from retnovation.web.app import create_app
+from elenchus.web.app import create_app
 
 _ANCHOR_TITLE = "Shipping something you can't take back"  # irreversible_anchor (cto)
 

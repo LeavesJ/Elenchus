@@ -12,17 +12,17 @@ import re
 
 import pytest
 
-from retnovation import forge
-from retnovation.content_loader import (
+from elenchus import forge
+from elenchus.content_loader import (
     load_denylist,
     load_experience,
     load_library,
     load_territory_text,
 )
-from retnovation.generator import select_open_ended, validate_scene
-from retnovation.model import AnthropicModel, FakeModel, IntakeClassification, Model
-from retnovation.persistence import Store
-from retnovation.types import (
+from elenchus.generator import select_open_ended, validate_scene
+from elenchus.model import AnthropicModel, FakeModel, IntakeClassification, Model
+from elenchus.persistence import Store
+from elenchus.types import (
     EgressScreen,
     FitCheck,
     NextExperienceSpec,
@@ -30,7 +30,7 @@ from retnovation.types import (
     Scene,
     TerritoryMap,
 )
-from retnovation.web import voice
+from elenchus.web import voice
 
 
 def _fake():
@@ -505,7 +505,7 @@ def test_forge_and_voice_moves_share_one_source_of_truth():
     then enters the registry with no other screen against the missing category). Both now
     delegate to types.hidden_move_details; this pins the delegation AND behavioral equality
     (order included — the live echo-gate's move indices map onto it)."""
-    from retnovation.types import hidden_move_details
+    from elenchus.types import hidden_move_details
 
     for e in load_library():
         assert forge._moves(e) == voice._moves(e) == hidden_move_details(e)
@@ -536,7 +536,7 @@ def test_parse_required_retries_once_on_truncation_then_fails_loud():
     cost a RETRY at 2x, never the segment; a second truncation still fails LOUD (L-17)."""
     import pytest
 
-    from retnovation.model import AnthropicModel, ModelError
+    from elenchus.model import AnthropicModel, ModelError
 
     class _Resp:
         def __init__(self, stop, parsed):
@@ -572,7 +572,7 @@ def test_parse_required_retries_once_on_truncation_then_fails_loud():
 
 
 def test_forge_scenario_prompt_carries_the_sequel_doctrine():
-    from retnovation.content_loader import load_prompt
+    from elenchus.content_loader import load_prompt
 
     p = load_prompt("forge_scenario")
     assert "story so far" in p.lower()
@@ -581,7 +581,7 @@ def test_forge_scenario_prompt_carries_the_sequel_doctrine():
 
 def test_forge_scenario_prompt_carries_the_focus_line():
     """User-steered chapters §2e: when a focus is given, chapter two poses the decision she named."""
-    from retnovation.content_loader import load_prompt
+    from elenchus.content_loader import load_prompt
 
     low = load_prompt("forge_scenario").lower()
     assert "focus" in low

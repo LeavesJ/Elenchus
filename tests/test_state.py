@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from retnovation.state import update_state
-from retnovation.types import (
+from elenchus.state import update_state
+from elenchus.types import (
     Assessment,
     FrameDelta,
     FrameState,
@@ -72,7 +72,7 @@ def test_tripped_trap_recorded_in_gallery():
 
 
 def _casmt(pairs):
-    from retnovation.types import CheckableAssessment, ConceptResult, CheckType
+    from elenchus.types import CheckableAssessment, ConceptResult, CheckType
 
     return CheckableAssessment(
         results=[
@@ -85,8 +85,8 @@ def _casmt(pairs):
 
 
 def test_checkable_recall_grows_interval_miss_resets():
-    from retnovation.state import update_state_checkable
-    from retnovation.types import LearnerState
+    from elenchus.state import update_state_checkable
+    from elenchus.types import LearnerState
 
     sp = {"initial_interval_days": 1, "ease_factor": 2.0, "min_interval_days": 1}
     st = LearnerState()
@@ -106,8 +106,8 @@ def test_checkable_recall_grows_interval_miss_resets():
 
 
 def test_checkable_concept_recalled_only_if_all_questions_correct():
-    from retnovation.state import update_state_checkable
-    from retnovation.types import LearnerState
+    from elenchus.state import update_state_checkable
+    from elenchus.types import LearnerState
 
     sp = {"initial_interval_days": 1, "ease_factor": 2.0, "min_interval_days": 1}
     a = _casmt([("c", True), ("c", False)])  # same concept, one miss
@@ -116,8 +116,8 @@ def test_checkable_concept_recalled_only_if_all_questions_correct():
 
 
 def test_state_updaters_registry_routes_by_regime():
-    from retnovation.state import STATE_UPDATERS, update_state, update_state_checkable
-    from retnovation.types import Regime
+    from elenchus.state import STATE_UPDATERS, update_state, update_state_checkable
+    from elenchus.types import Regime
 
     assert STATE_UPDATERS[Regime.open_ended] is update_state
     assert STATE_UPDATERS[Regime.cs_technical] is update_state_checkable
@@ -125,8 +125,8 @@ def test_state_updaters_registry_routes_by_regime():
 
 def test_storage_tier_strong_needs_two_unprompted_problems():
     from datetime import datetime, timezone
-    from retnovation.state import derive_strength
-    from retnovation.types import Strength
+    from elenchus.state import derive_strength
+    from elenchus.types import Strength
 
     t0 = datetime(2026, 6, 24, tzinfo=timezone.utc)
     # 1 unprompted problem → forming (not strong yet)
@@ -141,8 +141,8 @@ def test_storage_tier_strong_needs_two_unprompted_problems():
 
 def test_derive_strength_decays_one_bucket_then_springs_back():
     from datetime import datetime, timedelta, timezone
-    from retnovation.state import derive_strength
-    from retnovation.types import Strength
+    from elenchus.state import derive_strength
+    from elenchus.types import Strength
 
     t0 = datetime(2026, 6, 24, tzinfo=timezone.utc)
     strong_args = (2, {"veldra:a", "veldra:b"})  # storage tier = strong, interval 30d
@@ -159,7 +159,7 @@ def test_derive_strength_decays_one_bucket_then_springs_back():
 
 def test_due_keys_to_storage_tier_not_the_decayed_bucket():
     from datetime import datetime, timedelta, timezone
-    from retnovation.state import derive_due
+    from elenchus.state import derive_due
 
     t0 = datetime(2026, 6, 24, tzinfo=timezone.utc)
     strong_due = derive_due(2, {"veldra:a", "veldra:b"}, t0)
@@ -172,7 +172,7 @@ def test_due_keys_to_storage_tier_not_the_decayed_bucket():
 
 def test_frame_uncertainty_monotone():
     from datetime import datetime, timedelta, timezone
-    from retnovation.state import frame_uncertainty
+    from elenchus.state import frame_uncertainty
 
     t0 = datetime(2026, 6, 24, tzinfo=timezone.utc)
     # more evidence → less uncertain
@@ -195,9 +195,9 @@ def test_frame_uncertainty_monotone():
 
 def test_strong_reachable_across_two_problems():
     from datetime import datetime, timezone
-    from retnovation.model import IntakeClassification, ResponseClassification  # noqa: F401
-    from retnovation.state import update_state
-    from retnovation.types import (
+    from elenchus.model import IntakeClassification, ResponseClassification  # noqa: F401
+    from elenchus.state import update_state
+    from elenchus.types import (
         Assessment,
         LearnerState,
         StopReason,
@@ -225,7 +225,7 @@ def test_strong_reachable_across_two_problems():
 
 
 def test_frame_interval_days_keys_to_storage_tier():
-    from retnovation.state import frame_interval_days
+    from elenchus.state import frame_interval_days
 
     assert frame_interval_days(0, set()) == 1  # weak
     assert frame_interval_days(1, set()) == 7  # forming
@@ -234,8 +234,8 @@ def test_frame_interval_days_keys_to_storage_tier():
 
 def test_closed_under_pressure_is_forming_not_strong():
     from datetime import datetime, timezone
-    from retnovation.state import update_state
-    from retnovation.types import (
+    from elenchus.state import update_state
+    from elenchus.types import (
         Assessment,
         FrameDelta,
         FrameState,

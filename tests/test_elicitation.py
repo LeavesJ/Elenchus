@@ -3,16 +3,16 @@ from datetime import datetime, timezone
 
 import pytest
 
-from retnovation.content_loader import load_experience
-from retnovation.elicitation import (
+from elenchus.content_loader import load_experience
+from elenchus.elicitation import (
     DEFAULT_TARGET,
     assert_intake_equivalence,
     assert_no_frame_code_leak,
     run_elicitation_probe,
 )
-from retnovation.model import IntakeClassification
-from retnovation.run_elicitation import load_probe_experience
-from retnovation.types import (
+from elenchus.model import IntakeClassification
+from elenchus.run_elicitation import load_probe_experience
+from elenchus.types import (
     Frame,
     FrameState,
     GeneratedOutput,
@@ -87,8 +87,8 @@ def test_variants_differ_from_canonical_only_by_the_dropped_decision_frame():
     # instrument silently stops measuring the shipped content (§2d).
     import yaml
 
-    from retnovation.content_loader import CONTENT_ROOT
-    from retnovation.run_elicitation import ELICITATION_CONTENT_ROOT
+    from elenchus.content_loader import CONTENT_ROOT
+    from elenchus.run_elicitation import ELICITATION_CONTENT_ROOT
 
     variants = sorted((ELICITATION_CONTENT_ROOT / "rubrics").glob("*.yaml"))
     assert [p.stem for p in variants] == ["continuity_lock_in", "irreversible_anchor"]
@@ -189,7 +189,7 @@ def test_probe_records_refusal_and_skips_intake():
 def test_probe_uses_learner_max_tokens_budget():
     # The learner budget must thread to generate_output — lift's 1024 default truncates these longer
     # decision-prompt openings (or starves the text block when thinking fires). Pins the production default.
-    from retnovation.elicitation import LEARNER_MAX_TOKENS
+    from elenchus.elicitation import LEARNER_MAX_TOKENS
 
     assert (
         LEARNER_MAX_TOKENS > 1024
@@ -212,7 +212,7 @@ def test_probe_uses_learner_max_tokens_budget():
 
 def test_probe_enforces_the_equivalence_guard():
     # a cs_technical experience has rubric=None -> guard refuses before any model call
-    from retnovation.content_loader import load_checkable_experience
+    from elenchus.content_loader import load_checkable_experience
 
     exp = load_checkable_experience("consensus_safety_liveness")  # checkable -> rubric is None
     with pytest.raises(ValueError):
@@ -220,7 +220,7 @@ def test_probe_enforces_the_equivalence_guard():
 
 
 def test_run_writes_artifact_and_returns_result(tmp_path):
-    from retnovation import run_elicitation
+    from elenchus import run_elicitation
 
     model = _FakeProbeModel(
         outputs=[GeneratedOutput(text="op-x")],

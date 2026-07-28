@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
-from retnovation.policy import select_next
-from retnovation.types import (
+from elenchus.policy import select_next
+from elenchus.types import (
     Experience,
     Frame,
     FrameStrength,

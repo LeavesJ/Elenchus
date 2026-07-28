@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from retnovation.types import (
+from elenchus.types import (
     LearnerState,
     Regime,
 )
@@ -11,7 +11,7 @@ def _now():
 
 
 def _cs_state(items):
-    from retnovation.types import LearnerState, SpacedItem
+    from elenchus.types import LearnerState, SpacedItem
 
     st = LearnerState()
     for concept, (due, interval) in items.items():
@@ -20,8 +20,8 @@ def _cs_state(items):
 
 
 def test_propose_open_ended_returns_ranked_proposal():
-    from retnovation.scheduler import propose_open_ended
-    from retnovation.content_loader import load_library, load_progression
+    from elenchus.scheduler import propose_open_ended
+    from elenchus.content_loader import load_library, load_progression
 
     exps = [e for e in load_library() if e.regime.value == "open_ended"]
     prop = propose_open_ended(LearnerState(), exps, load_progression(), _now())
@@ -32,7 +32,7 @@ def test_propose_open_ended_returns_ranked_proposal():
 
 def test_schedule_cs_targets_due_concepts_first():
     from datetime import timedelta
-    from retnovation.scheduler import schedule_cs
+    from elenchus.scheduler import schedule_cs
 
     now = _now()
     st = _cs_state(
@@ -44,7 +44,7 @@ def test_schedule_cs_targets_due_concepts_first():
 
 def test_schedule_cs_with_nothing_due_targets_soonest():
     from datetime import timedelta
-    from retnovation.scheduler import schedule_cs
+    from elenchus.scheduler import schedule_cs
 
     now = _now()
     st = _cs_state({"soon": (now + timedelta(days=1), 1), "later": (now + timedelta(days=9), 8)})
@@ -52,7 +52,7 @@ def test_schedule_cs_with_nothing_due_targets_soonest():
 
 
 def test_schedule_cs_due_ties_break_by_concept_code():
-    from retnovation.scheduler import schedule_cs
+    from elenchus.scheduler import schedule_cs
 
     now = _now()
     st = _cs_state({"zebra": (now, 1), "alpha": (now, 1)})

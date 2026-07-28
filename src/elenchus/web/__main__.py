@@ -6,12 +6,12 @@ from pathlib import Path
 from .app import create_app
 
 _ROOT = Path(__file__).resolve().parents[3]
-DB = str(_ROOT / "data" / "retnovation.db")
+DB = str(_ROOT / "data" / "elenchus.db")
 
 
 def _load_dotenv(path: Path) -> None:
     """Best-effort: load simple KEY=VALUE lines from .env into the process env so
-    `python -m retnovation.web` finds ANTHROPIC_API_KEY without the caller sourcing .env first.
+    `python -m elenchus.web` finds ANTHROPIC_API_KEY without the caller sourcing .env first.
     Uses setdefault — a real exported var always wins. Never logs values."""
     if not path.exists():
         return

@@ -244,7 +244,7 @@ async function start(){
   const r = await post('/api/session');
   if(r.build){ buildStamp=r.build;
     const mk=document.getElementById('mark'); if(mk) mk.title=r.build;
-    console.info('retnovation build', r.build); }  // one glance answers "which build?" (§2f)
+    console.info('elenchus build', r.build); }  // one glance answers "which build?" (§2f)
   advance(r);
 }
 let menuNonce=null;  // stale-menu guard: choose echoes the nonce the menu carried

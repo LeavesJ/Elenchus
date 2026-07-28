@@ -2,11 +2,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from retnovation.aim import aim, derive_core
-from retnovation.cli import build_store
-from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
-from retnovation.orchestration import run_session
-from retnovation.types import (
+from elenchus.aim import aim, derive_core
+from elenchus.cli import build_store
+from elenchus.model import FakeModel, IntakeClassification, ResponseClassification
+from elenchus.orchestration import run_session
+from elenchus.types import (
     ConverseTurn,
     EntryClass,
     EntryClassification,
@@ -16,7 +16,7 @@ from retnovation.types import (
     TrapState,
     Work,
 )
-from retnovation.web.session_runner import SessionRegistry
+from elenchus.web.session_runner import SessionRegistry
 
 NOW = datetime(2026, 6, 29, tzinfo=timezone.utc)
 _ANCHOR = "veldra:embedded_anchor_lock_in"
@@ -281,7 +281,7 @@ def test_probe_displays_carry_an_incrementing_arc(tmp_path):
     (pre-incremented at the top of respond — never push 0). The door re-invite path carries none.
     TWO absent frames + never-closing responses force MULTIPLE probes, so the increment itself is
     exercised — a counter stuck at 1 would fail (batch-review Minor #1)."""
-    from retnovation.assessment.judgment_loop import MAX_PUSHES
+    from elenchus.assessment.judgment_loop import MAX_PUSHES
 
     arcs = []
 
@@ -403,7 +403,7 @@ def _arm_steer(
     capture mapper ranks `ranked_first` (default: a territory OTHER than the one just worked, so it
     is non-windowed → servable) with the given verdict/confidence. Returns the target eid. Mirrors
     how the record's own model authors the wind-down (converse uses rec['model'])."""
-    from retnovation.content_loader import load_library
+    from elenchus.content_loader import load_library
 
     worked = reg._last_record[sid]["exp"].experience_id
     open_eids = [e.experience_id for e in load_library() if e.regime is Regime.open_ended]
@@ -477,7 +477,7 @@ def test_error_segment_does_not_strand_continuation(tmp_path, make_fake):
 def test_write_through_persists_projected_transcript_and_state(tmp_path, make_fake):
     """The store mirrors the PROJECTED wire: vera/you/landing turns in order, NO menus, NO refs
     (L-13); the landed record + next pick + converged row are persisted; inflight clears at done."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "wt.db")
     reg = SessionRegistry(db, model_factory=make_fake)
@@ -513,7 +513,7 @@ def test_write_through_persists_projected_transcript_and_state(tmp_path, make_fa
 def test_write_through_continue_seam_marker_and_converse_record(tmp_path, make_fake):
     """Continue persists marker+seam+opening (never the swallowed internal menu) and the response
     carries the seam; converse persists the pair AND rewrites record_json.recent."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "seam.db")
     reg = SessionRegistry(db, model_factory=make_fake)
@@ -547,7 +547,7 @@ def test_write_through_continue_seam_marker_and_converse_record(tmp_path, make_f
 def test_write_through_plateau_banks_no_converged_row(tmp_path, make_fake):
     """F1 on the durable log: a plateaued segment persists its record (honest stop_reason) but
     NEVER a converged row — it may legitimately re-offer."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "plateau.db")
     reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "unchanged"))
@@ -564,7 +564,7 @@ def test_write_through_plateau_banks_no_converged_row(tmp_path, make_fake):
 
 def test_error_emissions_never_reach_the_durable_transcript(tmp_path, make_fake):
     """L-14: exception text can carry frame codes — a worker error emission must not persist."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     def factory():
         m = make_fake()
@@ -593,7 +593,7 @@ def test_error_emissions_never_reach_the_durable_transcript(tmp_path, make_fake)
 
 
 def test_close_marks_sitting_closed_and_clears_it(tmp_path, make_fake):
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "cl.db")
     reg = SessionRegistry(db, model_factory=make_fake)
@@ -613,7 +613,7 @@ def test_close_marks_sitting_closed_and_clears_it(tmp_path, make_fake):
 def test_drain_consumes_an_orphan_done_but_never_steals_from_a_stepper(tmp_path, make_fake):
     """Defensive drain: an undequeued done (handshake drift) is consumed by close/continue and
     banked via _on_done; but the drain is skipped while a step is in flight for the sid."""
-    from retnovation.content_loader import load_library
+    from elenchus.content_loader import load_library
 
     db = str(tmp_path / "drain.db")
     reg = SessionRegistry(db, model_factory=make_fake)
@@ -645,7 +645,7 @@ def test_drain_consumes_an_orphan_done_but_never_steals_from_a_stepper(tmp_path,
     assert tag_cl == "close"
     # close() then ENDS the sitting (clears the in-memory maps) — the durable evidence is the
     # converged log the drain's _on_done wrote before the close branched.
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     assert _ANCHOR in SittingStore(db).converged_within(datetime.now(timezone.utc))
 
@@ -754,7 +754,7 @@ def test_restart_mid_first_segment_offers_fresh_menu(tmp_path, make_fake):
 def test_rolling_window_dedupe_across_processes(tmp_path, make_fake):
     """Refs converged in a PRIOR process within 24h are excluded from the auto-pick even across a
     UTC date boundary; a stale persisted next_pick into a since-converged ref drops to the menu."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "window.db")
     reg, data = _converge_one(db, make_fake)
@@ -777,7 +777,7 @@ def test_rolling_window_dedupe_across_processes(tmp_path, make_fake):
 def test_rebuild_failure_degrades_to_statics(tmp_path, make_fake):
     """A record whose experience_id no longer resolves (L-1 content drift across a restart) must
     never author unscreened or 500 — converse and close degrade to statics + persisted terrain."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "degraded.db")
     _converge_one(db, make_fake)
@@ -798,7 +798,7 @@ def test_rebuild_failure_degrades_to_statics(tmp_path, make_fake):
 
 def test_stale_sitting_older_than_18h_cold_starts(tmp_path, make_fake):
     """A sitting is an evening, not an undying thread: >18h idle -> closed (retained), cold menu."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "stale.db")
     _converge_one(db, make_fake)
@@ -918,7 +918,7 @@ def test_errored_segment_clears_the_pending_seam(tmp_path, make_fake):
 def test_choose_is_refused_when_no_menu_is_pending(tmp_path, make_fake):
     """C10/C11: a replayed choose (same nonce, menu already consumed) is nudged — it must not
     inject an int into the gate loop nor fabricate 'door chosen' turns."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "replay.db")
     reg = SessionRegistry(db, model_factory=make_fake)
@@ -938,10 +938,10 @@ def test_choose_is_refused_when_no_menu_is_pending(tmp_path, make_fake):
 def test_union_screen_fails_closed_and_catches_lost_exp_moves(tmp_path, make_fake):
     """C9/C12: after a restart-lost segment, converse screens the UNION — a reply performing the
     LOST problem's move serves the safe static; an unresolvable lost exp also fails closed."""
-    from retnovation.content_loader import load_library
-    from retnovation.model import EgressScreen
-    from retnovation.web import voice as voice_mod
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.content_loader import load_library
+    from elenchus.model import EgressScreen
+    from elenchus.web import voice as voice_mod
+    from elenchus.web.sitting_store import SittingStore
 
     anchor_exp = next(e for e in load_library() if e.ledger_ref == _ANCHOR)
     # the screen receives RENDERED move details (frame/trap details, 1-based indices) — the exact
@@ -1008,9 +1008,9 @@ def test_reopen_seam_on_reentering_the_interrupted_door(tmp_path, make_fake):
 # ---- The living sitting (plan L4): worker front door, same-world continue, rebuild fidelity,
 # ---- bounded difficulty, sitting close (spec §2a/§2c/§2e/§2f/§2g) ---------------------------
 
-from retnovation.content_loader import load_territory_text  # noqa: E402
-from retnovation.web import voice as _voice  # noqa: E402
-from retnovation.web.session_runner import (  # noqa: E402
+from elenchus.content_loader import load_territory_text  # noqa: E402
+from elenchus.web import voice as _voice  # noqa: E402
+from elenchus.web.session_runner import (  # noqa: E402
     _CONFIRM_COPY,
     _FRONTDOOR_ASK,
     _HONEST_FIT,
@@ -1020,7 +1020,7 @@ from retnovation.web.session_runner import (  # noqa: E402
     _STATIC_BRIDGE,
     _territory_subtitle,
 )
-from retnovation.web.sitting_store import SittingStore  # noqa: E402
+from elenchus.web.sitting_store import SittingStore  # noqa: E402
 
 _SITUATION = "Signing a delivery commitment Thursday; the penalty clause is the fight."
 
@@ -1209,7 +1209,7 @@ def test_honest_fit_falls_back_to_generic_when_fit_is_empty(tmp_path, make_fake)
 def test_honest_fit_leaky_fit_falls_back_to_generic(tmp_path, make_fake):
     """A `fit` that PERFORMS a hidden move falls to the generic description (L-13 teeth on the
     honest-fit surface, mirroring the conversion screen)."""
-    from retnovation.model import EgressScreen
+    from elenchus.model import EgressScreen
 
     leaky_fit = "just embed every credential you need as a list"
 
@@ -1243,7 +1243,7 @@ def test_honest_fit_leaky_fit_falls_back_to_generic(tmp_path, make_fake):
 def test_conversion_screen_failure_serves_the_static_and_never_deflects(tmp_path, make_fake):
     """Spec §2a: an empty/refused/leaky authored conversion takes _STATIC_CONVERSION — which
     itself converts; the words 'out of scope' can never serve (founder constraint)."""
-    from retnovation.web.session_runner import _STATIC_CONVERSION
+    from elenchus.web.session_runner import _STATIC_CONVERSION
 
     script = [{"verdict": "topic", "conversion": ""}, {}]
     reg = SessionRegistry(
@@ -1262,7 +1262,7 @@ def test_scope_phrase_conversion_is_structurally_unservable(tmp_path, make_fake)
     """Review fold 2026-07-04 (probe-confirmed): the founder's forbidden phrase must be
     unservable STRUCTURALLY — the move screen is blind to deflection language, so a
     disobedient authored conversion containing 'out of scope' must fall to the static."""
-    from retnovation.web.session_runner import _STATIC_CONVERSION
+    from elenchus.web.session_runner import _STATIC_CONVERSION
 
     script = [
         {
@@ -1283,8 +1283,8 @@ def test_leaky_conversion_serves_the_static(tmp_path, make_fake):
     """Review fold 2026-07-04 (mutation survived): the conversion egress screen needs teeth —
     a conversion that PERFORMS a hidden move of the rank-head territory must fall to the
     static, never serve (the L-13 gate on the new learner-facing surface)."""
-    from retnovation.model import EgressScreen
-    from retnovation.web.session_runner import _STATIC_CONVERSION
+    from elenchus.model import EgressScreen
+    from elenchus.web.session_runner import _STATIC_CONVERSION
 
     leaky = "Just list every credential you need and embed them — now, what call do you face?"
 
@@ -1383,7 +1383,7 @@ def test_honest_fit_copy_rotates_across_serves(tmp_path, make_fake):
     """Spec §2d: the fit beat must not repeat verbatim within a session (dogfood 2026-07-04:
     identical copy twice on one screen). Variant 0 is the original — first serves stay
     deterministic for the existing pins."""
-    from retnovation.web.session_runner import _HONEST_FIT_VARIANTS
+    from elenchus.web.session_runner import _HONEST_FIT_VARIANTS
 
     def factory():
         m = _world_factory(make_fake)()
@@ -1663,7 +1663,7 @@ def test_leaking_reflection_serves_the_static_bridge(tmp_path, make_fake):
     not ride the opening — the static bridge serves instead. The leak fake flags ONLY the exact
     reflection text, so the forge's union screen (the scenario) and every other authored
     surface stay clean — this test discriminates the reflection gate specifically."""
-    from retnovation.model import EgressScreen
+    from elenchus.model import EgressScreen
 
     def factory():
         m = _world_factory(make_fake)()
@@ -2076,7 +2076,7 @@ def test_heard_you_screen_failure_does_not_leak_the_forge_registry_entry(tmp_pat
     """Triage fold 2026-07-03: the forge registers the entry BEFORE the heard-you screen runs —
     a raise there killed the worker (honest) but left the entry in the module-global registry
     for the process lifetime. The decide()-local cleanup pops exactly the ref it registered."""
-    from retnovation.forge import forge_registry
+    from elenchus.forge import forge_registry
 
     def factory():
         m = _world_factory(make_fake)()
@@ -2258,8 +2258,8 @@ def test_sitting_close_receives_all_segments_and_screens_once(tmp_path, make_fak
     assert len(union) == len(set(union))  # deduped
     # L4 review F6 (discriminating): the union must COVER every converged territory — a
     # regression to a single-territory union would silently shrink it otherwise.
-    from retnovation.content_loader import load_library
-    from retnovation.web import voice as _v2
+    from elenchus.content_loader import load_library
+    from elenchus.web import voice as _v2
 
     eids = {r["experience_id"] for r in SittingStore(db).converged_log()}
     assert len(eids) == 2
@@ -2271,7 +2271,7 @@ def test_sitting_close_receives_all_segments_and_screens_once(tmp_path, make_fak
 
 def test_sitting_close_falls_back_static_on_screen_failure(tmp_path, make_fake):
     """The union screen flags the authored sitting close -> the safe static serves."""
-    from retnovation.model import EgressScreen
+    from elenchus.model import EgressScreen
 
     def factory():
         m = _world_factory(make_fake)()
@@ -2359,7 +2359,7 @@ def test_resume_at_the_front_door_shows_one_ask(tmp_path, make_fake):
     """Founder live dogfood 2026-07-02: the doubled intro. A reload parked at the front door must
     render the ask ONCE — the replayed transcript turn and the re-served block dedupe, and
     repeated cross-restart resumes never accumulate ask turns durably."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "oneask.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
@@ -2681,7 +2681,7 @@ def test_label_kind_and_forge_path_agree_on_the_same_record(tmp_path, make_fake)
 def test_post_landing_converse_uses_the_honest_static_not_safe_contract(tmp_path, make_fake):
     """The founder's disclosure-question bounce (2026-07-04): a screened/refused post-landing
     converse must serve the honest static, never SAFE_CONTRACT's 'I'll push' lie."""
-    from retnovation.web import voice as _v
+    from elenchus.web import voice as _v
 
     def factory():
         m = _world_factory(make_fake)()
@@ -2727,7 +2727,7 @@ def test_interrupted_converse_fail_closed_is_honest_not_the_push_lie(tmp_path, m
     """Review fold (informational note): the lost-context fail-closed path served SAFE_CONTRACT's
     'I'll push' lie — the whole batch kills that lie. It now serves the honest fresh static
     (equally safe: a static, no move, no push promise)."""
-    from retnovation.web import voice as _v
+    from elenchus.web import voice as _v
 
     # The screen against a lost exp fail-closes: force it by making every reply "leak".
     def factory():
@@ -2825,7 +2825,7 @@ def test_end_sitting_clears_steer(tmp_path, make_fake):
 
 
 def _other_open_territory(reg, sid):
-    from retnovation.content_loader import load_library
+    from elenchus.content_loader import load_library
 
     worked = reg._last_record[sid]["exp"].experience_id
     open_eids = [e.experience_id for e in load_library() if e.regime is Regime.open_ended]
@@ -2835,7 +2835,7 @@ def _other_open_territory(reg, sid):
 def test_continue_consumes_steer_forges_pre_mapped_with_focus_no_second_map(tmp_path, make_fake):
     """§2d: a pending steer at Continue forges the PRE-MAPPED territory with focus= carrying the
     pressure, and makes NO second map_territories call (deterministic consume)."""
-    from retnovation.content_loader import load_territory_text
+    from elenchus.content_loader import load_territory_text
 
     briefs, maps = [], []
     reg = SessionRegistry(
@@ -2860,7 +2860,7 @@ def test_continue_consumes_steer_forges_pre_mapped_with_focus_no_second_map(tmp_
 def test_steer_label_agrees_with_delivery(tmp_path, make_fake):
     """§4 test 6: whenever the wind-down shows next_kind='steer', Continue delivers the SAME
     territory the steer named — label == delivery by construction."""
-    from retnovation.content_loader import load_territory_text
+    from elenchus.content_loader import load_territory_text
 
     briefs = []
     reg = SessionRegistry(
@@ -2956,7 +2956,7 @@ def test_distilled_pressure_never_reaches_the_projected_wire(tmp_path, make_fake
     """Spec §4 test 10 + review Minor: the distilled next_pressure/focus never reaches ANY client
     payload — sweep the REAL converse -> _emit projection AND the continue payload (composition
     seam, not a hand-built dict)."""
-    from retnovation.web.app import _emit
+    from elenchus.web.app import _emit
 
     reg = SessionRegistry(str(tmp_path / "sweep.db"), model_factory=_world_factory(make_fake))
     _open_world(reg, "s1")
@@ -2977,7 +2977,7 @@ def test_returning_line_counts_convergence_rows(tmp_path, make_fake):
     sitting_id' premise — and the '6 houses' count-bug fix it guarded — is gone; the honest count
     is the point). Pinned copy asserted literally: 'N judgment(s) across your domains'
     (review code-truth 5)."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "saga_count.db")
     store = SittingStore(db)
@@ -2996,9 +2996,9 @@ def test_frontdoor_load_payload_carries_homebase_terrain_and_houses(tmp_path, ma
     """Phase 2 2a/2b: on a returning load (no live sitting) the front-door payload carries the
     frozen cumulative (terrain, houses) so the world renders on landing — and _emit surfaces
     them behind the frontdoor allowlist."""
-    from retnovation.web.sitting_store import SittingStore
-    from retnovation.web.session_runner import SessionRegistry
-    from retnovation.web.app import _emit
+    from elenchus.web.sitting_store import SittingStore
+    from elenchus.web.session_runner import SessionRegistry
+    from elenchus.web.app import _emit
 
     db = str(tmp_path / "hbpay.db")
     store = SittingStore(db)  # seed via the store...
@@ -3023,8 +3023,8 @@ def test_frontdoor_load_payload_carries_homebase_terrain_and_houses(tmp_path, ma
 def test_frontdoor_load_payload_omits_homebase_on_first_visit(tmp_path, make_fake):
     """First-ever visit (no landed record): no terrain/houses on the wire -> the shell shows an
     empty world (just the front door), never a crash or a phantom village."""
-    from retnovation.web.session_runner import SessionRegistry
-    from retnovation.web.app import _emit
+    from elenchus.web.session_runner import SessionRegistry
+    from elenchus.web.app import _emit
 
     reg = SessionRegistry(str(tmp_path / "fresh.db"), model_factory=make_fake)
     tag, data = reg.resume_or_start("single")
@@ -3038,9 +3038,9 @@ def test_resume_parked_at_frontdoor_carries_the_homebase(tmp_path, make_fake):
     must carry the frozen homebase so the world shows on reload, not only on a fresh cold start.
     The first resume_or_start creates the parked live sitting (frontdoor); the second hits _resume."""
     import json
-    from retnovation.web.sitting_store import SittingStore
-    from retnovation.web.session_runner import SessionRegistry
-    from retnovation.web.app import _emit
+    from elenchus.web.sitting_store import SittingStore
+    from elenchus.web.session_runner import SessionRegistry
+    from elenchus.web.app import _emit
 
     db = str(tmp_path / "t7.db")
     store = SittingStore(db)
@@ -3071,8 +3071,8 @@ def test_plateau_only_returning_user_gets_no_homebase_on_either_path(tmp_path, m
     """Whole-branch consistency fold: a plateau/budget-only returning user has a NON-EMPTY seed
     terrain frozen but NO convergences (empty converged_log). The homebase must be absent on BOTH
     the fresh-frontdoor AND the reload-parked payloads — the two gates must agree (Decision 3)."""
-    from retnovation.web.sitting_store import SittingStore
-    from retnovation.web.session_runner import SessionRegistry
+    from elenchus.web.sitting_store import SittingStore
+    from elenchus.web.session_runner import SessionRegistry
 
     db = str(tmp_path / "plateau.db")
     store = SittingStore(db)
@@ -3148,7 +3148,7 @@ def test_reload_with_a_pending_steer_keeps_the_button_naming_the_steer(tmp_path,
     """The _wind_down_label agreement invariant on its surviving trigger (plain reload):
     a pending steer must label the resume Continue as the steer, matching what
     continue_session forges (cross-arc fix 2026-07-09, re-pointed after /enter removal)."""
-    from retnovation.content_loader import load_library, load_territory_text
+    from elenchus.content_loader import load_library, load_territory_text
 
     briefs = []
     reg = SessionRegistry(
@@ -3177,7 +3177,7 @@ def test_convergence_captures_the_final_you_turn_never_a_vera_push(tmp_path, mak
     """Spec 5a: the position is captured AT log_converged from the last persisted "you" turn —
     the _positions selection (kind=="you" only), never a vera push, and the landing turn is not
     yet appended at capture time. Stale/superseded flows never log -> never capture."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "x.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
@@ -3221,7 +3221,7 @@ def test_convergence_captures_the_final_you_turn_never_a_vera_push(tmp_path, mak
 
 
 def test_memory_returns_situation_position_when_for_each_convergence(tmp_path, make_fake):
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "x.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
@@ -3269,7 +3269,7 @@ def test_memory_bounds_and_legacy_are_honest(tmp_path, make_fake):
 def test_memory_drift_guard_returns_unavailable_on_ref_mismatch(tmp_path, make_fake):
     """house_refs[i] is the drift guard: if the frozen refs and the live log ever disagree
     (a legacy or corrupted record), the bubble refuses rather than serving a WRONG memory."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "x.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
@@ -3288,9 +3288,9 @@ def test_memory_drift_guard_returns_unavailable_on_ref_mismatch(tmp_path, make_f
 
 
 def test_memory_curated_situation_is_the_gated_prompt_never_territory_text(tmp_path, make_fake):
-    from retnovation.content_loader import load_library, load_territory_text
-    from retnovation.types import Regime
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.content_loader import load_library, load_territory_text
+    from elenchus.types import Regime
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "x.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
@@ -3325,9 +3325,9 @@ def test_memory_origin_is_a_date_only_handle_and_null_position_is_a_placeholder_
     the raw sitting_id NEVER rides (positive derivation assert — spec §8/review N5). A legacy row
     (position=NULL) still gets a BUBBLE with position None (the chrome placeholder), NOT
     unavailable (spec §5a; review N6)."""
-    from retnovation.content_loader import load_library
-    from retnovation.types import Regime
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.content_loader import load_library
+    from elenchus.types import Regime
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "x.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
@@ -3361,9 +3361,9 @@ def test_memory_drift_guard_checks_row_identity_not_ref_alone(tmp_path, make_fak
     lands back at the frozen index — a ref-only drift guard false-passes and serves the WRONG
     convergence's position. house_at (converged_at, frozen index-parallel with house_refs at the
     freeze site) pins WHICH convergence house 0 names, so the guard must refuse here."""
-    from retnovation.content_loader import load_library
-    from retnovation.types import Regime
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.content_loader import load_library
+    from elenchus.types import Regime
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "x.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
@@ -3402,8 +3402,8 @@ def test_memory_curated_situation_honors_the_row_experience_id(tmp_path, make_fa
     two library entries share `veldra:license_fork_risk` (continuity_lock_in, license_continuity)
     with DIFFERENT prompts. The situation returned must be the prompt of the entry whose
     experience_id actually converged (the row's), not whichever entry sorts first."""
-    from retnovation.content_loader import load_library
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.content_loader import load_library
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "x.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
@@ -3537,7 +3537,7 @@ def world_legacy_record(tmp_path, make_fake):
     landing (adopting the SAME live sitting) must self-heal — stamp a slot on EVERY house,
     including this pre-existing one, from current components — and never crash on the missing
     key (D1/L-32)."""
-    from retnovation.web.sitting_store import SittingStore
+    from elenchus.web.sitting_store import SittingStore
 
     db = str(tmp_path / "wlegacy.db")
     store = SittingStore(db)
@@ -3627,7 +3627,7 @@ def test_cross_domain_judgment_fires_confluence_and_retires_young_slot(world_cro
     rows = store.domain_slots()
     assert rows[1]["status"] == "confluent-into:0"
     # And the serialized record NEVER carries the event:
-    from retnovation.web.session_runner import _serialize_record
+    from elenchus.web.session_runner import _serialize_record
 
     assert "confluence" not in (_serialize_record(rec) or {})
     # Per-house slot-at-arrival is frozen forever (Spec-2 §5): the confluence landing must not

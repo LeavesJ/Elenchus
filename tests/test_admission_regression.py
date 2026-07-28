@@ -6,12 +6,12 @@ codes the FakeModel does not script -> KeyError)."""
 
 from datetime import datetime, timezone
 
-from retnovation.aim import aim, derive_core
-from retnovation.cli import build_store
-from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
-from retnovation.orchestration import run_session
-from retnovation.persistence import Store
-from retnovation.types import (
+from elenchus.aim import aim, derive_core
+from elenchus.cli import build_store
+from elenchus.model import FakeModel, IntakeClassification, ResponseClassification
+from elenchus.orchestration import run_session
+from elenchus.persistence import Store
+from elenchus.types import (
     FrameState,
     Outcome,
     Regime,

@@ -1,7 +1,7 @@
 import pytest
 
-from retnovation.model import AnthropicModel, ModelError, ResponseClassification
-from retnovation.types import (
+from elenchus.model import AnthropicModel, ModelError, ResponseClassification
+from elenchus.types import (
     Experience,
     Frame,
     FrameState,
@@ -208,7 +208,7 @@ def test_truncation_then_refusal_stays_bounded_at_two_calls():
 
 
 def test_grade_answer_parses_correctness_against_criteria():
-    from retnovation.types import CheckableGrade, CheckableQuestion, CheckType
+    from elenchus.types import CheckableGrade, CheckableQuestion, CheckType
 
     q = CheckableQuestion(
         question_id="q1",
@@ -230,7 +230,7 @@ def test_grade_answer_parses_correctness_against_criteria():
 
 
 def test_grade_answer_refusal_raises():
-    from retnovation.types import CheckableQuestion, CheckType
+    from elenchus.types import CheckableQuestion, CheckType
 
     q = CheckableQuestion(
         question_id="q1", concept="c", prompt="p", check_type=CheckType.model_graded, criteria="x"
@@ -241,7 +241,7 @@ def test_grade_answer_refusal_raises():
 
 
 def test_grade_sharper_is_blind_and_parses_verdict():
-    from retnovation.types import SharperVerdict
+    from elenchus.types import SharperVerdict
 
     client = _Client(
         parse_result=_Resp(parsed_output=SharperVerdict(sharper=True, reason="cited a mechanism"))
@@ -287,7 +287,7 @@ def test_classify_intake_ignores_hallucinated_codes():
 
 
 def _exp_with_scene():
-    from retnovation.types import Scene
+    from elenchus.types import Scene
 
     return _exp().model_copy(
         update={
@@ -383,7 +383,7 @@ def test_map_territories_instruction_carries_the_conversion_doctrine():
     """Spec §2a: the mapper authors the conversion — the instruction must define the topic
     verdict and the conversion craft (engage her subject, one question, never answer, never
     name a territory, never out-of-scope)."""
-    from retnovation.types import TerritoryMap
+    from elenchus.types import TerritoryMap
 
     wire = TerritoryMap(ranked=["e1"], confidence="high", reflection="r")
     client = _Client(parse_result=_Resp(parsed_output=wire))

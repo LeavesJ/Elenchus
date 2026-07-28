@@ -26,7 +26,7 @@ narrative.
 
 ## The engaged agent
 
-`python -m retnovation.web` serves a chat surface where you describe a real situation you
+`python -m elenchus.web` serves a chat surface where you describe a real situation you
 face; the engine forges a specific, unlabeled decision scenario around it, presses you on
 it turn by turn, and lands when your reasoning converges. Staying in a sitting spins the
 next *chapter* of the same story. The problem is never labeled and the doctrine is never
@@ -48,10 +48,10 @@ built to make visible.
 
 ## Layout
 
-- `src/retnovation/` — the engine: `orchestration`, `assessment/` (open-ended judgment loop
+- `src/elenchus/` — the engine: `orchestration`, `assessment/` (open-ended judgment loop
   + checkable scorer), `state`, `scheduler`, `persistence`, `types`, plus the generative
   seam (`model`, `forge`, `generator`) and the reward terrain (`terrain`).
-- `src/retnovation/web/` — the engaged-agent surface: FastAPI app, the session runner
+- `src/elenchus/web/` — the engaged-agent surface: FastAPI app, the session runner
   (bounded engine sessions inside one continuous sitting), the voice/concierge authoring
   layer, durable sitting store, and a vendored WebGL valley renderer.
 - `content/` — curated maps, curator rubrics, territories, and doctrine prompts: versioned
@@ -66,13 +66,13 @@ Python 3.14. This project runs on `PYTHONPATH=src`, not on the editable install 
 setuptools editable mode is unreliable on 3.14 — see `docs/lessons.md` L-19):
 
     python3 -m venv .venv
-    .venv/bin/pip install -e ".[dev]"        # deps only; do not rely on `import retnovation`
+    .venv/bin/pip install -e ".[dev]"        # deps only; do not rely on `import elenchus`
 
     # tests (fully offline against a scripted fake model)
     PYTHONPATH=src .venv/bin/pytest -q
 
     # the web app  (needs ANTHROPIC_API_KEY in .env for live model calls)
     set -a && . ./.env && set +a
-    PYTHONPATH=src .venv/bin/python -m retnovation.web   # → http://127.0.0.1:8000
+    PYTHONPATH=src .venv/bin/python -m elenchus.web   # → http://127.0.0.1:8000
 
 Only the web app and the `@live` suite (`pytest -m live`) call the real model.

@@ -1,7 +1,7 @@
 import pytest
 
 from datetime import datetime, timezone
-from retnovation.types import (
+from elenchus.types import (
     Strength,
     Regime,
     Mode,
@@ -65,7 +65,7 @@ def test_assessment_holds_stop_reason_and_work_is_callable():
 
 
 def test_gatecode_and_gateresult_and_experience_id():
-    from retnovation.types import GateCode, GateResult, Experience, Rubric, Mode, Regime
+    from elenchus.types import GateCode, GateResult, Experience, Rubric, Mode, Regime
 
     assert GateCode.recoverable_label.value == "recoverable_label"
     assert len(list(GateCode)) == 8
@@ -88,7 +88,7 @@ def test_gatecode_and_gateresult_and_experience_id():
 
 def test_checkable_types_build_and_regime_invariant():
     import pytest
-    from retnovation.types import (
+    from elenchus.types import (
         CheckType,
         CheckableQuestion,
         CheckableSet,
@@ -132,7 +132,7 @@ def test_checkable_types_build_and_regime_invariant():
     assert CheckableGrade(correct=False).correct is False
 
     # invariant: cs_technical with a rubric is rejected
-    from retnovation.types import Rubric, Mode
+    from elenchus.types import Rubric, Mode
 
     with pytest.raises(Exception):
         Experience(
@@ -149,7 +149,7 @@ def test_checkable_types_build_and_regime_invariant():
 
 
 def test_aim_core_content_core_accepts_a_concept_list():
-    from retnovation.types import Aim, Core
+    from elenchus.types import Aim, Core
 
     a = Aim(posture="cs_systems", process_dial=0, content_core=["safety_vs_liveness"])
     c = Core(
@@ -162,7 +162,7 @@ def test_aim_core_content_core_accepts_a_concept_list():
 
 
 def test_push_carries_raw_response_with_empty_default():
-    from retnovation.types import Push
+    from elenchus.types import Push
 
     p = Push(target_code="f", kind="frame", text="push", response_classification="closed")
     assert p.response == ""
@@ -177,7 +177,7 @@ def test_push_carries_raw_response_with_empty_default():
 
 
 def test_sharper_audit_types_and_assessment_field():
-    from retnovation.types import (
+    from elenchus.types import (
         Assessment,
         SharperAuditItem,
         SharperVerdict,
@@ -214,7 +214,7 @@ def test_sharper_audit_types_and_assessment_field():
 
 
 def test_scene_and_corpus_experience_scene_fields():
-    from retnovation.types import (
+    from elenchus.types import (
         CheckableSet,
         CorpusEntry,
         Experience,
@@ -301,7 +301,7 @@ def test_decision_frame_naming_a_missing_frame_raises():
 
 def test_frame_strength_storage_fields_default_empty():
     from datetime import datetime, timezone
-    from retnovation.types import FrameStrength, Strength
+    from elenchus.types import FrameStrength, Strength
 
     now = datetime(2026, 6, 24, tzinfo=timezone.utc)
     fs = FrameStrength(strength=Strength.weak, last_seen=now, due=now, last_evidence="")
@@ -322,7 +322,7 @@ def test_frame_strength_storage_fields_default_empty():
 
 
 def test_next_experience_spec_carries_experience_id_default_none():
-    from retnovation.types import NextExperienceSpec, Regime
+    from elenchus.types import NextExperienceSpec, Regime
 
     s = NextExperienceSpec(target_frames=["f"], ledger_ref="veldra:x", regime=Regime.open_ended)
     assert s.experience_id is None
@@ -337,7 +337,7 @@ def test_next_experience_spec_carries_experience_id_default_none():
 
 def test_selection_receipt_shape():
     from datetime import datetime, timezone
-    from retnovation.types import SelectionReceipt
+    from elenchus.types import SelectionReceipt
 
     r = SelectionReceipt(
         frame="lead_with_what_you_refuse_to_do",
@@ -358,7 +358,7 @@ def test_selection_receipt_shape():
 
 
 def test_proposal_top_and_problem_menu_dedup():
-    from retnovation.types import NextExperienceSpec, Proposal, Regime, SelectionReceipt
+    from elenchus.types import NextExperienceSpec, Proposal, Regime, SelectionReceipt
     from datetime import datetime, timezone
 
     now = datetime(2026, 6, 25, tzinfo=timezone.utc)
@@ -394,7 +394,7 @@ def test_proposal_top_and_problem_menu_dedup():
 
 
 def test_core_candidate_and_verdict_roundtrip():
-    from retnovation.types import CoreCandidate, CoreKind, CoreVerdict
+    from elenchus.types import CoreCandidate, CoreKind, CoreVerdict
 
     c = CoreCandidate(
         kind=CoreKind.demote, target="orphan_frame", rationale="no evidence, unreferenced"
@@ -406,7 +406,7 @@ def test_core_candidate_and_verdict_roundtrip():
 def test_territory_map_defaults_are_decision_and_empty_conversion():
     """Additive wire fields (front-door conversion spec §2a): every existing fake and caller
     stays valid — verdict defaults to decision, conversion to empty."""
-    from retnovation.types import TerritoryMap
+    from elenchus.types import TerritoryMap
 
     tm = TerritoryMap(ranked=["a"], confidence="high", reflection="r")
     assert tm.verdict == "decision"

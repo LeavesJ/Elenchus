@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 
-from retnovation.terrain import (
+from elenchus.terrain import (
     compose_houses,
     convergence_order,
     project_terrain,
     region_clears_guard,
 )
-from retnovation.types import FrameStrength, LearnerState, RegionRender, Strength, TerrainView
+from elenchus.types import FrameStrength, LearnerState, RegionRender, Strength, TerrainView
 
 NOW = datetime(2026, 6, 29, tzinfo=timezone.utc)
 
@@ -422,7 +422,7 @@ def test_compose_houses_is_one_house_per_convergence_row():
 def test_compose_houses_over_six_convergences_matches_house_region_element_wise():
     # The founder's headline count, now correct: six convergences (mixed sittings) -> six houses,
     # each one's region computed via the SAME _house_region function compose_houses delegates to.
-    from retnovation.terrain import _house_region
+    from elenchus.terrain import _house_region
 
     view = _two_region_view()
     territory_frames = {"dim_t": (["a_weak_a"], None), "bright_t": (["z_strong_a"], None)}

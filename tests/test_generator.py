@@ -1,6 +1,6 @@
 import pytest
 
-from retnovation.types import (
+from elenchus.types import (
     CorpusEntry,
     Experience,
     Frame,
@@ -75,21 +75,21 @@ GATE_KW = dict(
 
 
 def test_angle_count_counts_frames_traps_binding_and_four_dims():
-    from retnovation.generator import angle_count
+    from elenchus.generator import angle_count
 
     assert angle_count(_exp().rubric) == 2 + 2 + 0 + 4  # 8
     assert angle_count(_exp(mode=Mode.bounded_error, binding="hard line").rubric) == 9
 
 
 def test_good_experience_passes():
-    from retnovation.generator import anti_label_gate
+    from elenchus.generator import anti_label_gate
 
     res = anti_label_gate(_exp(), _corpus(), **GATE_KW)
     assert res.passed and res.rejects == [] and res.angle_count == 8
 
 
 def test_recoverable_label_trips_when_corpus_missing_or_unlabeled_empty():
-    from retnovation.generator import anti_label_gate
+    from elenchus.generator import anti_label_gate
 
     assert GateCode.recoverable_label in anti_label_gate(_exp(), None, **GATE_KW).rejects
     assert (
@@ -99,7 +99,7 @@ def test_recoverable_label_trips_when_corpus_missing_or_unlabeled_empty():
 
 
 def test_pre_named_framework_trips_on_method_name_and_frame_leak():
-    from retnovation.generator import anti_label_gate
+    from elenchus.generator import anti_label_gate
 
     assert (
         GateCode.pre_named_framework
@@ -114,7 +114,7 @@ def test_pre_named_framework_trips_on_method_name_and_frame_leak():
 
 
 def test_type_hint_scaffold_trips_on_category_cue():
-    from retnovation.generator import anti_label_gate
+    from elenchus.generator import anti_label_gate
 
     assert (
         GateCode.type_hint_scaffold
@@ -125,7 +125,7 @@ def test_type_hint_scaffold_trips_on_category_cue():
 
 
 def test_softened_ambiguity_trips_on_mode_dishonesty():
-    from retnovation.generator import anti_label_gate
+    from elenchus.generator import anti_label_gate
 
     assert (
         GateCode.softened_ambiguity
@@ -142,7 +142,7 @@ def test_softened_ambiguity_trips_on_mode_dishonesty():
 
 
 def test_cosmetic_engagement_trips_on_wrapper_or_missing_stakes():
-    from retnovation.generator import anti_label_gate
+    from elenchus.generator import anti_label_gate
 
     assert (
         GateCode.cosmetic_engagement
@@ -157,7 +157,7 @@ def test_cosmetic_engagement_trips_on_wrapper_or_missing_stakes():
 
 
 def test_depth_floor_trips_below_min_angle_count():
-    from retnovation.generator import anti_label_gate
+    from elenchus.generator import anti_label_gate
 
     thin = _exp(
         frames=[Frame(frame_code="protect_the_core_lane", frame_detail="d", paired_trap=None)],
@@ -169,7 +169,7 @@ def test_depth_floor_trips_below_min_angle_count():
 
 
 def test_quality_floors_downgrade_not_reject():
-    from retnovation.generator import anti_label_gate
+    from elenchus.generator import anti_label_gate
 
     res = anti_label_gate(_exp(), _corpus(prov="   "), **GATE_KW)  # empty provenance
     assert GateCode.owned_or_real in res.downgrades
@@ -205,7 +205,7 @@ def _write_seed(root, eid, ref, frames):
 
 
 def test_load_gated_library_raises_on_a_bad_rubric(tmp_path):
-    from retnovation.generator import load_gated_library, GateError
+    from elenchus.generator import load_gated_library, GateError
 
     _write_gate_files(tmp_path)
     # one thin (sub-8-angle) rubric: 1 frame + 1 trap + 4 = 6 < 8
@@ -217,8 +217,8 @@ def test_load_gated_library_raises_on_a_bad_rubric(tmp_path):
 
 
 def test_select_open_ended_ranks_by_frame_coverage(tmp_path):
-    from retnovation.generator import select_open_ended
-    from retnovation.types import LearnerState, NextExperienceSpec
+    from elenchus.generator import select_open_ended
+    from elenchus.types import LearnerState, NextExperienceSpec
 
     _write_gate_files(tmp_path)
     _write_seed(
@@ -250,8 +250,8 @@ def test_select_open_ended_ranks_by_frame_coverage(tmp_path):
 
 
 def test_select_cs_technical_ranks_by_concept_coverage():
-    from retnovation.generator import select_cs_technical
-    from retnovation.types import LearnerState, NextExperienceSpec, Regime
+    from elenchus.generator import select_cs_technical
+    from elenchus.types import LearnerState, NextExperienceSpec, Regime
 
     spec = NextExperienceSpec(
         target_frames=["safety_vs_liveness", "quorum_intersection"],
@@ -265,8 +265,8 @@ def test_select_cs_technical_ranks_by_concept_coverage():
 
 
 def test_select_cs_technical_cold_start_falls_back_to_content_core():
-    from retnovation.generator import select_cs_technical
-    from retnovation.types import Core, LearnerState
+    from elenchus.generator import select_cs_technical
+    from elenchus.types import Core, LearnerState
 
     core = Core(
         process_frames=[],
@@ -279,8 +279,8 @@ def test_select_cs_technical_cold_start_falls_back_to_content_core():
 
 def test_select_cs_technical_raises_on_empty_library(tmp_path):
     (tmp_path / "checkables").mkdir()
-    from retnovation.generator import select_cs_technical, GateError
-    from retnovation.types import LearnerState
+    from elenchus.generator import select_cs_technical, GateError
+    from elenchus.types import LearnerState
 
     with pytest.raises(GateError):
         select_cs_technical(
@@ -290,8 +290,8 @@ def test_select_cs_technical_raises_on_empty_library(tmp_path):
 
 def test_every_authored_rubric_passes_the_gate_and_clears_eight_angles():
     """The moat: the gate holds the unlabeled test over everything the generator produces."""
-    from retnovation.content_loader import load_library, load_min_angle_count, load_denylist
-    from retnovation.generator import anti_label_gate, angle_count
+    from elenchus.content_loader import load_library, load_min_angle_count, load_denylist
+    from elenchus.generator import anti_label_gate, angle_count
 
     min_angle = load_min_angle_count()
     fw, sc = load_denylist("framework_denylist"), load_denylist("scaffold_denylist")
@@ -307,15 +307,15 @@ def test_every_authored_rubric_passes_the_gate_and_clears_eight_angles():
 
 
 def test_seed_frame_subsets_differ_so_the_selector_discriminates():
-    from retnovation.content_loader import load_library
+    from elenchus.content_loader import load_library
 
     subsets = {frozenset(f.frame_code for f in e.rubric.frames) for e in load_library()}
     assert len(subsets) >= 2
 
 
 def test_validate_scene_passes_clean_and_rejects_leaks():
-    from retnovation.generator import GateError, validate_scene
-    from retnovation.types import Scene
+    from elenchus.generator import GateError, validate_scene
+    from elenchus.types import Scene
 
     rubric = _exp().rubric  # frames lead_with_what_you_refuse_to_do, protect_the_core_lane
     kw = dict(
@@ -362,15 +362,15 @@ def test_validate_scene_passes_clean_and_rejects_leaks():
 
 
 @pytest.mark.skipif(
-    not __import__("pathlib").Path("data/retnovation.db").exists(),
+    not __import__("pathlib").Path("data/elenchus.db").exists(),
     reason="real seeded corpus (gitignored data/) not present",
 )
 def test_seed_ledger_refs_resolve_in_the_real_corpus():
     """Catch the orphan class of bug: every seed must bind to a real seeded founder entry."""
-    from retnovation.content_loader import load_library
-    from retnovation.persistence import Store
+    from elenchus.content_loader import load_library
+    from elenchus.persistence import Store
 
-    store = Store("data/retnovation.db")
+    store = Store("data/elenchus.db")
     try:
         for exp in load_library():
             entry = store.get_corpus(exp.ledger_ref)
@@ -381,17 +381,17 @@ def test_seed_ledger_refs_resolve_in_the_real_corpus():
 
 
 @pytest.mark.skipif(
-    not __import__("pathlib").Path("data/retnovation.db").exists(),
+    not __import__("pathlib").Path("data/elenchus.db").exists(),
     reason="real seeded corpus (gitignored data/) not present",
 )
 def test_seeded_license_scene_clears_the_moat():
     """The authored (gitignored) license_continuity scene the student actually sees must clear the
     same anti-label bar as the abstract prompt — the moat holds over the concrete scene + situation."""
-    from retnovation.content_loader import load_denylist, load_experience
-    from retnovation.generator import validate_scene
-    from retnovation.persistence import Store
+    from elenchus.content_loader import load_denylist, load_experience
+    from elenchus.generator import validate_scene
+    from elenchus.persistence import Store
 
-    store = Store("data/retnovation.db")
+    store = Store("data/elenchus.db")
     try:
         entry = store.get_corpus("veldra:license_fork_risk")
         if entry is None or entry.scene is None:
@@ -412,8 +412,8 @@ def test_validate_scene_sees_through_markdown_emphasis():
     frame phrase split by markdown (e.g. `**Lead** with what you refuse to do`) cannot slip past."""
     import pytest
 
-    from retnovation.generator import GateError, validate_scene
-    from retnovation.types import Scene
+    from elenchus.generator import GateError, validate_scene
+    from elenchus.types import Scene
 
     rubric = _exp().rubric  # frames lead_with_what_you_refuse_to_do, protect_the_core_lane
     kw = dict(
@@ -441,7 +441,7 @@ def test_validate_scene_sees_through_markdown_emphasis():
 def test_anti_label_gate_sees_through_markdown_emphasis():
     """The same emphasis strip applies to the open_ended prompt gate, so a bold-split frame leak in
     exp.prompt is caught — the two gates stay consistent if abstract prompts also become legible."""
-    from retnovation.generator import anti_label_gate
+    from elenchus.generator import anti_label_gate
 
     res = anti_label_gate(
         _exp(prompt="**Lead** with what you refuse to do, then decide."), _corpus(), **GATE_KW
@@ -450,8 +450,8 @@ def test_anti_label_gate_sees_through_markdown_emphasis():
 
 
 def test_select_open_ended_honors_experience_id():
-    from retnovation.generator import select_open_ended
-    from retnovation.types import NextExperienceSpec, Regime
+    from elenchus.generator import select_open_ended
+    from elenchus.types import NextExperienceSpec, Regime
 
     spec = NextExperienceSpec(
         target_frames=["commit_under_the_deadline"],

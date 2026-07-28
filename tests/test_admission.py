@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from retnovation.admission import check_content_graph_integrity, screen_candidate
-from retnovation.model import FakeLiftModel
-from retnovation.types import (
+from elenchus.admission import check_content_graph_integrity, screen_candidate
+from elenchus.model import FakeLiftModel
+from elenchus.types import (
     AdmissionRecord,
     AdmittedAs,
     Experience,
@@ -86,7 +86,7 @@ def test_screen_candidate_filters_persists_and_returns(tmp_path):
 
 
 def test_adjudication_packet_shows_both_axes_and_outputs(tmp_path):
-    from retnovation.admission import format_adjudication_packet
+    from elenchus.admission import format_adjudication_packet
 
     result = screen_candidate(
         _candidate(),
@@ -113,7 +113,7 @@ def test_adjudication_packet_shows_both_axes_and_outputs(tmp_path):
 
 
 def test_admission_record_yaml_round_trips():
-    from retnovation.admission import format_admission_record
+    from elenchus.admission import format_admission_record
 
     import yaml
 

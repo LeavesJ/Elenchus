@@ -1,7 +1,7 @@
-from retnovation.content_loader import load_experience
-from retnovation.model import AnthropicModel
-from retnovation.types import ConverseTurn, EgressScreen
-from retnovation.web import voice
+from elenchus.content_loader import load_experience
+from elenchus.model import AnthropicModel
+from elenchus.types import ConverseTurn, EgressScreen
+from elenchus.web import voice
 
 
 class _Resp:

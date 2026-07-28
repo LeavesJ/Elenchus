@@ -1,10 +1,10 @@
 from datetime import datetime, timezone
 
-from retnovation.aim import aim, derive_core
-from retnovation.orchestration import run_session
-from retnovation.persistence import Store
-from retnovation.model import FakeModel, IntakeClassification, ResponseClassification
-from retnovation.types import (
+from elenchus.aim import aim, derive_core
+from elenchus.orchestration import run_session
+from elenchus.persistence import Store
+from elenchus.model import FakeModel, IntakeClassification, ResponseClassification
+from elenchus.types import (
     CorpusEntry,
     FrameState,
     LedgerEntry,
@@ -48,7 +48,7 @@ def _to_license(proposal):
     # Steer to license_continuity specifically. SP3 added continuity_lock_in on the same ledger_ref,
     # so the deduped problem_menu serves the single-frame isolate; license_continuity is still in the
     # full candidate list — steer by experience_id over proposal.candidates (L-14 re-steer).
-    from retnovation.types import Outcome, Selection
+    from elenchus.types import Outcome, Selection
 
     top_spec, top_receipt = proposal.top
     for spec, receipt in proposal.candidates:
@@ -141,8 +141,8 @@ def test_run_session_logs_selection_receipt(tmp_path):
 
 
 def test_decide_cli_accept_and_redirect(monkeypatch):
-    from retnovation.orchestration import decide_cli
-    from retnovation.types import (
+    from elenchus.orchestration import decide_cli
+    from elenchus.types import (
         NextExperienceSpec,
         Outcome,
         Proposal,

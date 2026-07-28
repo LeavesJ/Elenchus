@@ -2,9 +2,9 @@ import os
 
 import pytest
 
-from retnovation.elicitation import DEFAULT_TARGET, run_elicitation_probe
-from retnovation.run_elicitation import load_probe_experience
-from retnovation.types import FrameState, ProbeResult
+from elenchus.elicitation import DEFAULT_TARGET, run_elicitation_probe
+from elenchus.run_elicitation import load_probe_experience
+from elenchus.types import FrameState, ProbeResult
 
 _HAS_KEY = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN"))
 
@@ -14,7 +14,7 @@ _HAS_KEY = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKE
 def test_live_elicitation_smoke():
     """One real Opus run on the isolate: the pipeline returns a valid ProbeResult with the target
     classified. NO assertion on the substantive verdict — that is the human's (SP1/L-15)."""
-    from retnovation.model import AnthropicModel
+    from elenchus.model import AnthropicModel
 
     exp = load_probe_experience("continuity_lock_in")  # DF-free variant (§2d)
     result = run_elicitation_probe([exp], AnthropicModel(), runs_by_id={"continuity_lock_in": 1})

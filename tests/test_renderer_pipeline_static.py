@@ -9,9 +9,9 @@ this repo); the browser smoke supplies the behavioural teeth."""
 import re
 from pathlib import Path
 
-TERRAIN = Path("src/retnovation/web/static/terrain3d.js")
-CEREMONIES = Path("src/retnovation/web/static/ceremonies.js")
-SHELL = Path("src/retnovation/web/static/index.html")
+TERRAIN = Path("src/elenchus/web/static/terrain3d.js")
+CEREMONIES = Path("src/elenchus/web/static/ceremonies.js")
+SHELL = Path("src/elenchus/web/static/index.html")
 
 
 def _js_fn(src: str, name: str) -> str:

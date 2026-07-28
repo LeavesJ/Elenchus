@@ -1,8 +1,8 @@
 import pytest
 
-from retnovation.assessment import checkable_scorer
-from retnovation.model import FakeModel, IntakeClassification
-from retnovation.types import (
+from elenchus.assessment import checkable_scorer
+from elenchus.model import FakeModel, IntakeClassification
+from elenchus.types import (
     CheckableGrade,
     CheckableQuestion,
     CheckableSet,

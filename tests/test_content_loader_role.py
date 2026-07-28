@@ -1,4 +1,4 @@
-from retnovation.content_loader import load_experience
+from elenchus.content_loader import load_experience
 
 
 def test_role_loads_ceo_and_cto():
