@@ -63,6 +63,9 @@ _AFFIRMATIVE = frozenset(
     }
 )
 _MAX_CONFIRM_CORRECTIONS = 2
+# Bare rejections get their own allowance: they cost no re-map, so they must not spend a
+# correction, and they still have to terminate.
+_MAX_BARE_REJECTIONS = 2
 
 # A yes that TURNS is a correction, not agreement. These are the words that reverse whatever came
 # before them, so a reply carrying one must go to the re-map even if it opened with "yes".
@@ -786,6 +789,7 @@ class SessionRegistry:
                     # path that screen did not previously run at all. One added call per serve is
                     # the honest cost; do not describe this beat as free.
                     corrections = 0
+                    bare = 0
                     while True:
                         fit_text = tmap.fit.strip()
                         if fit_text and voice.egress_safe_reply(model, base, fit_text):
@@ -807,10 +811,19 @@ class SessionRegistry:
                         # rejects without naming anything ("no", "that's not it", "none of
                         # these"), which the beat's own last sentence invites. That is the
                         # 2026-07-27 harm from the other side: it used to write `no` into
-                        # `web_world` as her situation and re-map territories on it. It still
-                        # COUNTS as a correction, so the cap bounds a learner who only says no.
-                        corrections += 1
-                        if not _is_bare_rejection(value):
+                        # `web_world` as her situation and re-map territories on it.
+                        if _is_bare_rejection(value):
+                            # It carries nothing to map, so it costs no model call and must NOT
+                            # spend one of her two corrections — driving the real surface showed
+                            # a plain "no" burning half her budget, so the correction that
+                            # actually named her situation hit the cap instead of the beat built
+                            # for it. It still has to terminate: two of them take the same
+                            # honest-fit fall-through below, doors escape and all.
+                            bare += 1
+                            if bare < _MAX_BARE_REJECTIONS:
+                                continue
+                        else:
+                            corrections += 1
                             situation = value
                             if sit is not None:
                                 self._store.write_world(sit, situation, now)
@@ -818,7 +831,7 @@ class SessionRegistry:
                             # this, the forge below would build her LATEST words under a rubric
                             # chosen for her PREVIOUS ones — one scenario, two different inputs.
                             tmap, eid, base = remap(situation)
-                        if corrections >= _MAX_CONFIRM_CORRECTIONS:
+                        if corrections >= _MAX_CONFIRM_CORRECTIONS or bare >= _MAX_BARE_REJECTIONS:
                             # Past the cap the composer must NOT forge silently — that is the
                             # 2026-07-24 defect deferred by two turns, not fixed. Spec §4b: fall
                             # through to the honest-fit beat, which names the stretch in her own

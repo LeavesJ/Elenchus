@@ -1320,6 +1320,40 @@ def test_a_bare_rejection_at_the_confirm_beat_never_becomes_the_world(tmp_path, 
         assert tag == "say" and data["text"] == _SCENARIO, reply
 
 
+def test_a_bare_rejection_does_not_spend_one_of_her_two_corrections(tmp_path, make_fake):
+    """Found by driving the real HTTP surface, not by a unit test. Counting a bare "no" as a
+    correction made a plain no burn half her budget, so the correction that actually NAMED her
+    situation hit the cap's honest-fit fall-through instead of the conversion beat built for it.
+    A reply that carries nothing to map costs no model call and must cost no correction."""
+    conversion = "Getting your first client — what's the call in that?"
+    script = [{}, {"verdict": "topic", "confidence": "low", "conversion": conversion}]
+    db = str(tmp_path / "bare-budget.db")
+    reg = SessionRegistry(db, model_factory=_mapper_factory(make_fake, script))
+    reg.start("s1", now=NOW)
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    reg.step("s1", "startup getting first client")
+    tag, data = reg.step("s1", "no")  # spends a BARE allowance, not a correction
+    assert data["text"] == _CONFIRM_COPY.format(desc=desc)
+    tag, data = reg.step("s1", "no no like how to get my first client")
+    assert data["text"] == conversion  # the beat built for it, NOT the cap fall-through
+
+
+def test_two_bare_rejections_still_terminate_at_the_honest_fit_beat(tmp_path, make_fake):
+    """The other half: a learner who only ever says no must not loop. The second bare rejection
+    takes the same fall-through the correction cap uses — the stretch named, the doors offered."""
+    db = str(tmp_path / "bare-cap.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)
+    reg.step("s1", "no")
+    tag, data = reg.step("s1", "nope")
+    assert "doors first?" in data["text"] or "other doors" in data["text"]
+    store = SittingStore(db)
+    assert store.read_world(store.live_sitting()["id"]) == _SITUATION  # never overwritten
+    tag, data = reg.step("s1", "start there")
+    assert tag == "say" and data["text"] == _SCENARIO  # never dead-ends
+
+
 def test_a_rejection_that_carries_words_is_still_a_correction(tmp_path, make_fake):
     """The other direction, and it is the founder's own live path: "no no like how to get my
     first client" LEADS with rejection and carries a whole situation. That must re-map on his
