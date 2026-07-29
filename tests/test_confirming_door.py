@@ -254,11 +254,20 @@ def test_confirm_beat_precedes_the_forge():
     assert confirm_at < forge_at, "the confirm beat must run BEFORE the forge"
 
 
-def test_confirm_beat_screens_fit_before_serving_it():
-    # L-13: fit is model-authored learner-facing text and rides only after the egress screen.
+def test_the_served_fit_is_screened_at_one_seam_and_read_in_one_place():
+    # L-13: fit is model-authored learner-facing text and rides only after the egress screen. The
+    # screen lives in `screened_desc` now — one model call per MAP rather than one per serve
+    # (residual 3, 2026-07-28) — so the pin follows it. Both beats that carry `desc` take it from
+    # that seam; an inlined second copy is how the screen silently drops off one of them.
     body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
-    seg = body[body.index("_CONFIRM_COPY") - 900 : body.index("_CONFIRM_COPY") + 400]
-    assert "egress_safe_reply" in seg, "the confirm beat must egress-screen fit before serving"
+    assert body.count("def screened_desc(") == 1
+    # The read and the screen are the same two lines, so "screened before it rides" is structural
+    # rather than a claim about ordering: there is nowhere else that reads the mapper's fit.
+    assert body.count("fit_text = tmap.fit.strip()") == 1
+    assert body.count("if fit_text and voice.egress_safe_reply(model, base, fit_text):") == 1
+    assert len(re.findall(r"tmap\.fit", body)) == 1, "the mapper's fit is read at the seam only"
+    assert body.count("desc = screened_desc()") == 2  # the confirm beat and the honest-fit beat
+    assert "_CONFIRM_COPY.format(desc=desc)" in body and "fit_copy.format(desc=desc)" in body
 
 
 def test_confirm_copy_never_deflects_and_never_grades():

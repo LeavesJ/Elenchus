@@ -695,6 +695,7 @@ class SessionRegistry:
                     known = {eid for eid, _ in territories}
                     force_fit = False
                     converted = False
+                    fit_desc = None  # the screened `desc` for the CURRENT map; cleared on re-map
 
                     def remap(text):
                         """The mapping seam: the model call, the hallucination-proof ranking, the
@@ -706,11 +707,33 @@ class SessionRegistry:
                         A ranking fallback or a `mapped_rank` bank that fires at two of the three
                         is a door answering for a territory the composer never chose (L-31, the
                         honest_fit_beat precedent)."""
+                        nonlocal fit_desc
                         m = model.map_territories(text, territories)
                         ranked = [e for e in m.ranked if e in known] or [e for e, _ in territories]
                         head = ranked[0]  # a hallucinated ranking cannot pick the door
                         ch.mapped_rank = ranked  # banked registry-side at the next dequeue
+                        fit_desc = None  # a new map: the screened desc below is stale
                         return m, head, next(e for e in open_exps if e.experience_id == head)
+
+                    def screened_desc():
+                        """The decision named in HER words: the mapper's `fit`, egress-screened
+                        (L-13), else the generic territory description (2026-07-05 founder
+                        dogfood: the generic recite "never adjusts" to her material).
+
+                        This exists because the honest-fit beat and the confirm beat both serve
+                        it, and both used to compute it — so the low-confidence path screened one
+                        string twice off one map, and every bare rejection's re-ask bought the
+                        screen again to produce a string already in hand. `egress_safe_reply` is
+                        ONE MODEL CALL per invocation; the honest cost is one per MAP, not one
+                        per serve. `remap` clears it, which is the only thing that may."""
+                        nonlocal fit_desc
+                        if fit_desc is None:
+                            fit_text = tmap.fit.strip()
+                            if fit_text and voice.egress_safe_reply(model, base, fit_text):
+                                fit_desc = " ".join(fit_text.split()).rstrip(".")
+                            else:
+                                fit_desc = " ".join(load_territory_text(eid).split()).rstrip(".")
+                        return fit_desc
 
                     def conversion_beat():
                         """The conversion beat: engage THEIR subject, ask for the decision inside
@@ -795,11 +818,7 @@ class SessionRegistry:
                         words that declined it. A decline re-serves the doors where she is
                         looking; the question she is parked at does not change, so
                         `frontdoor_pending` stays set and a reload re-serves the pair."""
-                        fit_text = tmap.fit.strip()
-                        if fit_text and voice.egress_safe_reply(model, base, fit_text):
-                            desc = " ".join(fit_text.split()).rstrip(".")
-                        else:
-                            desc = " ".join(load_territory_text(eid).split()).rstrip(".")
+                        desc = screened_desc()
                         with self._lock:
                             n = self._fit_variant_idx.get(session_id, 0)
                             self._fit_variant_idx[session_id] = n + 1
@@ -843,11 +862,7 @@ class SessionRegistry:
                     corrections = 0
                     bare = 0
                     while True:
-                        fit_text = tmap.fit.strip()
-                        if fit_text and voice.egress_safe_reply(model, base, fit_text):
-                            desc = " ".join(fit_text.split()).rstrip(".")
-                        else:
-                            desc = " ".join(load_territory_text(eid).split()).rstrip(".")
+                        desc = screened_desc()
                         ch.frontdoor_pending = _CONFIRM_COPY.format(desc=desc)  # before the put
                         ch.from_worker.put(("say", {"text": ch.frontdoor_pending}))
                         value = ch.to_worker.get()

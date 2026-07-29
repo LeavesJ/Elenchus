@@ -1323,6 +1323,73 @@ def test_the_reserve_after_an_agreement_is_hedged_never_the_rejected_sentence(tm
     assert "other doors first?" in data["text"]  # the escape the assert-y re-serve never carried
 
 
+def _fit_screen_spy(monkeypatch):
+    """Records every text `voice.egress_safe_reply` was asked to screen. It is ONE MODEL CALL per
+    invocation (its own docstring says so), which is the whole point of counting them."""
+    seen = []
+    real = _voice.egress_safe_reply
+
+    def spy(model, exp, text):
+        seen.append(text)
+        return real(model, exp, text)
+
+    monkeypatch.setattr(_voice, "egress_safe_reply", spy)
+    return seen
+
+
+def test_the_screened_fit_costs_one_model_call_per_map(tmp_path, make_fake, monkeypatch):
+    """Residual 3's cost half. Every beat that serves the mapper's `fit` screens it first, and
+    the screen is a model call — so the honest-fit beat screened the string and the confirm beat
+    immediately screened the SAME string off the SAME map. One screen per map now."""
+    fit = "whether to sign the penalty clause Thursday"
+    seen = _fit_screen_spy(monkeypatch)
+    reg = SessionRegistry(
+        str(tmp_path / "screen-once-fit.db"),
+        model_factory=_mapper_factory(make_fake, [{"confidence": "low", "fit": fit}]),
+    )
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", _SITUATION)
+    assert data["text"] == _HONEST_FIT.format(desc=fit)  # the fit beat served it
+    tag, data = reg.step("s1", "start there")
+    assert data["text"] == _CONFIRM_COPY.format(desc=fit)  # the confirm beat served it again
+    assert seen.count(fit) == 1, "the same map's fit must not be screened once per serve"
+
+
+def test_a_bare_rejections_reask_does_not_buy_the_screen_again(tmp_path, make_fake, monkeypatch):
+    """The other re-serve off an unchanged map: a bare rejection costs no re-map by design, so
+    the re-ask is the same sentence off the same `tmap` — and it was paying for the screen a
+    second time to produce a string already in hand."""
+    fit = "whether to sign the penalty clause Thursday"
+    seen = _fit_screen_spy(monkeypatch)
+    reg = SessionRegistry(
+        str(tmp_path / "screen-once-bare.db"),
+        model_factory=_mapper_factory(make_fake, [{"fit": fit}]),
+    )
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", _SITUATION)
+    assert data["text"] == _CONFIRM_COPY.format(desc=fit)
+    tag, data = reg.step("s1", "no")  # a bare rejection: no re-map, so the map is unchanged
+    assert data["text"] == _CONFIRM_COPY.format(desc=fit)
+    assert seen.count(fit) == 1
+
+
+def test_a_correction_serves_the_new_maps_fit_never_the_cached_one(tmp_path, make_fake):
+    """The hazard the per-map cache introduces, pinned in its own right. A correction re-maps, so
+    the screened desc is stale the instant `remap` returns — serving it would put the PREVIOUS
+    map's decision to her under the rubric chosen for her new words. Only `remap` may clear it,
+    and it must, every time."""
+    first, second = "whether to sign Thursday", "whether to renew at all"
+    reg = SessionRegistry(
+        str(tmp_path / "desc-not-stale.db"),
+        model_factory=_mapper_factory(make_fake, [{"fit": first}, {"fit": second}]),
+    )
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", _SITUATION)
+    assert data["text"] == _CONFIRM_COPY.format(desc=first)
+    tag, data = reg.step("s1", "it's really about the renewal terms in March")
+    assert data["text"] == _CONFIRM_COPY.format(desc=second), "the re-map's fit, not the cache"
+
+
 def test_a_bare_rejection_at_the_confirm_beat_never_becomes_the_world(tmp_path, make_fake):
     """THE 2026-07-27 CLASS AGAIN, on the likeliest reply of all (found by the T2 review of the
     fix above). The beat ends "Say yes, or tell me what it actually is", and the canonical short
