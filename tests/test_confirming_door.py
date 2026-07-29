@@ -267,6 +267,106 @@ def test_empty_and_whitespace_are_not_affirmative():
         assert not _is_affirmative(t)
 
 
+# ---- The SPOKEN channel (voice input) -------------------------------------------------------
+# Invariant 7 applied to this gate: a safety property is a property of gate TIMES distribution.
+# Every predicate above was measured on TYPED replies, where "yeah" is a word someone chose. In
+# speech it is a turn-taking token with no propositional content, so the lead rule's entire
+# justification ("she said yes") stops being true and the gate fails in BOTH directions at once.
+
+
+def test_a_spoken_lead_token_is_not_consent():
+    # THE FALSE YES, and the reason the spoken channel needs its own rule. Nine of fifteen
+    # realistic spoken openers read as consent under the typed rule — each one forges the previous
+    # mapping and writes the sentence over her situation. This is how people actually start a
+    # sentence out loud when they are about to tell you that you have it wrong.
+    for t in [
+        "yeah so I'm trying to decide whether to fire my first sales hire",
+        "yeah I mean it's more about whether we keep chasing enterprise",
+        "ok so the real call is whether to raise now or wait two quarters",
+        "sure so the decision is whether to sign the LOI this week",
+        "right so I need to figure out if I should shut down the second product",
+        "exactly the kind of thing I'm stuck on is hiring",
+        "of course the bigger thing is whether we even have a market",
+        "for sure the hard part is choosing between the two offers",
+        "perfect so what I'm facing is the pricing floor",
+    ]:
+        assert not _is_affirmative(t, spoken=True), t
+        assert not _is_bare_rejection(t, spoken=True), t  # a correction, not a rejection either
+
+
+def test_the_same_lead_token_is_still_consent_when_typed():
+    # The other half of why the channel flag is load-bearing rather than a knob. Typing "Yes," and
+    # then elaborating IS consent — it is the exact sentence that destroyed a real sitting on
+    # 2026-07-27 when the gate called it a correction. The spoken rule must not reach it.
+    assert _is_affirmative("Yes, this is the decision I want to make.")
+    assert _is_affirmative("yeah, that's the one I'm facing")
+
+
+def test_spoken_consent_is_what_survives_the_filler():
+    # THE FALSE NO, which is what "verbal flexibility" actually asks for. This is how people say
+    # yes out loud, and none of it looks like typed consent.
+    for t in [
+        "mhm",
+        "mm hm",
+        "uh huh",
+        "yeah yeah",
+        "yep yep yep",
+        "yeah exactly",
+        "yeah, exactly that",
+        "um yeah",
+        "yeah I mean yeah",
+        "oh yeah totally",
+        "right right right",
+        "yeah ok sure",
+    ]:
+        assert _is_affirmative(t, spoken=True), t
+
+
+def test_a_spoken_reply_carrying_both_is_decided_by_its_LAST_token():
+    # Spoken English inverts on the last token and nowhere else: "yeah no" means no, "no yeah"
+    # means yes. Both are contentless, so neither is a correction — the only question is which
+    # verdict, and the answer is whichever token she landed on.
+    for t in ["no yeah", "yeah no yeah", "no no yeah exactly", "no I mean yeah"]:
+        assert _is_affirmative(t, spoken=True), t
+        assert not _is_bare_rejection(t, spoken=True), t
+    for t in ["yeah no", "yeah no no", "yeah I mean no", "mhm no", "no yeah no"]:
+        assert not _is_affirmative(t, spoken=True), t
+        assert _is_bare_rejection(t, spoken=True), t
+
+
+def test_spoken_filler_alone_never_becomes_her_world():
+    # A reply that is pure hesitation names nothing, so it must not be taken as a correction —
+    # that path assigns `situation = value` and persists "um" as her stated world. It takes the
+    # bare-rejection road instead: one honest re-ask, her ORIGINAL situation standing, and it
+    # still terminates on the cap. Typed input has the same hole; speech is where it gets hit.
+    for t in ["um", "uh", "hmm", "um uh", "like, um", "you know", "i mean", "mm"]:
+        assert not _is_affirmative(t, spoken=True), t
+        assert _is_bare_rejection(t, spoken=True), t
+    # "huh" on its own means "I didn't catch that". Taking it as consent would forge on a request
+    # to repeat the question — so it is filler, while "uh huh" folds to the backchannel yes.
+    assert not _is_affirmative("huh", spoken=True)
+    assert not _is_affirmative("huh?", spoken=True)
+    assert _is_affirmative("uh huh", spoken=True)
+
+
+def test_the_backchannel_yes_transcribes_a_dozen_ways():
+    # One gesture, and STT spells it differently every time. Word tokenisation splits half of
+    # these into pieces that mean nothing on their own, so they are folded before tokenising.
+    for t in ["mhm", "mm hm", "mm-hm", "mmhmm", "uh huh", "uh-huh", "mhm, that's the one"]:
+        assert _is_affirmative(t, spoken=True), t
+
+
+def test_a_spoken_correction_that_names_something_is_still_a_correction():
+    for t in [
+        "no it's really about finding anyone to sell to",
+        "um so the actual call is whether to keep the London office",
+        "not that, the co-founder equity split",
+        "mhm but the harder one is whether to shut the second product",
+    ]:
+        assert not _is_affirmative(t, spoken=True), t
+        assert not _is_bare_rejection(t, spoken=True), t
+
+
 def test_a_bare_rejection_names_nothing():
     # The beat's own last sentence is "Say yes, or tell me what it actually is", so "no" is the
     # canonical short answer — and it used to be written into web_world AS the learner's

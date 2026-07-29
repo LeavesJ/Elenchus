@@ -280,8 +280,78 @@ _CONTENTLESS = {
 }  # fmt: skip
 _WORD_RE = re.compile(r"[a-z']+")
 
+# ---- The SPOKEN channel ---------------------------------------------------------------------
+# Invariant 7 on this gate: a safety property is a property of gate TIMES distribution, and every
+# predicate here was measured on TYPED replies. In typing, "yeah" is a word someone chose, which
+# is the entire justification for `_AFFIRMATIVE_LEAD` ("she said yes"). In speech it is a
+# turn-taking token carrying no proposition, and the gate then fails in BOTH directions at once:
+# "yeah so I'm deciding whether to fire my first sales hire" reads as consent and erases her
+# world, while "mhm" and "no yeah" — which mean yes out loud — read as anything but.
+#
+# So the spoken channel reads what SURVIVES the tokens instead of what leads them: the shape
+# `_is_bare_rejection` already uses, applied to both verdicts at once. It cannot be the typed
+# rule too, which is why the flag is load-bearing rather than a knob: "Yes, this is the decision
+# I want to make." has substantive survivors, and calling that a correction IS the 2026-07-27
+# emergency.
+_SPOKEN_YES = {
+    "yes", "yeah", "yep", "yup", "ya", "yea", "aye", "mhm",
+    "ok", "okay", "sure", "right", "correct", "exactly", "totally", "definitely", "absolutely",
+    "precisely", "perfect", "agreed", "confirmed", "indeed", "true", "gotcha", "bingo", "spot",
+}  # fmt: skip
+# The backchannel yes is one gesture that transcribes a dozen ways — "mhm", "mm hm", "mm-hm",
+# "uh huh", "mmhmm" — and word tokenisation splits half of them into pieces that are individually
+# meaningless. Folded to one token BEFORE tokenising so the set above needs a single member.
+# Bare "huh" is deliberately NOT one of them: on its own it means "I didn't catch that", and
+# taking it as consent would forge on a request to repeat the question.
+_BACKCHANNEL_RE = re.compile(r"\b(?:m+\s*-?\s*h+m+|uh\s*-?\s*huh)\b")
+# Hesitation and discourse glue: words a spoken reply is FULL of and a typed one rarely carries.
+# Deliberately separate from `_CONTENTLESS` so widening it cannot loosen the typed predicates —
+# every word here makes the spoken survivor test more permissive, which is the dangerous
+# direction, so the blast radius stays visible.
+_SPOKEN_FILLER = {
+    "so", "mean", "know", "yknow", "kinda", "kind", "sorta", "sort", "basically", "literally",
+    "guess", "think", "say", "saying", "said", "hmm", "hm", "mm", "erm", "er", "oh", "ah", "huh",
+    "anyway", "anyways", "gonna", "wanna", "maybe", "probably", "totally", "here", "there", "to",
+    "in", "on", "for", "with", "as", "if", "then", "now", "up", "out", "about", "more", "much",
+    "very", "pretty", "sure", "fine", "good", "great", "cool", "nice", "let", "lets", "s", "t",
+}  # fmt: skip
 
-def _is_bare_rejection(text: str) -> bool:
+
+def _spoken_verdict(text: str) -> str | None:
+    """`"yes"` / `"no"` for a spoken reply that names nothing of her own, else None (a correction).
+
+    Two rules, both of which fall out of how speech actually works:
+
+    * **Survivors, not leaders.** If any word outside the token/filler sets survives, she is
+      telling you something and the reply is a CORRECTION however it opened. That is what keeps
+      "yeah so I'm trying to decide whether to fire my first sales hire" out of consent.
+    * **The last token wins.** When nothing substantive survives, the reply is a verdict and
+      spoken English inverts on its final token and nowhere else: "yeah no" means no, "no yeah"
+      means yes, "yeah no yeah" means yes.
+
+    Pure hesitation ("um", "i mean") returns `"no"`, not None. It names nothing, so treating it
+    as a correction would assign `situation = value` and persist "um" as her stated world; the
+    bare-rejection road costs one honest re-ask with her ORIGINAL situation standing, and it
+    still terminates on the cap.
+    """
+    folded = _BACKCHANNEL_RE.sub(" mhm ", (text or "").lower().replace("’", "'"))
+    words = [w.replace("'", "") for w in _WORD_RE.findall(folded)]
+    if any(
+        w not in _SPOKEN_YES
+        and w not in _REJECTION
+        and w not in _CONTENTLESS
+        and w not in _SPOKEN_FILLER
+        for w in words
+    ):
+        return None
+    last = next(
+        (w for w in reversed(words) if w in _SPOKEN_YES or w in _REJECTION),
+        None,
+    )
+    return "yes" if last in _SPOKEN_YES else "no"
+
+
+def _is_bare_rejection(text: str, *, spoken: bool = False) -> bool:
     """True for a reply that rejects the beat and supplies no situation of its own.
 
     The 2026-07-27 emergency was an AGREEMENT overwriting the learner's world. This is the same
@@ -294,7 +364,12 @@ def _is_bare_rejection(text: str) -> bool:
     ORIGINAL situation standing, and a false negative destroys durable state — so this one may be
     generous. It still requires a rejection word, so a bare correction that merely happens to be
     short ("pricing") is untouched.
+
+    `spoken` hands the whole question to `_spoken_verdict`: speech opens with turn-taking tokens
+    that carry no proposition, so leading means nothing and only the survivors decide.
     """
+    if spoken:
+        return _spoken_verdict(text) == "no"
     words = [w.replace("'", "") for w in _WORD_RE.findall((text or "").lower().replace("’", "'"))]
     if not any(w in _REJECTION for w in words):
         return False
@@ -340,7 +415,7 @@ def _asks_for_the_doors(text: str) -> bool:
     return all(w in _DOORS or w in _CONTENTLESS or w in _DOORS_FRAME for w in words)
 
 
-def _is_affirmative(text: str) -> bool:
+def _is_affirmative(text: str, *, spoken: bool = False) -> bool:
     """True for agreement, whether bare or LEADING.
 
     Bare-only was the original rule (Spec-3 §4a) and it destroyed a real sitting on 2026-07-27.
@@ -362,7 +437,13 @@ def _is_affirmative(text: str) -> bool:
     every phone keyboard autocorrects ' to ’, so "That’s it" — pinned agreement in its straight
     form since the beat was written — was silently taking the correction branch. The trailing
     strip carries full-width punctuation too, so a bare "はい。" is the bare "はい".
+    `spoken` hands the whole question to `_spoken_verdict`, because none of the reasoning above
+    survives the change of channel: in speech "yeah" is not a word she chose, so "leading with an
+    affirmative cannot forge something unagreed" is simply untrue and the lead sets must not be
+    consulted at all.
     """
+    if spoken:
+        return _spoken_verdict(text) == "yes"
     t = " ".join((text or "").replace("’", "'").split()).strip().lower().rstrip(".!?。！？，、,")
     if not t:
         return False
