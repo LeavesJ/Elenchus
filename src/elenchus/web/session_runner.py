@@ -613,8 +613,8 @@ class SessionRegistry:
                         honest_fit_beat precedent)."""
                         m = model.map_territories(text, territories)
                         ranked = [e for e in m.ranked if e in known] or [e for e, _ in territories]
-                        ch.mapped_rank = ranked  # banked registry-side at the next dequeue
                         head = ranked[0]  # a hallucinated ranking cannot pick the door
+                        ch.mapped_rank = ranked  # banked registry-side at the next dequeue
                         return m, head, next(e for e in open_exps if e.experience_id == head)
 
                     def conversion_beat():
@@ -774,13 +774,24 @@ class SessionRegistry:
                             # one that ASSERTS (residual named 2026-07-26, and his live path: "no
                             # no like how to get my first client" maps here). Re-serving the
                             # confirm beat put a decision to him that his own words named nowhere.
-                            # The budget is the SAME `converted` the intake loop spends, so the
-                            # conversion fires at most once per pass however it is reached, and
-                            # the cap above still bounds the loop: the extra beat is one turn.
+                            # `converted` is the SAME budget the intake loop spends, so a second
+                            # conversion is unreachable here; today the cap would also stop it at
+                            # `corrections == 1`, and the flag is what keeps that true if the cap
+                            # ever rises. The extra beat is one turn.
                             converted = True
                             value = conversion_beat()
                             if isinstance(value, int):
                                 return forge_selection(eids[value], situation, clicked=True)
+                            if _is_affirmative(value):
+                                # THE 2026-07-27 CLASS, one beat later (T2 review of this change).
+                                # The confirm beat one turn back said "Say yes, or tell me what it
+                                # actually is", so an agreement lands at a park that asked an open
+                                # question. It is not an intake. Overwriting the world with it is
+                                # exactly the failure that destroyed his situation on the live db;
+                                # leaving HER correction standing and asking again with the
+                                # decision NAMED is strictly smaller harm, and it is what the
+                                # confirm beat exists to do.
+                                continue
                             situation = value  # a fresh intake, NOT consent — re-map it
                             if sit is not None:
                                 self._store.write_world(sit, situation, now)

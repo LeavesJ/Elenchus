@@ -1252,6 +1252,142 @@ def test_click_at_the_confirm_loop_conversion_park_forges_the_clicked_territory(
     assert row is not None and row["experience_id"] == _T2  # the CLICKED territory
 
 
+def test_an_agreement_at_the_confirm_loop_conversion_never_becomes_the_world(tmp_path, make_fake):
+    """THE 2026-07-27 EMERGENCY, one beat later — caught by the T2 review of the beat that
+    introduced it. The confirm beat's last sentence is "Say yes, or tell me what it actually is",
+    so the very next park inherits an invitation to agree. That park asks an OPEN question, and a
+    fresh-intake branch there swallowed 'Yes, this is the decision I want to make.' — the literal
+    string from his live db — straight into `web_world`, destroying his situation exactly as the
+    emergency did. An agreement is not an intake: his correction stands and the beat that NAMES a
+    decision asks again."""
+    for reply in ["Yes, this is the decision I want to make.", "yes", "correct", "that's it"]:
+        script = [{}, {"verdict": "topic", "confidence": "low", "conversion": "What call?"}]
+        db = str(tmp_path / f"agree-{abs(hash(reply))}.db")
+        reg = SessionRegistry(db, model_factory=_mapper_factory(make_fake, script))
+        reg.start("s1", now=NOW)
+        reg.step("s1", "startup getting first client")
+        correction = "no no like how to get my first client"
+        tag, data = reg.step("s1", correction)
+        assert data["text"] == "What call?"  # parked at the conversion
+        tag, data = reg.step("s1", reply)
+        store = SittingStore(db)
+        assert store.read_world(store.live_sitting()["id"]) == correction, reply
+        desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+        assert data["text"] == _CONFIRM_COPY.format(desc=desc), reply  # asked, never forged blind
+        tag, data = reg.step("s1", "yes")  # and consent to the NAMED decision still forges
+        assert tag == "say" and data["text"] == _SCENARIO
+
+
+def test_the_conversion_answer_is_what_the_next_beat_and_the_forge_are_built_on(
+    tmp_path, make_fake
+):
+    """The re-map after the conversion must run on her ANSWER, not on the correction that
+    triggered it. Ordering the two the other way is invisible to a mapper that ignores its input
+    and produces a scenario assembled from two different inputs — the exact defect the cap-path
+    comment names. This mapper is a FUNCTION OF THE TEXT, so the order is observable."""
+    briefs = []
+
+    def factory():
+        m = _world_factory(make_fake, briefs=briefs)()
+        orig = m.map_territories
+
+        def by_text(s, t):
+            out = orig(s, t)
+            if "client" in s:  # the correction: a topic whose best stretch is T1
+                return out.model_copy(
+                    update={
+                        "verdict": "topic",
+                        "confidence": "low",
+                        "conversion": "What call?",
+                        "ranked": [_T1, _T2, _T3],
+                    }
+                )
+            if "rebuild" in s:  # her ANSWER to the conversion: a decision, and a DIFFERENT door
+                return out.model_copy(update={"ranked": [_T3, _T1, _T2]})
+            return out
+
+        m.map_territories = by_text
+        return m
+
+    db = str(tmp_path / "conv-answer.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)
+    tag, data = reg.step("s1", "how to get my first client")
+    assert data["text"] == "What call?"
+    answer = "whether to promise a full rebuild to win them"
+    tag, data = reg.step("s1", answer)
+    desc3 = " ".join(load_territory_text(_T3).split()).rstrip(".")
+    assert data["text"] == _CONFIRM_COPY.format(desc=desc3)  # HER ANSWER's territory, not T1's
+    tag, data = reg.step("s1", "yes")
+    assert tag == "say" and data["text"] == _SCENARIO
+    assert answer in briefs[-1][0]
+    store = SittingStore(db)
+    row = store.read_generated_problem(f"gen:{store.live_sitting()['id']}:1")
+    assert row is not None and row["experience_id"] == _T3
+
+
+def test_a_ranking_the_library_does_not_contain_cannot_pick_the_door(tmp_path, make_fake):
+    """The hallucination-proof half of the mapping seam, which had no executable coverage before
+    the T2 review looked for it: a `ranked` naming ids that do not exist, and an EMPTY `ranked`.
+    Unfiltered, the first forges an experience_id the library has never heard of (StopIteration
+    inside the worker thread); unguarded, the second is an IndexError. Both must land on a real
+    territory and forge."""
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    for tag_, ranked in [("fake", ["not_a_territory", "also_fake"]), ("empty", [])]:
+        db = str(tmp_path / f"rank-{tag_}.db")
+        reg = SessionRegistry(db, model_factory=_mapper_factory(make_fake, [{"ranked": ranked}]))
+        reg.start("s1", now=NOW)
+        tag, data = reg.step("s1", _SITUATION)
+        assert tag == "say" and data["text"] == _CONFIRM_COPY.format(desc=desc), (tag_, data)
+        tag, data = reg.step("s1", "yes")
+        assert tag == "say" and data["text"] == _SCENARIO, (tag_, data)
+        store = SittingStore(db)
+        row = store.read_generated_problem(f"gen:{store.live_sitting()['id']}:1")
+        assert row is not None and row["experience_id"] == _T1, tag_
+
+
+def test_a_correction_that_lands_cleanly_at_the_cap_is_not_a_content_gap(tmp_path, make_fake):
+    """§4b: the gap ledger is the content axis's only mechanical input, so it records what the
+    door COULD NOT serve — never every correction. Two corrections that both re-map cleanly
+    (decision/high) reach the cap and must leave the ledger empty; the topic/low arm below is the
+    same path with the condition true."""
+    db = str(tmp_path / "gap-clean.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)
+    reg.step("s1", "no, it's the second delivery clause")
+    tag, data = reg.step("s1", "no, it's really the board review timing")  # cap -> honest fit
+    assert "doors first?" in data["text"] or "other doors" in data["text"]
+    tag, data = reg.step("s1", "start there")
+    assert tag == "say" and data["text"] == _SCENARIO
+    import sqlite3
+
+    c = sqlite3.connect(db)
+    rows = c.execute("SELECT situation, verdict FROM web_content_gap").fetchall()
+    c.close()
+    assert rows == [], rows  # a correction the mapper served cleanly is not a content gap
+
+
+def test_a_correction_the_remap_still_cannot_serve_is_a_content_gap(tmp_path, make_fake):
+    """The other arm: at the cap, a re-map that is still not decision/high IS the gap."""
+    script = [{}, {}, {"verdict": "topic", "confidence": "low", "conversion": "c"}]
+    db = str(tmp_path / "gap-miss.db")
+    reg = SessionRegistry(db, model_factory=_mapper_factory(make_fake, script))
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)
+    reg.step("s1", "no, it's the second delivery clause")
+    reg.step("s1", "no, it's really about finding anyone to sell to")  # cap: topic/low
+    import sqlite3
+
+    c = sqlite3.connect(db)
+    rows = c.execute(
+        "SELECT situation, verdict, confidence, corrected FROM web_content_gap"
+    ).fetchall()
+    c.close()
+    assert rows == [("no, it's really about finding anyone to sell to", "topic", "low", 1)], rows
+
+
 def test_resume_parked_at_the_confirm_loop_conversion_reserves_it(tmp_path, make_fake):
     """Triage fold 2026-07-03, on the new park: a reload must re-serve the question ACTUALLY
     pending. Re-serving the plain confirm ask here would invite a fresh situation that the parked
