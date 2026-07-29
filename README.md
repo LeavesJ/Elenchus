@@ -70,7 +70,7 @@ The honest gap in the product is that the world is built for many domains and ou
 into one, because all five territories currently share a domain. The plural geography is real code
 with real tests and no second instance yet.
 
-Suite: **697 passing / 30 skipped**. The graded engine core (`orchestration`, `assessment/`) is held
+Suite: **704 passing / 30 skipped**. The graded engine core (`orchestration`, `assessment/`) is held
 byte-stable and surface work rides additive seams around it, so changing the rented model is a
 config line that never touches what does the grading.
 
