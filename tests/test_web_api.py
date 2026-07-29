@@ -575,6 +575,36 @@ def _world_client(tmp_path, make_fake):
     return TestClient(app)
 
 
+def test_fit_beat_doors_reserve_over_http_is_title_only(tmp_path, make_fake):
+    """The honest-fit beat's doors escape, answered in words, over the wire. A worker-emitted
+    `menu` was dead scaffolding until this beat made it live, so pin the projection: the doors
+    ride as titles with a fresh nonce the client must echo, and the refs/eids the worker hands
+    the emission stay server-side (L-13) exactly as the embedded front-door menu does."""
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+        m.map_territories = lambda s, t: orig(s, t).model_copy(update={"confidence": "low"})
+        return m
+
+    app = create_app(db_path=str(tmp_path / "fit-doors-http.db"), model_factory=factory)
+    client = TestClient(app)
+    fd = client.post("/api/session").json()
+    assert fd["kind"] == "frontdoor"
+    first_nonce = fd["menu"]["nonce"]
+
+    assert client.post("/api/session/s/say", json={"text": _SITUATION}).json()["kind"] == "say"
+    r = client.post("/api/session/s/say", json={"text": "the other doors first"}).json()
+    assert r["kind"] == "menu" and r["problems"]
+    assert "refs" not in r and "eids" not in r  # L-13: server-side keys never ride the wire
+    assert r["nonce"] != first_nonce  # a fresh stamp — the stale click cannot replay
+
+    picked = client.post(
+        "/api/session/single/choose", json={"index": 0, "nonce": r["nonce"]}
+    ).json()
+    assert picked["kind"] == "say" and picked["text"] == _SCENARIO
+
+
 def test_front_door_free_text_flow_over_http(tmp_path, make_fake):
     """The living sitting end-to-end at the HTTP layer: frontdoor kind → free text → bridge on
     the opening say → done with the subtitled next_title → same-world continue → sitting-story

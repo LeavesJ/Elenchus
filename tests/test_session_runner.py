@@ -1974,6 +1974,79 @@ def test_click_at_the_fit_park_forges_the_clicked_territory(tmp_path, make_fake)
     assert row is not None and row["experience_id"] == _T3  # the CLICKED territory
 
 
+def _low_confidence_reg(db, make_fake):
+    """A registry whose mapper always reports low confidence — every front-door submit parks at
+    the honest-fit beat. Four doors-escape tests below need the same park."""
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+        m.map_territories = lambda s, t: orig(s, t).model_copy(update={"confidence": "low"})
+        return m
+
+    return SessionRegistry(db, model_factory=factory)
+
+
+def test_fit_beat_doors_escape_answered_in_words_reserves_the_doors(tmp_path, make_fake):
+    """The beat offers two options and only ONE of them was answerable. It ends *"Start there —
+    or look at the other doors first?"*, and the doors escape is a CLICK: typing the second
+    option proceeded with the FIRST — the mapped territory she had just declined, forged on the
+    words that declined it. Her words now re-serve the doors where she is looking, and clicking
+    one forges THAT territory."""
+    db = str(tmp_path / "fit-doors-words.db")
+    reg = _low_confidence_reg(db, make_fake)
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", _SITUATION)
+    assert tag == "say" and "other doors first?" in data["text"]  # parked at the fit beat
+
+    tag, data = reg.step("s1", "look at the other doors first")
+    assert tag == "menu", "her words took the beat's own second option — the doors must re-serve"
+    assert data["problems"], "the re-serve carries the doors themselves"
+
+    tag, data = reg.choose("s1", reg._ch["s1"].last_menu_eids.index(_T3), nonce=data["nonce"])
+    assert tag == "say" and data["text"] == _SCENARIO  # the door she picked, forged on her words
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    assert store.read_generated_problem(f"gen:{sit}:1")["experience_id"] == _T3
+
+
+def test_fit_beat_doors_reserve_still_proceeds_on_text(tmp_path, make_fake):
+    """The re-serve must never dead-end: she asked for the doors, looked, and typed instead of
+    clicking. That is the ORIGINAL contract — any text proceeds with the mapped territory — now
+    taken only after the doors were actually put in front of her."""
+    reg = _low_confidence_reg(str(tmp_path / "fit-doors-text.db"), make_fake)
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)
+    tag, data = reg.step("s1", "show me the other doors")
+    assert tag == "menu"
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    tag, data = reg.step("s1", "fine, start there")
+    assert tag == "say" and data["text"] == _CONFIRM_COPY.format(desc=desc)
+
+
+def test_fit_beat_bare_rejection_reserves_the_doors(tmp_path, make_fake):
+    """The same harm on the shorter reply: "no" to a beat whose two options are *start there* or
+    *the doors* is not consent to the first one. It used to forge the mapped territory on a word
+    that declined it — the 2026-07-27 class at the beat one step earlier."""
+    reg = _low_confidence_reg(str(tmp_path / "fit-doors-no.db"), make_fake)
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)
+    tag, _ = reg.step("s1", "no")
+    assert tag == "menu"
+
+
+def test_fit_beat_a_situation_that_mentions_options_is_not_a_doors_request(tmp_path, make_fake):
+    """The false-positive guard, and why the predicate requires the whole reply to sit inside a
+    closed frame: a real situation can carry the word `options` and must still proceed. A miss
+    here costs one extra beat; reading every such reply as a doors request would strand her."""
+    reg = _low_confidence_reg(str(tmp_path / "fit-doors-fp.db"), make_fake)
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    tag, data = reg.step("s1", "I need to look at my options for the penalty clause")
+    assert tag == "say" and data["text"] == _CONFIRM_COPY.format(desc=desc)
+
+
 def test_click_at_the_conversion_park_forges_around_the_topic(tmp_path, make_fake):
     """Spec §2a/§2b: at the conversion park a click means 'give me the pressure on my
     material' — the topic text is the forge brief's situation."""

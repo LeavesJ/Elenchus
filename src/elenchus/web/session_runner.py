@@ -223,6 +223,38 @@ def _is_bare_rejection(text: str) -> bool:
     return all(w in _REJECTION or w in _CONTENTLESS for w in words)
 
 
+# The doors, asked for in WORDS. The honest-fit beat ends "Start there — or look at the other
+# doors first?", and the doors escape is a CLICK: typing the second option proceeded with the
+# FIRST, forging the territory she had just declined on the very words that declined it.
+_DOORS = ("doors", "door", "options", "option", "menu", "list", "choices", "choice")
+# The closed frame those words may sit in — the `_CONTENTLESS` idea again, one beat narrower. The
+# whole reply must fall inside it, which is what keeps a real situation carrying the word
+# "options" ("I need to look at my options for the penalty clause") out: `need`, `penalty` and
+# `clause` sit outside the frame, so it stays the correction it is.
+_DOORS_FRAME = {
+    "look", "looking", "see", "seeing", "show", "showing", "scan", "browse", "check", "view",
+    "read", "first", "other", "others", "another", "more", "else", "rest", "what", "whats",
+    "which", "want", "wanna", "can", "could", "would", "let", "lets", "there", "here", "before",
+    "instead", "rather", "prefer", "try", "back", "up", "out", "over", "some", "any", "still",
+    "maybe", "thanks", "have", "got", "give", "take", "start", "pick", "choose", "to", "for",
+}  # fmt: skip
+
+
+def _asks_for_the_doors(text: str) -> bool:
+    """True for a reply that answers the honest-fit beat's SECOND option in words.
+
+    Same shape as `_is_bare_rejection` and generous for the same reason, inverted: a false
+    positive costs one extra beat — the doors re-serve and any text after them still proceeds
+    with the mapped territory — while a false negative forges the thing she just declined. It
+    still requires a doors WORD, so a bare correction that merely happens to be short is
+    untouched.
+    """
+    words = [w.replace("'", "") for w in _WORD_RE.findall((text or "").lower().replace("’", "'"))]
+    if not any(w in _DOORS for w in words):
+        return False
+    return all(w in _DOORS or w in _CONTENTLESS or w in _DOORS_FRAME for w in words)
+
+
 def _is_affirmative(text: str) -> bool:
     """True for agreement, whether bare or LEADING.
 
@@ -755,7 +787,14 @@ class SessionRegistry:
                         Reads `tmap`/`base`/`eid` at CALL time, so it reflects the latest mapping.
                         Returns a door index if she clicked one, else None (any text proceeds with
                         the MAPPED territory). Shared by the low-confidence path and the confirm
-                        beat's correction cap, so the two can never drift apart (L-31)."""
+                        beat's correction cap, so the two can never drift apart (L-31).
+
+                        BOTH its options are answerable in words. The doors escape used to be a
+                        CLICK only, so typing the second one ("look at the other doors first")
+                        took the first — forging the territory she had just declined, on the
+                        words that declined it. A decline re-serves the doors where she is
+                        looking; the question she is parked at does not change, so
+                        `frontdoor_pending` stays set and a reload re-serves the pair."""
                         fit_text = tmap.fit.strip()
                         if fit_text and voice.egress_safe_reply(model, base, fit_text):
                             desc = " ".join(fit_text.split()).rstrip(".")
@@ -768,6 +807,19 @@ class SessionRegistry:
                         ch.frontdoor_pending = fit_copy.format(desc=desc)  # before the put
                         ch.from_worker.put(("say", {"text": ch.frontdoor_pending}))
                         v = ch.to_worker.get()
+                        if (
+                            not isinstance(v, int)
+                            and v is not _ABANDON
+                            and (_asks_for_the_doors(v) or _is_bare_rejection(v))
+                        ):
+                            # She took the beat's own second option. One re-serve, then whatever
+                            # she says next stands: the doors were actually put in front of her,
+                            # so text proceeding with the mapped territory is the ORIGINAL
+                            # contract rather than a forge on a rejection. It cannot loop.
+                            ch.from_worker.put(
+                                ("menu", {"problems": list(labels), "refs": refs, "eids": eids})
+                            )
+                            v = ch.to_worker.get()
                         ch.frontdoor_pending = None  # consumed
                         if v is _ABANDON:
                             raise _Abandoned()
