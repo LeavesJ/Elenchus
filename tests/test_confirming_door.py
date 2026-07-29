@@ -122,6 +122,72 @@ def test_the_other_common_ways_of_saying_yes():
         assert _is_affirmative(t), t
 
 
+def test_plain_consent_phrasings_that_used_to_read_as_corrections():
+    # Residual 4 (SESSION_HANDOFF 2026-07-28): about twenty everyday ways of saying yes still
+    # took the CORRECTION branch at both parks, and each one is another way to erase a world —
+    # the miss does not cost a re-map, it replaces her situation with the sentence she agreed in.
+    for t in [
+        "that's correct",
+        "That is correct.",
+        "you're right",
+        "you are right, that's the call",
+        "sounds good",
+        "sounds about right",
+        "that works",
+        "that works, build it",
+        "perfect",
+        "Perfect, that's the one I'm facing.",
+        "spot on",
+        "i think so",
+        "I think so, yes",
+        "that's true",
+        "of course",
+        "indeed",
+        "makes sense",
+        "that makes sense to me",
+        "nailed it",
+        "you nailed it",
+        "right on",
+        "pretty much",
+        "for sure",
+        "100%",
+    ]:
+        assert _is_affirmative(t), t
+
+
+def test_a_plain_consent_phrasing_that_turns_is_still_a_correction():
+    # The safety the handoff called "the contrast check carries it" — verified, not assumed. Every
+    # new opener above must still lose to a pivot, or the generosity buys back the 2026-07-27 harm.
+    for t in [
+        "that's correct, but the real question is pricing",
+        "you're right — actually it's about churn",
+        "sounds good, although the decision is whether to hire",
+        "that works, except it's really the co-founder split",
+        "perfect, no wait, it's the renewal",
+        "makes sense, however what I face is the funding round",
+        "spot on, not that one though",
+    ]:
+        assert not _is_affirmative(t), t
+
+
+def test_a_non_english_yes_counts_only_as_the_whole_reply():
+    # The handoff's advice was to extend `_AFFIRMATIVE_LEAD`, and for these it is not safe: the
+    # contrast check is ENGLISH-ONLY, so "sí pero en realidad es sobre el precio" carries nothing
+    # `_CONTRAST` knows and a LEAD rule would read the correction as consent — the exact harm.
+    # Bare (the whole reply) needs no contrast check and is how these actually arrive.
+    for yes in ["si", "sí", "oui", "ja", "da", "はい", "对", "是", "네", "sim", "evet", "да"]:
+        assert _is_affirmative(yes), yes
+        assert not _is_affirmative(yes + " pero en realidad es sobre el precio"), yes
+
+
+def test_a_curly_apostrophe_is_the_same_consent():
+    # Every phone keyboard autocorrects ' to ’, so "That’s it" — already a pinned agreement in its
+    # straight form — was taking the correction branch. `_is_bare_rejection` already normalised it.
+    for t in ["That’s it", "that’s right", "you’re right", "that’s correct", "that’s the one"]:
+        assert _is_affirmative(t), t
+    assert not _is_affirmative("that’s right, but the real one is pricing")
+
+
 def test_empty_and_whitespace_are_not_affirmative():
     for t in ["", "   ", "\n"]:
         assert not _is_affirmative(t)

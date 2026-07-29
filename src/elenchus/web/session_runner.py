@@ -60,6 +60,35 @@ _AFFIRMATIVE = frozenset(
         "sounds right",
         "confirmed",
         "agreed",
+        # A yes in her own language, BARE ONLY — deliberately not in the lead set below. The
+        # contrast check that makes leading safe is English-only, so "sí pero en realidad es
+        # sobre el precio" carries no word `_CONTRAST` knows and a lead rule would read the
+        # correction as consent: the 2026-07-27 harm, in Spanish. As the WHOLE reply there is
+        # nothing for a pivot to hide in, and that is how these actually arrive.
+        "si",
+        "sí",
+        "oui",
+        "ja",
+        "da",
+        "да",
+        "hai",
+        "はい",
+        "ええ",
+        "うん",
+        "对",
+        "对的",
+        "是",
+        "是的",
+        "好",
+        "好的",
+        "네",
+        "예",
+        "sim",
+        "tak",
+        "evet",
+        "ναι",
+        "نعم",
+        "כן",
     }
 )
 _MAX_CONFIRM_CORRECTIONS = 2
@@ -134,6 +163,35 @@ _AFFIRMATIVE_LEAD = (
     "that is the one",
     "that's it exactly",
     "this is it",
+    # Residual 4 (2026-07-28): the everyday phrasings that were still taking the CORRECTION
+    # branch at both parks. Leading is safe for the reason above — she said yes, so the residual
+    # cost is a dropped elaboration with her ORIGINAL situation standing, never a forged one —
+    # and the contrast check below is what keeps "that's correct, but ..." a correction.
+    "that's correct",
+    "thats correct",
+    "that is correct",
+    "you're right",
+    "youre right",
+    "you are right",
+    "that's true",
+    "thats true",
+    "that is true",
+    "sounds good",
+    "sounds about right",
+    "that works",
+    "perfect",
+    "spot on",
+    "i think so",
+    "of course",
+    "indeed",
+    "makes sense",
+    "that makes sense",
+    "nailed it",
+    "you nailed it",
+    "right on",
+    "pretty much",
+    "for sure",
+    "100%",
 )
 # Longest-first, so "that's right" is tested before any shorter member that prefixes it.
 _AFFIRMATIVE_LEAD_RE = re.compile(
@@ -272,8 +330,13 @@ def _is_affirmative(text: str) -> bool:
     The safety property is kept where it actually lives: a yes that TURNS ("yes but ...", "yeah,
     actually ...") carries new material the forge must map, so it stays a correction. Still local
     and pure — the happy path pays no model call.
+
+    The curly apostrophe is normalised for the same reason `_is_bare_rejection` normalises it:
+    every phone keyboard autocorrects ' to ’, so "That’s it" — pinned agreement in its straight
+    form since the beat was written — was silently taking the correction branch. The trailing
+    strip carries full-width punctuation too, so a bare "はい。" is the bare "はい".
     """
-    t = " ".join((text or "").split()).strip().lower().rstrip(".!?")
+    t = " ".join((text or "").replace("’", "'").split()).strip().lower().rstrip(".!?。！？，、,")
     if not t:
         return False
     if t in _AFFIRMATIVE:
