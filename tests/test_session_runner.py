@@ -1426,6 +1426,55 @@ def test_the_conversion_budget_survives_a_raised_correction_cap(tmp_path, make_f
     assert "other doors first?" in data["text"]
 
 
+def test_a_bare_rejection_at_the_conversion_park_never_becomes_the_world(tmp_path, make_fake):
+    """T2 REVIEW, High — the 2026-07-27 emergency, still live at the one park that never got the
+    guard. The conversion beat asks an OPEN question ("there's a call you have to make. What is
+    it?"), and "no" answers it the way "no" answers everything: naming nothing. Both conversion
+    parks took it as a fresh intake, wrote the literal string over `web_world`, and re-mapped
+    territories on it. A rejection cannot convert a topic any more than an agreement can, so it
+    takes the same road: her situation stands and the hedged beat asks with the stretch named."""
+    for reply in ["no", "that's not it", "none of these", "stop", "nope, nevermind"]:
+        db = str(tmp_path / f"conv-no-{abs(hash(reply))}.db")
+        reg = SessionRegistry(
+            db,
+            model_factory=_mapper_factory(
+                make_fake, [{"verdict": "topic", "conversion": "What call do you face in that?"}]
+            ),
+        )
+        reg.start("s1", now=NOW)
+        tag, data = reg.step("s1", _SITUATION)
+        assert data["text"] == "What call do you face in that?", reply  # the intake park
+
+        tag, data = reg.step("s1", reply)
+        store = SittingStore(db)
+        assert store.read_world(store.live_sitting()["id"]) == _SITUATION, reply  # NOT erased
+        assert "other doors first?" in data["text"], reply  # the hedged beat, doors escape and all
+
+
+def test_a_bare_rejection_at_the_confirm_loop_conversion_park_never_becomes_the_world(
+    tmp_path, make_fake
+):
+    """The same guard at the sibling park inside the confirm loop, which the review found by
+    reading the re-indented block rather than by trusting that one test covered both."""
+    correction = "no no like how to get my first client"
+    db = str(tmp_path / "conv-loop-no.db")
+    reg = SessionRegistry(
+        db,
+        model_factory=_mapper_factory(
+            make_fake, [{}, {"verdict": "topic", "conversion": "What call?"}]
+        ),
+    )
+    reg.start("s1", now=NOW)
+    reg.step("s1", "startup getting first client")
+    tag, data = reg.step("s1", correction)
+    assert data["text"] == "What call?"
+
+    tag, data = reg.step("s1", "no")
+    store = SittingStore(db)
+    assert store.read_world(store.live_sitting()["id"]) == correction  # her correction stands
+    assert "other doors first?" in data["text"]
+
+
 def test_a_bare_rejection_at_the_confirm_beat_never_becomes_the_world(tmp_path, make_fake):
     """THE 2026-07-27 CLASS AGAIN, on the likeliest reply of all (found by the T2 review of the
     fix above). The beat ends "Say yes, or tell me what it actually is", and the canonical short

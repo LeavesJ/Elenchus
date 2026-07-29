@@ -166,7 +166,9 @@ _AFFIRMATIVE_LEAD = (
     # Residual 4 (2026-07-28): the everyday phrasings that were still taking the CORRECTION
     # branch at both parks. Leading is safe for the reason above — she said yes, so the residual
     # cost is a dropped elaboration with her ORIGINAL situation standing, never a forged one —
-    # and the contrast check below is what keeps "that's correct, but ..." a correction.
+    # and the contrast check below is what keeps "that's correct, but ..." a correction. Only
+    # CLAUSE-LEVEL assents belong here; anything that can modify the next word instead lives in
+    # `_AFFIRMATIVE_SET_OFF`.
     "that's correct",
     "thats correct",
     "that is correct",
@@ -178,6 +180,16 @@ _AFFIRMATIVE_LEAD = (
     "that is true",
     "sounds good",
     "sounds about right",
+)
+# Agreement phrases that are ALSO ordinary modifiers, so they count only as the whole reply or
+# when punctuation sets them off from what follows (T2 review, High). The lead rule's safety
+# argument is "she said yes, so at worst an elaboration is dropped" — and for these she never
+# said yes: "Perfect timing, I need to decide on the lease renewal" is a situation, and reading
+# it as consent forges the territory she was correcting without the mapper ever seeing her words.
+# `"right on"` shipped as a lead while `"right"` is deliberately bare-only for exactly this
+# reason, reintroducing the excluded shape one word over ("right on schedule I have to choose").
+# The set-off boundary is the whole difference between "Perfect, that's it" and "Perfect timing".
+_AFFIRMATIVE_SET_OFF = (
     "that works",
     "perfect",
     "spot on",
@@ -198,6 +210,14 @@ _AFFIRMATIVE_LEAD_RE = re.compile(
     r"^(?:"
     + "|".join(re.escape(w) for w in sorted(_AFFIRMATIVE_LEAD, key=len, reverse=True))
     + r")(?![\w'])"
+)
+# The same, plus the set-off boundary: end of reply, or punctuation before anything else. That
+# lookahead is the entire guard — without it these phrases modify the next word and the reply is
+# a situation, not consent.
+_AFFIRMATIVE_SET_OFF_RE = re.compile(
+    r"^(?:"
+    + "|".join(re.escape(w) for w in sorted(_AFFIRMATIVE_SET_OFF, key=len, reverse=True))
+    + r")(?![\w'])\s*(?:[,;:—–-]|$)"
 )
 
 
@@ -284,7 +304,14 @@ def _is_bare_rejection(text: str) -> bool:
 # The doors, asked for in WORDS. The honest-fit beat ends "Start there — or look at the other
 # doors first?", and the doors escape is a CLICK: typing the second option proceeded with the
 # FIRST, forging the territory she had just declined on the very words that declined it.
-_DOORS = ("doors", "door", "options", "option", "menu", "list", "choices", "choice")
+# `else`, `rest`, `others` and `alternative(s)` are TRIGGERS, not frame (T2 review, High): they
+# shipped in the frame below, which merely permits, so "what else", "the others" and "show me the
+# rest" — the most natural ways to take the beat's second option — carried no trigger at all and
+# fell through to forging the territory she had just declined.
+_DOORS = (
+    "doors", "door", "options", "option", "menu", "list", "choices", "choice",
+    "else", "rest", "others", "alternatives", "alternative",
+)  # fmt: skip
 # The closed frame those words may sit in — the `_CONTENTLESS` idea again, one beat narrower. The
 # whole reply must fall inside it, which is what keeps a real situation carrying the word
 # "options" ("I need to look at my options for the penalty clause") out: `need`, `penalty` and
@@ -343,7 +370,7 @@ def _is_affirmative(text: str) -> bool:
         return True
     if _CONTRAST_RE.search(t):
         return False
-    return bool(_AFFIRMATIVE_LEAD_RE.match(t))
+    return bool(_AFFIRMATIVE_LEAD_RE.match(t) or _AFFIRMATIVE_SET_OFF_RE.match(t))
 
 
 # Chained sittings: a poison-pill put on an ORPHANED segment's to_worker queue (continue/close over
@@ -847,13 +874,16 @@ class SessionRegistry:
                             # territory around it (spec §2b); cold clicks at the initial
                             # ask stay curated.
                             return forge_selection(eids[value], situation, clicked=True)
-                        if _is_affirmative(value):
-                            # The same consent rule as the confirm loop's park. Nothing here
-                            # invites a yes, but the conversion is model-authored and a binary
-                            # phrasing makes one natural — and an agreement swallowed as an
-                            # intake is the 2026-07-27 harm wherever it happens. An agreement
-                            # cannot convert a topic, so take the honest-fit beat: it names the
-                            # stretch in her words and carries the doors escape.
+                        if _is_affirmative(value) or _is_bare_rejection(value):
+                            # The same two guards as the confirm beat, for the same reason and at
+                            # the park that never had them (T2 review, High). Nothing here invites
+                            # a yes, but the conversion is model-authored and a binary phrasing
+                            # makes one natural; and the beat asks an OPEN question, which "no"
+                            # answers the way "no" answers everything — by naming nothing. Either
+                            # one swallowed as an intake is the 2026-07-27 harm: it wrote the
+                            # literal reply over `web_world` and re-mapped territories on it.
+                            # Neither can convert a topic, so both take the honest-fit beat: her
+                            # situation stands, the stretch is named in her words, doors and all.
                             force_fit = True
                             break
                         situation = value  # a fresh intake, NOT consent — re-map it
@@ -1000,18 +1030,20 @@ class SessionRegistry:
                                 value = conversion_beat()
                                 if isinstance(value, int):
                                     return forge_selection(eids[value], situation, clicked=True)
-                                if not _is_affirmative(value):
+                                if not (_is_affirmative(value) or _is_bare_rejection(value)):
                                     situation = value  # a fresh intake, NOT consent — re-map it
                                     if sit is not None:
                                         self._store.write_world(sit, situation, now)
                                     tmap, eid, base = remap(situation)
-                                # An AGREEMENT falls through with `tmap` untouched — still a
-                                # topic — straight to the hedge below. THE 2026-07-27 CLASS, one
-                                # beat later (T2 review): the confirm beat one turn back said
-                                # "Say yes, or tell me what it actually is", so an agreement
-                                # lands at a park that asked an open question. It is not an
-                                # intake, and overwriting the world with it is the failure that
-                                # destroyed his situation on the live db. Her correction stands.
+                                # An AGREEMENT or a bare REJECTION falls through with `tmap`
+                                # untouched — still a topic — straight to the hedge below. THE
+                                # 2026-07-27 CLASS from both sides (T2 review): the confirm beat
+                                # one turn back said "Say yes, or tell me what it actually is",
+                                # so an agreement lands at a park that asked an open question,
+                                # and "no" is the canonical answer to that same last sentence.
+                                # Neither is an intake, and writing either over the world is the
+                                # failure that destroyed his situation on the live db. Her
+                                # correction stands.
                             if tmap.verdict == "topic":
                                 # Still a topic with the conversion budget spent — whether the
                                 # intake loop spent it, this branch just did and she agreed, or

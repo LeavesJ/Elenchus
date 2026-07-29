@@ -8,7 +8,7 @@ converged, writing a permanent memory of a decision he never made.
 The fix is a gate BEFORE the forge, not an exit inside the loop (L-5: the loop stays sealed —
 the gate fires while no scenario exists, so there is no effort to evade yet)."""
 
-from elenchus.web.session_runner import _is_affirmative, _is_bare_rejection
+from elenchus.web.session_runner import _asks_for_the_doors, _is_affirmative, _is_bare_rejection
 
 
 def test_plain_agreement_is_affirmative():
@@ -144,7 +144,10 @@ def test_plain_consent_phrasings_that_used_to_read_as_corrections():
         "of course",
         "indeed",
         "makes sense",
-        "that makes sense to me",
+        # "that makes sense to me" is deliberately NOT here: it is the same shape as "makes sense
+        # to wait until Q4, so the call is whether to hold the round", which is a situation. The
+        # set-off rule cannot tell them apart, so it takes the cheap side — one re-map, her
+        # situation standing — rather than the side that forges (T2 review, High).
         "nailed it",
         "you nailed it",
         "right on",
@@ -153,6 +156,77 @@ def test_plain_consent_phrasings_that_used_to_read_as_corrections():
         "100%",
     ]:
         assert _is_affirmative(t), t
+
+
+def test_a_consent_phrase_that_can_also_modify_must_be_set_off(tmp_path=None):
+    # T2 REVIEW, High. Half of residual 4's new openers are not clause-level assents at all — they
+    # are phrases that can MODIFY the next word, and then the lead rule's whole safety argument
+    # ("she said yes, so the worst case is a dropped elaboration") is simply false: she never said
+    # yes. `"right on"` went in as a lead while `"right"` is deliberately bare-only, which
+    # reintroduced the exact shape the module excludes one word over.
+    for t in [
+        "100% of my revenue comes from one client, so I need to decide whether to diversify",
+        "I think so far the real question is whether to keep the office",
+        "Pretty much everything hinges on whether I keep the contractor",
+        "For sure the biggest question is whether to raise or bootstrap",
+        "Of course I want to figure out whether to hire a second engineer",
+        "Perfect timing, I need to decide on the lease renewal by Friday",
+        "Spot on pricing is what I keep going back and forth on",
+        "Right on schedule I have to choose a distributor",
+        "Nailed it down to two vendors and I have to choose",
+        "That works out to about 40% margin, which is why I'm deciding on the price",
+        "Makes sense to wait until Q4, so the call is whether to hold the round",
+        "Indeed the harder question is whether to keep the London office",
+    ]:
+        assert not _is_affirmative(t), t
+    # They stay consent as the WHOLE reply, or when punctuation sets them off from what follows —
+    # which is exactly the difference between "Perfect, that's it" and "Perfect timing".
+    for t in [
+        "perfect",
+        "Perfect, that's the one I'm facing.",
+        "that works",
+        "that works, build it",
+        "i think so",
+        "I think so, yes",
+        "100%",
+        "100%, that's the one",
+        "right on",
+        "right on, that's it",
+        "for sure",
+        "for sure, let's go",
+        "nailed it",
+        "spot on",
+        "of course",
+        "makes sense",
+        "pretty much",
+        "indeed",
+    ]:
+        assert _is_affirmative(t), t
+
+
+def test_the_doors_are_asked_for_by_the_words_people_actually_use():
+    # T2 REVIEW, High. `_asks_for_the_doors` required a word from `_DOORS`, but `else`, `rest` and
+    # `others` sat only in the permissive FRAME — so the most natural way to take the beat's second
+    # option had no trigger at all and fell through to forging the territory just declined.
+    for t in [
+        "what else",
+        "the others",
+        "show me the rest",
+        "what else is there",
+        "let me see the others first",
+        "what are the alternatives",
+        "the other doors",
+        "look at the other doors first",
+    ]:
+        assert _asks_for_the_doors(t), t
+    # and the false-positive direction still holds: a real situation carrying one of these words
+    for t in [
+        "I need to look at my options for the penalty clause",
+        "the rest of the founding team is leaving in March",
+        "nothing else matters until I decide the price",
+        "I have to choose which of the alternatives to fund next quarter",
+    ]:
+        assert not _asks_for_the_doors(t), t
 
 
 def test_a_plain_consent_phrasing_that_turns_is_still_a_correction():
