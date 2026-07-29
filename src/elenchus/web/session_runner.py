@@ -987,44 +987,48 @@ class SessionRegistry:
                             if picked is not None:
                                 return forge_selection(eids[picked], situation, clicked=True)
                             break
-                        if tmap.verdict == "topic" and not converted:
-                            # A correction that lands on a TOPIC gets the beat that ASKS, not the
-                            # one that ASSERTS (residual named 2026-07-26, and his live path: "no
-                            # no like how to get my first client" maps here). Re-serving the
-                            # confirm beat put a decision to him that his own words named nowhere.
-                            # `converted` is the SAME budget the intake loop spends, so a second
-                            # conversion is unreachable here; today the cap would also stop it at
-                            # `corrections == 1`, and the flag is what keeps that true if the cap
-                            # ever rises. The extra beat is one turn.
-                            converted = True
-                            value = conversion_beat()
-                            if isinstance(value, int):
-                                return forge_selection(eids[value], situation, clicked=True)
-                            if _is_affirmative(value):
-                                # THE 2026-07-27 CLASS, one beat later (T2 review of this change).
-                                # The confirm beat one turn back said "Say yes, or tell me what it
-                                # actually is", so an agreement lands at a park that asked an open
-                                # question. It is not an intake. Overwriting the world with it is
-                                # exactly the failure that destroyed his situation on the live db;
-                                # her correction stands.
+                        if tmap.verdict == "topic":
+                            if not converted:
+                                # A correction that lands on a TOPIC gets the beat that ASKS, not
+                                # the one that ASSERTS (residual named 2026-07-26, and his live
+                                # path: "no no like how to get my first client" maps here).
+                                # Re-serving the confirm beat put a decision to him that his own
+                                # words named nowhere. `converted` is the SAME budget the intake
+                                # loop spends: one conversion per pass, because pressing it twice
+                                # is an interrogation. The extra beat is one turn.
+                                converted = True
+                                value = conversion_beat()
+                                if isinstance(value, int):
+                                    return forge_selection(eids[value], situation, clicked=True)
+                                if not _is_affirmative(value):
+                                    situation = value  # a fresh intake, NOT consent — re-map it
+                                    if sit is not None:
+                                        self._store.write_world(sit, situation, now)
+                                    tmap, eid, base = remap(situation)
+                                # An AGREEMENT falls through with `tmap` untouched — still a
+                                # topic — straight to the hedge below. THE 2026-07-27 CLASS, one
+                                # beat later (T2 review): the confirm beat one turn back said
+                                # "Say yes, or tell me what it actually is", so an agreement
+                                # lands at a park that asked an open question. It is not an
+                                # intake, and overwriting the world with it is the failure that
+                                # destroyed his situation on the live db. Her correction stands.
+                            if tmap.verdict == "topic":
+                                # Still a topic with the conversion budget spent — whether the
+                                # intake loop spent it, this branch just did and she agreed, or
+                                # her answer at the park mapped to another topic. All three used
+                                # to fall through to the confirm beat, which ASSERTS a decision at
+                                # full confidence on material the mapper has called a topic, with
+                                # no hedge — the one thing the honest-fit beat exists to prevent
+                                # (residuals 2+3+5, 2026-07-28). Two of the three were unreachable
+                                # at today's cap, which is exactly why they were wrong and silent.
                                 #
-                                # What it stands INTO is the hedged beat, not the confirm ask
-                                # again (residuals 2+3, 2026-07-28). Her correction did not move
-                                # the rank head — the common case — so re-asserting `_CONFIRM_COPY`
-                                # came back byte-identical to the sentence she had just rejected,
-                                # reading as the machine ignoring her, and it ASSERTED a decision
-                                # on a topic/low map with no hedge, which is the one thing the
-                                # honest-fit beat exists to prevent. Same shape as the correction
-                                # cap's fall-through (§4b): name the stretch in her own words,
+                                # So take the beat built for a stretch, the same shape as the
+                                # correction cap's fall-through (§4b): name it in her own words,
                                 # keep the doors answerable, then proceed. Never dead-ends.
                                 picked = honest_fit_beat()
                                 if picked is not None:
                                     return forge_selection(eids[picked], situation, clicked=True)
                                 break
-                            situation = value  # a fresh intake, NOT consent — re-map it
-                            if sit is not None:
-                                self._store.write_world(sit, situation, now)
-                            tmap, eid, base = remap(situation)
                     sel = forge_selection(eid, situation)
                     try:
                         if ch.pending_bridge is None:

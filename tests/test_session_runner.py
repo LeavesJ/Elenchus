@@ -1009,6 +1009,7 @@ def test_reopen_seam_on_reentering_the_interrupted_door(tmp_path, make_fake):
 # ---- bounded difficulty, sitting close (spec §2a/§2c/§2e/§2f/§2g) ---------------------------
 
 from elenchus.content_loader import load_territory_text  # noqa: E402
+from elenchus.web import session_runner  # noqa: E402
 from elenchus.web import voice as _voice  # noqa: E402
 from elenchus.web.session_runner import (  # noqa: E402
     _CONFIRM_COPY,
@@ -1201,7 +1202,12 @@ def test_the_conversion_budget_is_spent_once_across_both_loops(tmp_path, make_fa
     """Spec §2a's ONE-conversion-per-pass rule spans the front door AND the confirm loop: a topic
     intake that already had its conversion must not get a second one when a later correction maps
     to a topic too. Pressing the conversion twice is an interrogation, and `converted` is the one
-    budget both loops spend from."""
+    budget both loops spend from.
+
+    Residual 5 (2026-07-28) is what happens INSTEAD, and it used to be the confirm beat: that
+    asserts a decision at full confidence on material the mapper has just called a topic, with no
+    hedge — the one thing the honest-fit beat exists to prevent. A spent budget is a reason to
+    hedge, never a reason to assert."""
     script = [
         {"verdict": "topic", "conversion": "First conversion question?"},
         {},  # her answer maps as a decision -> the confirm beat
@@ -1217,7 +1223,8 @@ def test_the_conversion_budget_is_spent_once_across_both_loops(tmp_path, make_fa
     tag, data = reg.step("s1", "I must decide whether to gate signup behind SSO by Friday")
     assert data["text"] == _CONFIRM_COPY.format(desc=desc)
     tag, data = reg.step("s1", "no, it's really about pricing")
-    assert data["text"] == _CONFIRM_COPY.format(desc=desc)  # the confirm beat, NOT a 2nd conversion
+    assert "interrogation" not in data["text"]  # NOT a second conversion
+    assert data["text"] == _HONEST_FIT.format(desc=desc)  # hedged, with the doors escape
 
 
 def test_click_at_the_confirm_loop_conversion_park_forges_the_clicked_territory(
@@ -1388,6 +1395,35 @@ def test_a_correction_serves_the_new_maps_fit_never_the_cached_one(tmp_path, mak
     assert data["text"] == _CONFIRM_COPY.format(desc=first)
     tag, data = reg.step("s1", "it's really about the renewal terms in March")
     assert data["text"] == _CONFIRM_COPY.format(desc=second), "the re-map's fit, not the cache"
+
+
+def test_the_conversion_budget_survives_a_raised_correction_cap(tmp_path, make_fake, monkeypatch):
+    """Residual 5's other half, the DEAD STORE itself. `converted = True` inside the confirm
+    loop's topic branch guards nothing at `_MAX_CONFIRM_CORRECTIONS = 2` — the cap ends the loop
+    before a second topic correction can reach it — so both mutations survived and the handoff
+    said so out loud rather than claiming it pinned. Raise the cap and the flag is load-bearing:
+    it is what stops the composer pressing the conversion twice, which is an interrogation."""
+    monkeypatch.setattr(session_runner, "_MAX_CONFIRM_CORRECTIONS", 3)
+    script = [
+        {},  # the confirm beat
+        {"verdict": "topic", "conversion": "What call?"},  # correction 1 is a topic: convert
+        {},  # her answer at the park maps to a decision — the confirm beat again
+        {"verdict": "topic", "conversion": "A SECOND CONVERSION"},  # correction 2 is a topic too
+    ]
+    reg = SessionRegistry(
+        str(tmp_path / "budget-raised-cap.db"), model_factory=_mapper_factory(make_fake, script)
+    )
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)
+    tag, data = reg.step("s1", "no it's really about finding anyone to sell to")
+    assert data["text"] == "What call?"
+    tag, data = reg.step("s1", "whether to keep chasing enterprise or go self-serve")
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    assert data["text"] == _CONFIRM_COPY.format(desc=desc)
+
+    tag, data = reg.step("s1", "actually the call is whether to fire the first sales hire")
+    assert data["text"] != "A SECOND CONVERSION", "the conversion is one per pass, cap or no cap"
+    assert "other doors first?" in data["text"]
 
 
 def test_a_bare_rejection_at_the_confirm_beat_never_becomes_the_world(tmp_path, make_fake):
