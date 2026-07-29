@@ -1168,6 +1168,109 @@ def test_second_topic_falls_through_to_the_honest_fit_beat(tmp_path, make_fake):
     assert tag == "say" and data["text"] == _SCENARIO  # consent proceeds as today
 
 
+def test_a_correction_that_maps_to_a_topic_gets_the_conversion_beat(tmp_path, make_fake):
+    """THE 2026-07-26 NAMED RESIDUAL, and the founder's own live path. His correction ("no no
+    like how to get my first client") re-maps as a TOPIC, and the confirm loop re-served the
+    CONFIRM beat — which ASSERTS "here's the decision I'd put to you" about a subject that names
+    no decision at all. For a topic the conversion beat ASKS. Nothing false was written before
+    this fix, but the wrong beat was serving his most common correction."""
+    conversion = "Getting your first client — what's the call you have to make in that?"
+    script = [
+        {},  # the intake maps as a decision (base defaults) -> the confirm beat asserts it
+        {"verdict": "topic", "confidence": "low", "conversion": conversion},  # his correction
+        {},  # his answer to the conversion re-maps as a decision -> confirm, then forge
+    ]
+    db = str(tmp_path / "conv-correct.db")
+    reg = SessionRegistry(db, model_factory=_mapper_factory(make_fake, script))
+    reg.start("s1", now=NOW)
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    tag, data = reg.step("s1", "startup getting first client")
+    assert data["text"] == _CONFIRM_COPY.format(desc=desc)  # the confirm beat asserts a decision
+    tag, data = reg.step("s1", "no no like how to get my first client")
+    assert data["text"] == conversion  # the conversion ASKS — not a second assertion
+    decision = "whether to promise a full rebuild to win the first one"
+    tag, data = reg.step("s1", decision)
+    assert data["text"] == _CONFIRM_COPY.format(desc=desc)  # confirming again, on the NEW mapping
+    tag, data = reg.step("s1", "yes")
+    assert tag == "say" and data["text"] == _SCENARIO  # forged only after he agreed
+    store = SittingStore(db)
+    assert store.read_world(store.live_sitting()["id"]) == decision  # the latest fed text
+
+
+def test_the_conversion_budget_is_spent_once_across_both_loops(tmp_path, make_fake):
+    """Spec §2a's ONE-conversion-per-pass rule spans the front door AND the confirm loop: a topic
+    intake that already had its conversion must not get a second one when a later correction maps
+    to a topic too. Pressing the conversion twice is an interrogation, and `converted` is the one
+    budget both loops spend from."""
+    script = [
+        {"verdict": "topic", "conversion": "First conversion question?"},
+        {},  # her answer maps as a decision -> the confirm beat
+        {"verdict": "topic", "conversion": "A second conversion would be an interrogation"},
+    ]
+    reg = SessionRegistry(
+        str(tmp_path / "conv-budget.db"), model_factory=_mapper_factory(make_fake, script)
+    )
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", "a question about strategy")
+    assert data["text"] == "First conversion question?"
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    tag, data = reg.step("s1", "I must decide whether to gate signup behind SSO by Friday")
+    assert data["text"] == _CONFIRM_COPY.format(desc=desc)
+    tag, data = reg.step("s1", "no, it's really about pricing")
+    assert data["text"] == _CONFIRM_COPY.format(desc=desc)  # the confirm beat, NOT a 2nd conversion
+
+
+def test_click_at_the_confirm_loop_conversion_park_forges_the_clicked_territory(
+    tmp_path, make_fake
+):
+    """The new park is a park like any other (§2b): a door click there is its own consent and
+    forges the CLICKED territory around her corrected words — never the naked curated prompt."""
+    briefs = []
+
+    def factory():
+        m = _world_factory(make_fake, briefs=briefs)()
+        orig = m.map_territories
+        script = [{}, {"verdict": "topic", "conversion": "What call do you face in that?"}]
+        m.map_territories = lambda s, t: (
+            orig(s, t).model_copy(update=script.pop(0)) if script else orig(s, t)
+        )
+        return m
+
+    db = str(tmp_path / "conv-correct-click.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)  # the confirm beat
+    correction = "no, it's really about getting the first client at all"
+    tag, data = reg.step("s1", correction)
+    assert data["text"] == "What call do you face in that?"  # parked at the conversion
+    idx = reg._ch["s1"].last_menu_eids.index(_T2)
+    tag, data = reg.step("s1", idx)  # the click
+    assert tag == "say" and data["text"] == _SCENARIO  # forged, not curated
+    assert correction in briefs[-1][0]  # her CORRECTED words are the brief's situation
+    store = SittingStore(db)
+    row = store.read_generated_problem(f"gen:{store.live_sitting()['id']}:1")
+    assert row is not None and row["experience_id"] == _T2  # the CLICKED territory
+
+
+def test_resume_parked_at_the_confirm_loop_conversion_reserves_it(tmp_path, make_fake):
+    """Triage fold 2026-07-03, on the new park: a reload must re-serve the question ACTUALLY
+    pending. Re-serving the plain confirm ask here would invite a fresh situation that the parked
+    worker then consumes as an answer to a conversion she never saw."""
+    conversion = "What's the call you have to make in that?"
+    script = [{}, {"verdict": "topic", "conversion": conversion}]
+    reg = SessionRegistry(
+        str(tmp_path / "conv-correct-resume.db"), model_factory=_mapper_factory(make_fake, script)
+    )
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)  # the confirm beat
+    tag, data = reg.step("s1", "no, it's really about finding anyone to sell to")
+    assert data["text"] == conversion
+    tag, rdata = reg.resume_or_start("s1")
+    assert tag == "resume"
+    assert rdata["frontdoor"]["text"] == conversion  # the pending question, not the plain ask
+    assert not (rdata["turns"] and rdata["turns"][-1]["text"] == conversion)  # deduped
+
+
 def test_honest_fit_reflects_her_words_when_the_mapper_authors_a_safe_fit(tmp_path, make_fake):
     """Honest-fit reflection fix (2026-07-05 founder dogfood): the fit beat names the pressable
     edge in HER words (mapper `fit`, screened like the conversion) — NOT the generic territory

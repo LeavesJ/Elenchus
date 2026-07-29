@@ -600,13 +600,56 @@ class SessionRegistry:
                     known = {eid for eid, _ in territories}
                     force_fit = False
                     converted = False
-                    while True:
-                        tmap = model.map_territories(situation, territories)
-                        ranked = [eid for eid in tmap.ranked if eid in known]
-                        if not ranked:  # a hallucinated ranking cannot pick the door
-                            ranked = [eid for eid, _ in territories]
-                        eid = ranked[0]
+
+                    def remap(text):
+                        """The mapping seam: the model call, the hallucination-proof ranking, the
+                        registry bank, and the territory the rank head names. Returns
+                        `(tmap, eid, base)`.
+
+                        This exists because THREE sites map her words — the intake loop, the
+                        confirm beat's correction, and a correction that turns out to be a topic.
+                        A ranking fallback or a `mapped_rank` bank that fires at two of the three
+                        is a door answering for a territory the composer never chose (L-31, the
+                        honest_fit_beat precedent)."""
+                        m = model.map_territories(text, territories)
+                        ranked = [e for e in m.ranked if e in known] or [e for e, _ in territories]
                         ch.mapped_rank = ranked  # banked registry-side at the next dequeue
+                        head = ranked[0]  # a hallucinated ranking cannot pick the door
+                        return m, head, next(e for e in open_exps if e.experience_id == head)
+
+                    def conversion_beat():
+                        """The conversion beat: engage THEIR subject, ask for the decision inside
+                        it — authored by the mapper, screened like the reflection (§2a gated
+                        precedent); the static fallback converts too. Never "out of scope"
+                        (founder constraint, 2026-07-04). Verdict trumps confidence: a topic is
+                        not a decision however cleanly it maps.
+
+                        Reads `tmap`/`base` at CALL time, so it reflects the latest mapping.
+                        Returns a door index if she clicked one, else her text — a fresh intake,
+                        NOT consent. Shared by the intake loop and the confirm beat's topic
+                        correction, so the screen the two serve can never drift (L-31)."""
+                        text = tmap.conversion.strip()
+                        served = (
+                            text
+                            if text
+                            # The founder's forbidden phrase is unservable STRUCTURALLY
+                            # (review fold 2026-07-04): the move screen is blind to
+                            # deflection language, and instruction compliance alone is
+                            # not trusted anywhere else on this path either.
+                            and "out of scope" not in text.lower()
+                            and voice.egress_safe_reply(model, base, text)
+                            else _STATIC_CONVERSION
+                        )
+                        ch.frontdoor_pending = served  # before the put (resume re-serves it)
+                        ch.from_worker.put(("say", {"text": served}))
+                        v = ch.to_worker.get()
+                        ch.frontdoor_pending = None  # consumed
+                        if v is _ABANDON:
+                            raise _Abandoned()
+                        return v
+
+                    while True:
+                        tmap, eid, base = remap(situation)
                         if tmap.verdict != "topic":
                             break
                         if converted:
@@ -617,30 +660,7 @@ class SessionRegistry:
                             force_fit = True
                             break
                         converted = True
-                        # The conversion beat: engage THEIR subject, ask for the decision
-                        # inside it — authored by the mapper, screened like the reflection
-                        # (§2a gated precedent); the static fallback converts too. Never
-                        # "out of scope" (founder constraint, 2026-07-04). Verdict trumps
-                        # confidence: a topic is not a decision however cleanly it maps.
-                        base0 = next(e for e in open_exps if e.experience_id == eid)
-                        text = tmap.conversion.strip()
-                        served = (
-                            text
-                            if text
-                            # The founder's forbidden phrase is unservable STRUCTURALLY
-                            # (review fold 2026-07-04): the move screen is blind to
-                            # deflection language, and instruction compliance alone is
-                            # not trusted anywhere else on this path either.
-                            and "out of scope" not in text.lower()
-                            and voice.egress_safe_reply(model, base0, text)
-                            else _STATIC_CONVERSION
-                        )
-                        ch.frontdoor_pending = served  # before the put (resume re-serves it)
-                        ch.from_worker.put(("say", {"text": served}))
-                        value = ch.to_worker.get()
-                        ch.frontdoor_pending = None  # consumed
-                        if value is _ABANDON:
-                            raise _Abandoned()
+                        value = conversion_beat()
                         if isinstance(value, int):
                             # A click with fed material this pass forges the CLICKED
                             # territory around it (spec §2b); cold clicks at the initial
@@ -653,7 +673,6 @@ class SessionRegistry:
                     # is not clearly "high" takes the honest-fit beat — silent stretching costs
                     # signal; the extra beat costs one collect. force_fit (a second topic)
                     # takes it regardless of confidence.
-                    base = next(e for e in open_exps if e.experience_id == eid)
 
                     def honest_fit_beat():
                         """The honest-stretch beat (§2a): her situation stays the world; no silent
@@ -723,13 +742,7 @@ class SessionRegistry:
                         # Re-map BEFORE the cap check, always. If the cap short-circuited this,
                         # the forge below would build her LATEST words under a rubric chosen for
                         # her PREVIOUS ones — a scenario assembled from two different inputs.
-                        tmap = model.map_territories(situation, territories)
-                        ranked = [e for e in tmap.ranked if e in known] or [
-                            e for e, _ in territories
-                        ]
-                        eid = ranked[0]
-                        ch.mapped_rank = ranked
-                        base = next(e for e in open_exps if e.experience_id == eid)
+                        tmap, eid, base = remap(situation)
                         if corrections >= _MAX_CONFIRM_CORRECTIONS:
                             # Past the cap the composer must NOT forge silently — that is the
                             # 2026-07-24 defect deferred by two turns, not fixed. Spec §4b: fall
@@ -756,6 +769,22 @@ class SessionRegistry:
                             if picked is not None:
                                 return forge_selection(eids[picked], situation, clicked=True)
                             break
+                        if tmap.verdict == "topic" and not converted:
+                            # A correction that lands on a TOPIC gets the beat that ASKS, not the
+                            # one that ASSERTS (residual named 2026-07-26, and his live path: "no
+                            # no like how to get my first client" maps here). Re-serving the
+                            # confirm beat put a decision to him that his own words named nowhere.
+                            # The budget is the SAME `converted` the intake loop spends, so the
+                            # conversion fires at most once per pass however it is reached, and
+                            # the cap above still bounds the loop: the extra beat is one turn.
+                            converted = True
+                            value = conversion_beat()
+                            if isinstance(value, int):
+                                return forge_selection(eids[value], situation, clicked=True)
+                            situation = value  # a fresh intake, NOT consent — re-map it
+                            if sit is not None:
+                                self._store.write_world(sit, situation, now)
+                            tmap, eid, base = remap(situation)
                     sel = forge_selection(eid, situation)
                     try:
                         if ch.pending_bridge is None:

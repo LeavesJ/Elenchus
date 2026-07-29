@@ -134,10 +134,17 @@ RUNNER = Path("src/elenchus/web/session_runner.py")
 
 
 def _fn(src: str, name: str) -> str:
-    """Extract a def body by indentation — the runner's decide() is nested inside start()."""
+    """Extract a def body by indentation — the runner's decide() is nested inside start().
+
+    The base indent is measured from the START OF THE DEF'S LINE, not from the `def` keyword:
+    slicing at the keyword makes every nested def look top-level, so the extraction ran to EOF
+    and every guard below silently scanned the whole file. `test_the_remap_precedes_the_cap_check`
+    was the one that noticed — it matched a `map_territories(` call 63k characters past the
+    function it was guarding."""
     i = src.index("def " + name)
-    lines = src[i:].splitlines(True)
-    base = len(lines[0]) - len(lines[0].lstrip())
+    start = src.rindex("\n", 0, i) + 1
+    lines = src[start:].splitlines(True)
+    base = i - start
     out = [lines[0]]
     for ln in lines[1:]:
         if ln.strip() and (len(ln) - len(ln.lstrip())) <= base:
@@ -241,9 +248,48 @@ def test_the_remap_precedes_the_cap_check():
     # words under a rubric chosen for her PREVIOUS ones — one scenario from two different inputs.
     body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
     seg = body[body.index("corrections += 1") :]
-    remap = seg.index("model.map_territories(")
+    remap = seg.index("remap(")
     cap = seg.index("corrections >= _MAX_CONFIRM_CORRECTIONS")
     assert remap < cap, "the re-map must run BEFORE the cap check so eid always matches situation"
+
+
+def test_every_front_door_mapping_goes_through_one_seam():
+    # Three sites map her words now — the intake loop, the confirm beat's correction, and a
+    # correction that turns out to be a topic. The hallucination-proof ranking fallback and the
+    # `mapped_rank` bank must fire at ALL of them: a site that maps without banking leaves the
+    # doors answering for the territory of a PREVIOUS mapping. One seam is how that stays true.
+    body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
+    door = body[body.index("_FRONTDOOR_ASK") : body.rindex("sel = forge_selection(")]
+    assert door.count("def remap(") == 1
+    assert len(re.findall(r"model\.map_territories\(", door)) == 1, (
+        "every front-door mapping must go through the one remap seam"
+    )
+    assert len(re.findall(r"(?<!def )remap\(", door)) == 3  # intake, correction, topic-correction
+
+
+def test_conversion_beat_is_one_implementation_shared_by_both_callers():
+    # L-31 again, on the OTHER learner-facing beat. The intake loop and the confirm loop both
+    # serve the conversion; a second inlined copy is how the egress screen (or the forbidden
+    # "out of scope" filter) silently drifts on one of the two surfaces but not the other.
+    body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
+    assert body.count("def conversion_beat(") == 1
+    assert len(re.findall(r"(?<!def )conversion_beat\(\)", body)) == 2
+
+
+def test_a_topic_correction_asks_instead_of_asserting():
+    # The 2026-07-26 residual. Inside the confirm loop the conversion beat must come AFTER the
+    # affirmative break (an agreement can never trigger it) and AFTER the cap check (the cap
+    # bounds the loop; converting past it would extend an interrogation the cap exists to end).
+    body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
+    loop = body[body.index("corrections = 0") : body.index("sel = forge_selection(")]
+    conv = loop.index("conversion_beat()")
+    assert loop.index("_is_affirmative(") < conv, "an agreement must never reach the conversion"
+    assert loop.index("corrections >= _MAX_CONFIRM_CORRECTIONS") < conv, (
+        "the cap check must precede the topic conversion — past the cap the loop ends"
+    )
+    assert "not converted" in loop, (
+        "the confirm loop must spend the SAME one-per-pass conversion budget as the intake loop"
+    )
 
 
 def test_honest_fit_beat_is_one_implementation_shared_by_both_callers():
