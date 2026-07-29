@@ -344,13 +344,16 @@ def test_a_topic_correction_asks_instead_of_asserting():
     )
 
 
-def test_honest_fit_beat_is_one_implementation_shared_by_both_callers():
-    # L-31: the low-confidence path and the cap path must not drift apart. One definition, two
-    # call sites — a second inlined copy is how the two silently diverge.
+def test_honest_fit_beat_is_one_implementation_shared_by_all_callers():
+    # L-31: the paths that hedge must not drift apart. Three now — the low-confidence path, the
+    # correction cap, and the agreement at the confirm loop's conversion park (residuals 2+3,
+    # 2026-07-28: that one used to re-assert `_CONFIRM_COPY` byte-identically on a topic/low map).
+    # One definition, three call sites — a second inlined copy is how they silently diverge, and
+    # this beat is the only one carrying the doors escape.
     body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
     assert body.count("def honest_fit_beat(") == 1
     # count CALL sites only — the def line contains the same substring
-    assert len(re.findall(r"(?<!def )honest_fit_beat\(\)", body)) == 2
+    assert len(re.findall(r"(?<!def )honest_fit_beat\(\)", body)) == 3
 
 
 # ---- T4: the content-gap ledger --------------------------------------------------------------

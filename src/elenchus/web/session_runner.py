@@ -928,10 +928,21 @@ class SessionRegistry:
                                 # actually is", so an agreement lands at a park that asked an open
                                 # question. It is not an intake. Overwriting the world with it is
                                 # exactly the failure that destroyed his situation on the live db;
-                                # leaving HER correction standing and asking again with the
-                                # decision NAMED is strictly smaller harm, and it is what the
-                                # confirm beat exists to do.
-                                continue
+                                # her correction stands.
+                                #
+                                # What it stands INTO is the hedged beat, not the confirm ask
+                                # again (residuals 2+3, 2026-07-28). Her correction did not move
+                                # the rank head — the common case — so re-asserting `_CONFIRM_COPY`
+                                # came back byte-identical to the sentence she had just rejected,
+                                # reading as the machine ignoring her, and it ASSERTED a decision
+                                # on a topic/low map with no hedge, which is the one thing the
+                                # honest-fit beat exists to prevent. Same shape as the correction
+                                # cap's fall-through (§4b): name the stretch in her own words,
+                                # keep the doors answerable, then proceed. Never dead-ends.
+                                picked = honest_fit_beat()
+                                if picked is not None:
+                                    return forge_selection(eids[picked], situation, clicked=True)
+                                break
                             situation = value  # a fresh intake, NOT consent — re-map it
                             if sit is not None:
                                 self._store.write_world(sit, situation, now)

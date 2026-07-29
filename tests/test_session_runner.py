@@ -1283,20 +1283,44 @@ def test_an_agreement_at_the_confirm_loop_conversion_never_becomes_the_world(tmp
         store = SittingStore(db)
         assert store.read_world(store.live_sitting()["id"]) == correction, reply
         desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
-        assert data["text"] == _CONFIRM_COPY.format(desc=desc), reply  # asked, never forged blind
-        tag, data = reg.step("s1", "yes")  # and consent to the NAMED decision still forges
+        assert data["text"] == _HONEST_FIT.format(desc=desc), reply  # asked, never forged blind
+        tag, data = reg.step("s1", "yes — start there")  # consent to the named stretch forges
         assert tag == "say" and data["text"] == _SCENARIO
         # The DURABLE world is not the only thing an agreement must not become. Assigning
         # `situation` above the guard leaves the db clean and still hands the forge a sentence
         # naming no situation (T2 review, M25) — so pin what the forge actually received.
         assert correction in briefs[-1][0], reply
         assert reply not in briefs[-1][0], reply
-        # The beat after an agreement is the CONFIRM ask, not the honest-fit fall-through.
-        # (This does NOT pin whether the agreement consumed one of her two corrections: with
-        # `_MAX_CONFIRM_CORRECTIONS = 2` the cap fires on her second correction either way, so
-        # that increment is unobservable — the same dead-store shape as `converted = True` at
-        # the same site. Mutation-checked, survives, said here rather than claimed away.)
-        assert "doors first?" not in data["text"], reply
+
+
+def test_the_reserve_after_an_agreement_is_hedged_never_the_rejected_sentence(tmp_path, make_fake):
+    """Residuals 2 and 3 (SESSION_HANDOFF 2026-07-28), one site and one fix. Her correction did
+    not move the rank head — the common case — so the confirm beat came back BYTE-IDENTICAL to
+    the sentence she had just rejected, which reads as the machine ignoring her. Worse, it came
+    back ASSERTING a decision on a `topic`/`low` map with no hedge, which is precisely what the
+    honest-fit beat exists to prevent. The re-serve is that beat now: it hedges, names the
+    stretch in her words, carries the doors escape, and cannot be the sentence she declined."""
+    script = [{}, {"verdict": "topic", "confidence": "low", "conversion": "What call?"}]
+
+    def factory():
+        m = _world_factory(make_fake)()
+        orig = m.map_territories
+        m.map_territories = lambda s, t: (
+            orig(s, t).model_copy(update=script.pop(0)) if script else orig(s, t)
+        )
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "agree-hedge.db"), model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", "startup getting first client")
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    tag, first = reg.step("s1", "no no like how to get my first client")
+    assert first["text"] == "What call?"  # the conversion park
+
+    tag, data = reg.step("s1", "yes")
+    assert data["text"] != _CONFIRM_COPY.format(desc=desc), "the sentence she just rejected"
+    assert data["text"] == _HONEST_FIT.format(desc=desc)  # hedged, and it names the stretch
+    assert "other doors first?" in data["text"]  # the escape the assert-y re-serve never carried
 
 
 def test_a_bare_rejection_at_the_confirm_beat_never_becomes_the_world(tmp_path, make_fake):
