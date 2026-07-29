@@ -8,7 +8,7 @@ converged, writing a permanent memory of a decision he never made.
 The fix is a gate BEFORE the forge, not an exit inside the loop (L-5: the loop stays sealed —
 the gate fires while no scenario exists, so there is no effort to evade yet)."""
 
-from elenchus.web.session_runner import _is_affirmative
+from elenchus.web.session_runner import _is_affirmative, _is_bare_rejection
 
 
 def test_plain_agreement_is_affirmative():
@@ -125,6 +125,58 @@ def test_the_other_common_ways_of_saying_yes():
 def test_empty_and_whitespace_are_not_affirmative():
     for t in ["", "   ", "\n"]:
         assert not _is_affirmative(t)
+
+
+def test_a_bare_rejection_names_nothing():
+    # The beat's own last sentence is "Say yes, or tell me what it actually is", so "no" is the
+    # canonical short answer — and it used to be written into web_world AS the learner's
+    # situation. Anything here must never replace a world.
+    for t in [
+        "no",
+        "No.",
+        "NOPE",
+        "nah",
+        "not really",
+        "not quite",
+        "that's not it",
+        "thats not it",
+        "that is not it",
+        "no, not that one",
+        "none of these",
+        "neither",
+        "no it isn't",
+        "wrong",
+        "that's wrong",
+        "stop",
+        "cancel",
+        "nevermind",
+        "no way",
+        "not at all",
+        "nope, not that",
+    ]:
+        assert _is_bare_rejection(t), t
+
+
+def test_a_rejection_that_names_something_is_a_correction():
+    # The founder's own live path leads with a rejection and carries a whole situation. Reading
+    # it as contentless would throw away the correction the door exists to serve — so the
+    # predicate requires that NOTHING substantive survives the rejection words.
+    for t in [
+        "no no like how to get my first client",
+        "not quite, it's about pricing",
+        "no, the co-founder equity split",
+        "that's not it — I mean the hiring decision",
+        "not the money, the timing",
+        "no, whether to sign by Friday",
+    ]:
+        assert not _is_bare_rejection(t), t
+
+
+def test_a_short_reply_with_no_rejection_word_is_never_bare():
+    # A rejection word is REQUIRED. Otherwise a terse correction ("pricing") would be read as
+    # contentless and silently discarded — the opposite failure, and just as destructive.
+    for t in ["pricing", "the equity split", "", "   ", "yes", "that's it", "one of these"]:
+        assert not _is_bare_rejection(t), t
 
 
 import re  # noqa: E402

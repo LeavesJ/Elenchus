@@ -1261,9 +1261,19 @@ def test_an_agreement_at_the_confirm_loop_conversion_never_becomes_the_world(tmp
     emergency did. An agreement is not an intake: his correction stands and the beat that NAMES a
     decision asks again."""
     for reply in ["Yes, this is the decision I want to make.", "yes", "correct", "that's it"]:
+        briefs = []
         script = [{}, {"verdict": "topic", "confidence": "low", "conversion": "What call?"}]
+
+        def factory(_s=script, _b=briefs):
+            m = _world_factory(make_fake, briefs=_b)()
+            orig = m.map_territories
+            m.map_territories = lambda s, t: (
+                orig(s, t).model_copy(update=_s.pop(0)) if _s else orig(s, t)
+            )
+            return m
+
         db = str(tmp_path / f"agree-{abs(hash(reply))}.db")
-        reg = SessionRegistry(db, model_factory=_mapper_factory(make_fake, script))
+        reg = SessionRegistry(db, model_factory=factory)
         reg.start("s1", now=NOW)
         reg.step("s1", "startup getting first client")
         correction = "no no like how to get my first client"
@@ -1276,6 +1286,105 @@ def test_an_agreement_at_the_confirm_loop_conversion_never_becomes_the_world(tmp
         assert data["text"] == _CONFIRM_COPY.format(desc=desc), reply  # asked, never forged blind
         tag, data = reg.step("s1", "yes")  # and consent to the NAMED decision still forges
         assert tag == "say" and data["text"] == _SCENARIO
+        # The DURABLE world is not the only thing an agreement must not become. Assigning
+        # `situation` above the guard leaves the db clean and still hands the forge a sentence
+        # naming no situation (T2 review, M25) — so pin what the forge actually received.
+        assert correction in briefs[-1][0], reply
+        assert reply not in briefs[-1][0], reply
+        # The beat after an agreement is the CONFIRM ask, not the honest-fit fall-through.
+        # (This does NOT pin whether the agreement consumed one of her two corrections: with
+        # `_MAX_CONFIRM_CORRECTIONS = 2` the cap fires on her second correction either way, so
+        # that increment is unobservable — the same dead-store shape as `converted = True` at
+        # the same site. Mutation-checked, survives, said here rather than claimed away.)
+        assert "doors first?" not in data["text"], reply
+
+
+def test_a_bare_rejection_at_the_confirm_beat_never_becomes_the_world(tmp_path, make_fake):
+    """THE 2026-07-27 CLASS AGAIN, on the likeliest reply of all (found by the T2 review of the
+    fix above). The beat ends "Say yes, or tell me what it actually is", and the canonical short
+    answer to that question is "no" — which took the correction branch, wrote `no` into
+    `web_world` as the learner's situation, and re-mapped territories on a string naming nothing.
+    A rejection that carries no situation cannot replace one. It still counts as a correction, so
+    the cap bounds a learner who only ever says no."""
+    for reply in ["no", "nope", "that's not it", "none of these", "stop", "no, not that one"]:
+        db = str(tmp_path / f"nope-{abs(hash(reply))}.db")
+        reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+        reg.start("s1", now=NOW)
+        desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+        tag, data = reg.step("s1", _SITUATION)
+        assert data["text"] == _CONFIRM_COPY.format(desc=desc)
+        tag, data = reg.step("s1", reply)
+        store = SittingStore(db)
+        assert store.read_world(store.live_sitting()["id"]) == _SITUATION, reply
+        tag, data = reg.step("s1", "yes")  # and the door still works afterwards
+        assert tag == "say" and data["text"] == _SCENARIO, reply
+
+
+def test_a_rejection_that_carries_words_is_still_a_correction(tmp_path, make_fake):
+    """The other direction, and it is the founder's own live path: "no no like how to get my
+    first client" LEADS with rejection and carries a whole situation. That must re-map on his
+    words — treating it as contentless would throw away the correction the door exists for."""
+    db = str(tmp_path / "real-correction.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    reg.start("s1", now=NOW)
+    reg.step("s1", "startup getting first client")
+    correction = "no no like how to get my first client"
+    reg.step("s1", correction)
+    store = SittingStore(db)
+    assert store.read_world(store.live_sitting()["id"]) == correction
+    for other in ["not quite, it's about pricing", "no, the co-founder equity split"]:
+        db2 = str(tmp_path / f"rc-{abs(hash(other))}.db")
+        reg2 = SessionRegistry(db2, model_factory=_world_factory(make_fake))
+        reg2.start("s1", now=NOW)
+        reg2.step("s1", _SITUATION)
+        reg2.step("s1", other)
+        s2 = SittingStore(db2)
+        assert s2.read_world(s2.live_sitting()["id"]) == other, other
+
+
+def test_an_agreement_at_the_intake_conversion_park_never_becomes_the_world(tmp_path, make_fake):
+    """The SIBLING park (T2 review, A-3). `conversion_beat()` is shared so the two parks can never
+    serve different text — but their handling of the reply had drifted: the confirm-loop park
+    stopped swallowing agreements and the intake park still did. Nothing invites a yes here, but
+    the conversion is model-authored and a binary phrasing ("is it whether to hire, or hold?")
+    makes yes the natural reply. An agreement cannot convert a topic, so it takes the honest-fit
+    beat — which names the stretch and carries the doors escape."""
+    for reply in ["yes", "sure", "Yes, this is the decision I want to make."]:
+        topic = "what should optimal onboarding look like?"
+        db = str(tmp_path / f"intake-agree-{abs(hash(reply))}.db")
+        reg = SessionRegistry(
+            db,
+            model_factory=_mapper_factory(
+                make_fake, [{"verdict": "topic", "conversion": "Is it A, or B?"}]
+            ),
+        )
+        reg.start("s1", now=NOW)
+        tag, data = reg.step("s1", topic)
+        assert data["text"] == "Is it A, or B?"
+        tag, data = reg.step("s1", reply)
+        store = SittingStore(db)
+        assert store.read_world(store.live_sitting()["id"]) == topic, reply
+        desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+        assert data["text"] == _HONEST_FIT.format(desc=desc), reply
+
+
+def test_a_click_at_the_confirm_beat_forges_the_door_that_was_clicked(tmp_path, make_fake):
+    """A door click at the confirm beat is its own consent — for the door SHE picked. Forging the
+    mapped territory instead survived the whole suite (T2 review, M15): no test clicked a
+    NON-mapped door at this beat, and the static consent guard passes on `clicked=True` alone
+    without ever checking which territory the call names."""
+    db = str(tmp_path / "confirm-click.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    reg.start("s1", now=NOW)
+    tag, data = reg.step("s1", _SITUATION)
+    desc = " ".join(load_territory_text(_T1).split()).rstrip(".")
+    assert data["text"] == _CONFIRM_COPY.format(desc=desc)  # mapped territory is _T1
+    idx = reg._ch["s1"].last_menu_eids.index(_T3)  # she clicks a DIFFERENT door
+    tag, data = reg.step("s1", idx)
+    assert tag == "say" and data["text"] == _SCENARIO
+    store = SittingStore(db)
+    row = store.read_generated_problem(f"gen:{store.live_sitting()['id']}:1")
+    assert row is not None and row["experience_id"] == _T3  # hers, not the mapper's
 
 
 def test_the_conversion_answer_is_what_the_next_beat_and_the_forge_are_built_on(

@@ -160,6 +160,66 @@ def _should_ask_outcome(converged_at: str, outcome: str | None, now: datetime) -
     return (now - at).days >= OUTCOME_ASK_AFTER_DAYS
 
 
+# A rejection that names nothing. The confirm beat ends "Say yes, or tell me what it actually is",
+# and the canonical short answer to that question is "no" — which is a REJECTION and not a
+# situation. Membership is decided by what survives the rejection: a reply is bare only if it
+# carries a rejection word AND every remaining word names nothing on its own. "no no like how to
+# get my first client" keeps `like/how/get/first/client`, so it stays the correction it is.
+_REJECTION = (
+    # One per line for the same reason as _AFFIRMATIVE_LEAD: this list gets EXTENDED every time
+    # someone finds a phrasing it missed, and each miss is another way to erase a world.
+    "no",
+    "nope",
+    "nah",
+    "naw",
+    "nay",
+    "negative",
+    "not",
+    "none",
+    "neither",
+    "nothing",
+    "never",
+    "wrong",
+    "incorrect",
+    "mistaken",
+    "nvm",
+    "nevermind",
+    "stop",
+    "cancel",
+    "sorry",
+)
+# A closed grammatical class (articles, pronouns, copulas, fillers), not a growth list — kept
+# compact on purpose so the predicate above stays readable on one screen.
+_CONTENTLESS = {
+    "a", "an", "the", "this", "that", "thats", "these", "those", "them", "they", "it", "its",
+    "is", "isnt", "was", "wasnt", "are", "arent", "am", "be", "one", "ones", "of", "at", "all",
+    "quite", "exactly", "really", "either", "thing", "things", "i", "im", "me", "my", "you",
+    "your", "we", "dont", "doesnt", "didnt", "and", "or", "but", "just", "actually", "also",
+    "like", "well", "um", "uh", "ok", "okay", "please", "yes", "yeah", "right", "way", "ways",
+}  # fmt: skip
+_WORD_RE = re.compile(r"[a-z']+")
+
+
+def _is_bare_rejection(text: str) -> bool:
+    """True for a reply that rejects the beat and supplies no situation of its own.
+
+    The 2026-07-27 emergency was an AGREEMENT overwriting the learner's world. This is the same
+    harm from the opposite side and it is the likelier reply of the two, because the beat's own
+    last sentence invites it: answering "no" wrote the literal string `no` into `web_world`,
+    erased his stated decision, and re-mapped territories on a word naming nothing.
+
+    Deliberately asymmetric to `_is_affirmative`. There, a false positive forges something
+    unagreed, so the predicate is conservative. Here a false positive costs one re-ask with her
+    ORIGINAL situation standing, and a false negative destroys durable state — so this one may be
+    generous. It still requires a rejection word, so a bare correction that merely happens to be
+    short ("pricing") is untouched.
+    """
+    words = [w.replace("'", "") for w in _WORD_RE.findall((text or "").lower().replace("’", "'"))]
+    if not any(w in _REJECTION for w in words):
+        return False
+    return all(w in _REJECTION or w in _CONTENTLESS for w in words)
+
+
 def _is_affirmative(text: str) -> bool:
     """True for agreement, whether bare or LEADING.
 
@@ -666,6 +726,15 @@ class SessionRegistry:
                             # territory around it (spec §2b); cold clicks at the initial
                             # ask stay curated.
                             return forge_selection(eids[value], situation, clicked=True)
+                        if _is_affirmative(value):
+                            # The same consent rule as the confirm loop's park. Nothing here
+                            # invites a yes, but the conversion is model-authored and a binary
+                            # phrasing makes one natural — and an agreement swallowed as an
+                            # intake is the 2026-07-27 harm wherever it happens. An agreement
+                            # cannot convert a topic, so take the honest-fit beat: it names the
+                            # stretch in her words and carries the doors escape.
+                            force_fit = True
+                            break
                         situation = value  # a fresh intake, NOT consent — re-map it
                         if sit is not None:
                             self._store.write_world(sit, situation, now)
@@ -734,15 +803,21 @@ class SessionRegistry:
                             return forge_selection(eids[value], situation, clicked=True)
                         if _is_affirmative(value):
                             break
-                        # A correction. Re-map on HER words and ask again.
+                        # A correction. Re-map on HER words and ask again — unless the reply
+                        # rejects without naming anything ("no", "that's not it", "none of
+                        # these"), which the beat's own last sentence invites. That is the
+                        # 2026-07-27 harm from the other side: it used to write `no` into
+                        # `web_world` as her situation and re-map territories on it. It still
+                        # COUNTS as a correction, so the cap bounds a learner who only says no.
                         corrections += 1
-                        situation = value
-                        if sit is not None:
-                            self._store.write_world(sit, situation, now)
-                        # Re-map BEFORE the cap check, always. If the cap short-circuited this,
-                        # the forge below would build her LATEST words under a rubric chosen for
-                        # her PREVIOUS ones — a scenario assembled from two different inputs.
-                        tmap, eid, base = remap(situation)
+                        if not _is_bare_rejection(value):
+                            situation = value
+                            if sit is not None:
+                                self._store.write_world(sit, situation, now)
+                            # Re-map BEFORE the cap check, always. If the cap short-circuited
+                            # this, the forge below would build her LATEST words under a rubric
+                            # chosen for her PREVIOUS ones — one scenario, two different inputs.
+                            tmap, eid, base = remap(situation)
                         if corrections >= _MAX_CONFIRM_CORRECTIONS:
                             # Past the cap the composer must NOT forge silently — that is the
                             # 2026-07-24 defect deferred by two turns, not fixed. Spec §4b: fall
