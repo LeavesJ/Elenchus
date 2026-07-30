@@ -631,10 +631,14 @@ def test_a_rejected_generation_records_its_reason_code(tmp_path):
     m = _JargonModel()
     res = _forge(m, _engine_store(tmp_path), level="base")
     assert [c for _, c, _ in res.rejections] == ["jargon", "jargon"]  # attempt 1 and the regen
-    # m.briefs[1] is the regen call (index 0 is the first generation, steer=""); its steer is the
-    # _JargonRejection's `.prose` (T2 review, Fix 1) — never a raw prefixed string the loop had
-    # to strip, since a `_JargonRejection` is a TYPE model-authored text can never produce.
-    assert "83(b)" in m.briefs[1][1]
+    # m.briefs[1] is the regen call (index 0 is the first generation, steer=""); its steer must be
+    # EXACTLY the _JargonRejection's `.prose` (T2 re-review, Finding 1) — `in` containment also
+    # passes if the whole dataclass rides over raw (e.g. `steer = str(reason)`), since its repr
+    # embeds the prose. Recompute the expected rejection over attempt 1's exact scenario (a fresh
+    # model instance is a pure function of the (brief, steer) pair m.briefs[0] recorded).
+    first_brief, first_steer = m.briefs[0]
+    expected = forge._jargon_reason(_JargonModel().forge_scenario(first_brief, first_steer), "base")
+    assert m.briefs[1][1] == expected.prose
 
 
 def test_a_spoofed_fit_reason_cannot_forge_the_jargon_code_or_truncate_its_steer(tmp_path):
@@ -702,8 +706,13 @@ def test_a_multi_term_rejection_records_and_steers_with_every_term(tmp_path):
     res = _forge(m, _engine_store(tmp_path), level="base")
     assert [c for _, c, _ in res.rejections] == ["jargon", "jargon"]
     assert [d for _, _, d in res.rejections] == ["83(b), vesting cliff"] * 2
-    steer = m.briefs[1][1]
-    assert "83(b)" in steer and "vesting cliff" in steer
+    # Equality, not containment (T2 re-review, Finding 1) — see
+    # test_a_rejected_generation_records_its_reason_code for why `in` is too weak here.
+    first_brief, first_steer = m.briefs[0]
+    expected = forge._jargon_reason(
+        _MultiJargonModel().forge_scenario(first_brief, first_steer), "base"
+    )
+    assert m.briefs[1][1] == expected.prose
 
 
 def test_a_clean_forge_records_nothing(tmp_path):

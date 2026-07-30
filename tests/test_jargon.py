@@ -11,6 +11,26 @@ from elenchus.jargon import compact, offending_terms
 
 CONTENT = Path(__file__).resolve().parents[1] / "content"
 
+# Ordinary-English guard (T2 re-review, Finding 2a). The corpus canary below only catches an
+# entry that fires on content already living under content/ — `cliff`, `stack`, `grant`, and
+# `runway` appear nowhere in that corpus (not even jargon.yaml's own comment, which can never be
+# part of its own canary), so the canary structurally cannot catch a bare entry for any of them.
+# This is the instrument that can: each sentence uses one of those words, plus a few more
+# plausible-but-bad future entries, in its ordinary business sense, and none may ever produce a
+# hit against the REAL loaded jargon.yaml.
+_CLIFF_SENTENCE = "the negotiation went off a cliff"
+
+ORDINARY_ENGLISH_SENTENCES = [
+    _CLIFF_SENTENCE,
+    "we stacked three investor calls back to back this morning",
+    "the city will grant our permit application by Friday",
+    "the drone lifted off from the makeshift runway in the parking lot",
+    "our lease renews for another one-year term in the fall",
+    "we put a cap on how many pizzas the team orders each month",
+    "everyone on the warehouse floor has to wear a safety vest",
+    "we left the option open to push the launch a week if QA runs long",
+]
+
 
 def _canary_corpus():
     """Every file a generated scenario could plausibly echo. Widened past territories/rubrics
@@ -52,11 +72,24 @@ def test_a_bare_number_does_not_fire():
 
 
 def test_bare_cliff_does_not_fire():
-    # Deliberately absent from the list: it would fire on ordinary English.
-    assert offending_terms("the negotiation went off a cliff", load_jargon_terms()) == []
+    # Deliberately absent from the list: it would fire on ordinary English. `_CLIFF_SENTENCE` is
+    # also wired into ORDINARY_ENGLISH_SENTENCES (T2 re-review, Finding 2a) so a future bare
+    # `cliff` entry fails the suite generally, not just here.
+    assert offending_terms(_CLIFF_SENTENCE, load_jargon_terms()) == []
     assert offending_terms("her vesting cliff is in March", load_jargon_terms()) == [
         "vesting cliff"
     ]
+
+
+def test_ordinary_english_never_fires_on_the_real_jargon_list():
+    """The corpus canary (below) can only catch an entry that fires on content already living
+    under content/. The words this guards against — cliff, stack, grant, runway, and friends —
+    appear nowhere in that corpus, so no in-repo entry could ever exercise the canary for them
+    (T2 re-review, Finding 2). Ordinary business-English sentences, checked against the REAL
+    loaded jargon.yaml, are the instrument that can: they must never produce a hit."""
+    terms = load_jargon_terms()
+    hits = {s: found for s in ORDINARY_ENGLISH_SENTENCES if (found := offending_terms(s, terms))}
+    assert hits == {}, f"ordinary English fires on jargon.yaml entries: {hits}"
 
 
 def test_clean_text_returns_empty():

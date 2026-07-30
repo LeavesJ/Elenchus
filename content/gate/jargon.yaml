@@ -6,13 +6,24 @@
 #
 # GROWS ON EVIDENCE ONLY. Seeded from the terms that actually lost testers on 2026-07-29.
 #
-# Entries must survive compaction without overfiring. Bare `cliff` is deliberately ABSENT: it
-# would fire on "went off a cliff". Single-token entries are admissible only when unambiguous.
-# tests/test_jargon.py::test_the_overfire_canary_over_all_existing_content enforces this against
-# every territory, rubric, prompt, persona, and voice file under content/ — widened past the
-# original two globs, which contained none of the vocabulary above and so could not have caught
-# a bad entry (T2 review, Fix 2); ::test_the_overfire_canary_actually_bites proves the corpus is
-# wide enough to catch one.
+# Entries must survive compaction without overfiring. Two tests enforce that, over two different
+# corpora, and each catches a different failure — neither alone is enough:
+#
+# tests/test_jargon.py::test_the_overfire_canary_over_all_existing_content fires every entry
+# against every territory, rubric, prompt, persona, and voice file under content/ and fails on any
+# hit — it catches an entry that collides with doctrine content this repo already ships.
+# ::test_the_overfire_canary_actually_bites proves that corpus is wide enough to catch one (T2
+# review, Fix 2).
+#
+# tests/test_jargon.py::test_ordinary_english_never_fires_on_the_real_jargon_list fires every
+# entry against a handful of everyday business-English sentences instead of content/. The corpus
+# canary can only catch a term that happens to appear somewhere under content/ — an ordinary
+# English word used in its ordinary sense (cliff, stack, grant, runway, ...) appears nowhere in
+# that corpus, not even in this comment, so the canary structurally cannot catch it. This guard
+# can: it is why bare `cliff` is deliberately ABSENT below — it would fire on "went off a
+# cliff" — and why adding it back fails the suite (T2 re-review, Finding 2).
+#
+# Single-token entries are admissible only when both guards pass.
 - term: "83(b)"
   variants: ["83(b)", "83b", "section 83(b)"]
 - term: "QSBS"
