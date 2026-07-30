@@ -790,6 +790,9 @@ class SessionRegistry:
                             # this world under the mapped rubric. None on a rotation continue.
                             focus=focus,
                         )
+                        if sit is not None:
+                            for attempt, code, detail in res.rejections:
+                                self._store.add_gate_rejection(sit, attempt, code, detail, now)
                         if res.fallback:
                             # Honest fallback (P1): the curated base serves untouched; the
                             # bridge line rides the opening payload; no instance row persists

@@ -64,6 +64,9 @@ class ForgeResult:
     instance_ref: str  # "gen:{sitting}:{n}" — registry key + sitting-store identity
     fallback: bool  # True -> the CURATED base served; the bridge line rides the payload
     scenario: str  # the text actually served (== experience.prompt)
+    # (attempt, code, detail) per rejected generation. The CALLER persists these: the forge holds
+    # the ENGINE store, not the web SittingStore — same seam as the instance row (spec §4.4).
+    rejections: tuple[tuple[int, str, str], ...] = ()
 
 
 def build_brief(
@@ -168,9 +171,28 @@ def _jargon_reason(scenario: str, level: str) -> str | None:
     if term is None:
         return None
     return (
-        f"the scenario uses the term {term!r}, which this reader does not know — say the same "
-        f"thing in plain words, without the term"
+        f"{_JARGON_PREFIX}{term}|the scenario uses the term {term!r}, which this reader does not "
+        f"know — say the same thing in plain words, without the term"
     )
+
+
+_JARGON_PREFIX = "jargon:"
+
+
+def _reason_code(reason: str) -> str:
+    """The stable machine-facing code for a rejection (spec §4.4). Prose is for the model; this
+    is for counting. `anti_label` and `structural` are the two pre-existing causes that used to
+    be indistinguishable from a jargon rejection in aggregate."""
+    if reason.startswith(_JARGON_PREFIX):
+        return "jargon"
+    return "other"
+
+
+def _reason_detail(reason: str) -> str:
+    """For a jargon rejection, the term that fired; empty otherwise."""
+    if reason.startswith(_JARGON_PREFIX):
+        return reason[len(_JARGON_PREFIX) :].split("|", 1)[0]
+    return ""
 
 
 def _fit_requirements(rubric: Rubric) -> str:
@@ -257,7 +279,8 @@ def forge_experience(
     union = _union_moves(base, engaged_frames)
 
     steer = ""
-    for _ in range(2):  # one generation + ONE steered regen (spec §2b)
+    rejections: list[tuple[int, str, str]] = []
+    for attempt in range(1, 3):  # one generation + ONE steered regen (spec §2b)
         scenario = model.forge_scenario(brief, steer=steer)
         reason = (
             _structural_reason(scenario)
@@ -282,9 +305,14 @@ def forge_experience(
             store.add_ledger_entry(LedgerEntry(id=world_ref, owned_problem=situation))
             forge_registry[instance_ref] = forged
             return ForgeResult(
-                experience=forged, instance_ref=instance_ref, fallback=False, scenario=scenario
+                experience=forged,
+                instance_ref=instance_ref,
+                fallback=False,
+                scenario=scenario,
+                rejections=tuple(rejections),
             )
-        steer = reason
+        rejections.append((attempt, _reason_code(reason), _reason_detail(reason)))
+        steer = reason.split("|", 1)[-1] if reason.startswith(_JARGON_PREFIX) else reason
 
     # Honest fallback (review P1): the curated base, byte-untouched — its curated ledger_ref
     # keeps banking honest; the bridge line rides the payload; the world row (caller-owned)
@@ -292,5 +320,9 @@ def forge_experience(
     # the seam stays uniform for the worker.
     forge_registry[instance_ref] = base
     return ForgeResult(
-        experience=base, instance_ref=instance_ref, fallback=True, scenario=base.prompt
+        experience=base,
+        instance_ref=instance_ref,
+        fallback=True,
+        scenario=base.prompt,
+        rejections=tuple(rejections),
     )

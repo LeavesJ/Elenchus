@@ -633,3 +633,39 @@ def test_inert_store_domain_slots_noop():
         retire=[],
     )
     assert store.domain_slots() == []
+
+
+def test_gate_rejection_table_migrates_and_round_trips(tmp_path):
+    from datetime import datetime, timezone
+
+    from elenchus.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "gate.db")
+    store = SittingStore(db)
+    now = datetime.now(timezone.utc)
+    store.add_gate_rejection("sit1", 1, "jargon", "83(b)", now)
+    store.add_gate_rejection("sit1", 2, "jargon", "83(b)", now)
+
+    import sqlite3
+
+    c = sqlite3.connect(db)
+    rows = c.execute(
+        "select sitting_id, attempt, code, detail from web_gate_rejection order by attempt"
+    ).fetchall()
+    c.close()
+    assert rows == [("sit1", 1, "jargon", "83(b)"), ("sit1", 2, "jargon", "83(b)")]
+
+
+def test_gate_rejection_table_is_additive_on_an_existing_db(tmp_path):
+    """The live db has 7 memories and 12 world rows. Migration must not touch them."""
+    from datetime import datetime, timezone
+
+    from elenchus.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "existing.db")
+    first = SittingStore(db)
+    sit = first.create_sitting(datetime.now(timezone.utc))
+    first.write_world(sit, "her situation", datetime.now(timezone.utc))
+
+    second = SittingStore(db)  # re-open: CREATE TABLE IF NOT EXISTS runs again
+    assert second.read_world(sit) == "her situation"

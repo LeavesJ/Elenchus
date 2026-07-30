@@ -156,6 +156,14 @@ CREATE TABLE IF NOT EXISTS web_domain_slot (
 CREATE TABLE IF NOT EXISTS web_content_gap (
   situation TEXT NOT NULL, mapped_eid TEXT NOT NULL, confidence TEXT NOT NULL,
   verdict TEXT NOT NULL, corrected INTEGER NOT NULL, at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS web_gate_rejection (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  sitting_id  TEXT NOT NULL,
+  attempt     INTEGER NOT NULL,
+  code        TEXT NOT NULL,
+  detail      TEXT NOT NULL DEFAULT '',
+  at          TEXT NOT NULL
+);
 """
 
 
@@ -464,6 +472,23 @@ class SittingStore:
                 "ON CONFLICT(ref) DO UPDATE SET experience_id=excluded.experience_id, "
                 "scenario=excluded.scenario",  # upsert, never delete (L-3); freshest forge wins
                 (ref, sitting_id, experience_id, scenario, now.isoformat()),
+            )
+
+    def add_gate_rejection(
+        self, sitting_id: str, attempt: int, code: str, detail: str, now: datetime
+    ) -> None:
+        """One row per rejected generation attempt (spec §4.4).
+
+        A stable machine-facing `code` plus a count per attempt is the ONLY way to tell "the
+        jargon list is too strict" from "the model keeps naming frames" — both degrade to the
+        same silent curated fallback, and nobody reads prose logs in an MVP."""
+        if self._inert:
+            return
+        with self._conn() as c:
+            c.execute(
+                "INSERT INTO web_gate_rejection "
+                "(sitting_id, attempt, code, detail, at) VALUES (?, ?, ?, ?, ?)",
+                (sitting_id, attempt, code, detail, now.isoformat()),
             )
 
     def read_generated_problem(self, ref: str) -> dict | None:

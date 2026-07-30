@@ -594,7 +594,8 @@ def test_the_jargon_gate_rejects_at_base_and_the_steer_names_the_term(tmp_path, 
 
     reason = _jargon_reason("The 83(b) clock is ticking on those shares.", "base")
     assert reason is not None
-    assert "83(b)" in reason, "the steer must name the term, or the regen is guessing"
+    prose = reason.split("|", 1)[-1]
+    assert "83(b)" in prose, "the steer must name the term, or the regen is guessing"
 
 
 def test_the_jargon_gate_does_not_run_above_base():
@@ -610,3 +611,34 @@ def test_the_jargon_gate_passes_clean_text_at_base():
     from elenchus.forge import _jargon_reason
 
     assert _jargon_reason("You have to decide what to tell her on Monday.", "base") is None
+
+
+class _JargonModel(_ForgeFake):
+    """Always reaches for a banned term, so BOTH the first generation and the one steered regen
+    fail the gate — the over-strict-list path (spec §6)."""
+
+    def forge_scenario(self, brief, steer=""):
+        return "The 83(b) clock is ticking on those shares. " + super().forge_scenario(
+            brief, steer=steer
+        )
+
+
+def test_a_rejected_generation_records_its_reason_code(tmp_path):
+    """Spec §4.4. Logging is passive and the degradation is silent BY DESIGN — a rejected
+    generation falls back to a curated problem with no user-visible error. Two independent
+    causes must not land as one indistinguishable symptom."""
+    res = _forge(_JargonModel(), _engine_store(tmp_path), level="base")
+    assert [c for _, c, _ in res.rejections] == ["jargon", "jargon"]  # attempt 1 and the regen
+
+
+def test_a_rejection_records_the_term_and_the_attempt(tmp_path):
+    res = _forge(_JargonModel(), _engine_store(tmp_path), level="base")
+    assert [a for a, _, _ in res.rejections] == [1, 2]
+    assert all(d == "83(b)" for _, _, d in res.rejections)
+    assert res.fallback is True  # both attempts failed -> the curated base served
+
+
+def test_a_clean_forge_records_nothing(tmp_path):
+    res = _forge(_ForgeFake(), _engine_store(tmp_path), level="base")
+    assert res.rejections == ()  # a TUPLE, not a list — ForgeResult is frozen-ish by convention
+    assert res.fallback is False
