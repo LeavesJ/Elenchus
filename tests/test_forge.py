@@ -597,6 +597,12 @@ def test_the_jargon_gate_rejects_at_base_and_the_steer_names_the_term(tmp_path, 
     assert isinstance(reason, _JargonRejection)
     assert reason.terms == ("83(b)",)
     assert "83(b)" in reason.prose, "the steer must name the term, or the regen is guessing"
+    # Literal pin (T2 FINAL review, Finding 1): the exact wording, not a recomputation of
+    # `_jargon_reason` itself — a grammar or phrasing regression must fail here directly.
+    assert reason.prose == (
+        "the scenario uses the term '83(b)', which this reader does not know — say the same "
+        "thing in plain words, without it"
+    )
 
 
 def test_the_jargon_gate_does_not_run_above_base():
@@ -632,13 +638,13 @@ def test_a_rejected_generation_records_its_reason_code(tmp_path):
     res = _forge(m, _engine_store(tmp_path), level="base")
     assert [c for _, c, _ in res.rejections] == ["jargon", "jargon"]  # attempt 1 and the regen
     # m.briefs[1] is the regen call (index 0 is the first generation, steer=""); its steer must be
-    # EXACTLY the _JargonRejection's `.prose` (T2 re-review, Finding 1) — `in` containment also
-    # passes if the whole dataclass rides over raw (e.g. `steer = str(reason)`), since its repr
-    # embeds the prose. Recompute the expected rejection over attempt 1's exact scenario (a fresh
-    # model instance is a pure function of the (brief, steer) pair m.briefs[0] recorded).
-    first_brief, first_steer = m.briefs[0]
-    expected = forge._jargon_reason(_JargonModel().forge_scenario(first_brief, first_steer), "base")
-    assert m.briefs[1][1] == expected.prose
+    # EXACTLY the _JargonRejection's `.prose`. Pinned as a LITERAL (T2 FINAL review, Finding 1) —
+    # never recomputed by calling `_jargon_reason` again, which would compare the function's
+    # output to its own output and pass no matter what `prose` says.
+    assert m.briefs[1][1] == (
+        "the scenario uses the term '83(b)', which this reader does not know — say the same "
+        "thing in plain words, without it"
+    )
 
 
 def test_a_spoofed_fit_reason_cannot_forge_the_jargon_code_or_truncate_its_steer(tmp_path):
@@ -685,6 +691,40 @@ def test_a_rejection_records_the_term_and_the_attempt(tmp_path):
     assert res.fallback is True  # both attempts failed -> the curated base served
 
 
+class _GateCountingModel(_JargonModel):
+    """Counts `fit_check`/`screen_moves` calls — the free-gate-ordering witness (T2 FINAL review,
+    Finding 3). Reuses `_MovesSpyModel`'s counting vocabulary. `_JargonModel` always reaches for a
+    banned term, so BOTH attempts should reject at the jargon gate (free — no model call) and
+    never reach `fit_check` (gate 2) or `screen_moves` (gate 3), each a paid model call."""
+
+    def __init__(self):
+        super().__init__()
+        self.fit_check_calls = 0
+        self.screen_moves_calls = 0
+
+    def fit_check(self, scenario, requirements):
+        self.fit_check_calls += 1
+        return FitCheck(fits=True, reason="")
+
+    def screen_moves(self, moves, text):
+        self.screen_moves_calls += 1
+        return EgressScreen(performed=[], evidence="(counting)")
+
+
+def test_jargon_rejection_never_reaches_the_paid_gates(tmp_path):
+    """T2 FINAL review, Finding 3. Gate order is cheapest-first (review D12): the jargon gate runs
+    before the reject-only fit gate and the union egress screen, both real model calls. A jargon
+    rejection on EVERY attempt is the branch's core economic justification — moving
+    `_jargon_reason` to after `fit_check`/`screen_moves` in the `or` chain leaves the rest of the
+    suite green but costs two extra model calls per rejected attempt (four across the two attempts
+    exercised here)."""
+    m = _GateCountingModel()
+    res = _forge(m, _engine_store(tmp_path), level="base")
+    assert [c for _, c, _ in res.rejections] == ["jargon", "jargon"]  # both attempts reject
+    assert m.fit_check_calls == 0
+    assert m.screen_moves_calls == 0
+
+
 class _MultiJargonModel(_ForgeFake):
     """Reaches for TWO banned terms in the same generation — the case Fix 3 exists for: reporting
     only the first term burns the single retry fixing it while the second rides along to the
@@ -706,13 +746,18 @@ def test_a_multi_term_rejection_records_and_steers_with_every_term(tmp_path):
     res = _forge(m, _engine_store(tmp_path), level="base")
     assert [c for _, c, _ in res.rejections] == ["jargon", "jargon"]
     assert [d for _, _, d in res.rejections] == ["83(b), vesting cliff"] * 2
-    # Equality, not containment (T2 re-review, Finding 1) — see
-    # test_a_rejected_generation_records_its_reason_code for why `in` is too weak here.
-    first_brief, first_steer = m.briefs[0]
-    expected = forge._jargon_reason(
-        _MultiJargonModel().forge_scenario(first_brief, first_steer), "base"
+    steer = m.briefs[1][1]  # the regen's steer — the one value that actually reaches the model
+    # Independent property (T2 FINAL review, Finding 1): every offending term must be named in
+    # the prose that reaches the model. Checked against `steer` directly, never against a second
+    # call to `_jargon_reason` — a `names = repr(terms[0])` regression would still produce a
+    # `_JargonRejection` whose OWN recomputed `.prose` also drops the second term, so comparing
+    # the function's output to itself can never catch it.
+    assert all(term in steer for term in ("83(b)", "vesting cliff"))
+    # Literal pin: the exact wording, so the grammar (plural "terms"/"them") is pinned too.
+    assert steer == (
+        "the scenario uses the terms '83(b)', 'vesting cliff', which this reader does not "
+        "know — say the same thing in plain words, without them"
     )
-    assert m.briefs[1][1] == expected.prose
 
 
 def test_a_clean_forge_records_nothing(tmp_path):

@@ -635,6 +635,18 @@ def test_inert_store_domain_slots_noop():
     assert store.domain_slots() == []
 
 
+def test_inert_store_gate_rejection_noop():
+    """T2 FINAL review, Finding 2: `add_gate_rejection` has no dedicated inert-path test, unlike
+    every sibling write (`test_inert_store_domain_slots_noop` and friends). Without the
+    `if self._inert:` guard at the top of `add_gate_rejection`, an inert store's `_conn()` opens a
+    FRESH empty in-memory db (per-op, since `:memory:` never ran `executescript(_SCHEMA)` at
+    __init__) and the INSERT below raises `sqlite3.OperationalError: no such table:
+    web_gate_rejection` — so simply not raising is the whole claim here; there is no reader to
+    round-trip through, since a rejection is logged, never read back, by this store."""
+    store = SittingStore(":memory:")
+    store.add_gate_rejection("s1", 1, "jargon", "83(b)", NOW)
+
+
 def test_gate_rejection_table_migrates_and_round_trips(tmp_path):
     from datetime import datetime, timezone
 

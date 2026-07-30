@@ -107,6 +107,53 @@ def test_two_listed_terms_are_both_reported_in_list_order():
     assert offending_terms(text, terms) == ["83(b)", "vesting cliff"]  # list order, not text order
 
 
+# T2 FINAL review, Finding 4: before this, only "83(b)" and "vesting cliff" were exercised
+# anywhere in this file — "QSBS", "preferred stack", and "true-up" had zero coverage, so a typo'd
+# variant (e.g. "QSBS" -> "QSBBS") or a lost secondary variant silently disabled a term with the
+# full suite green throughout.
+SEEDED_TERM_SENTENCES = {
+    "83(b)": "the 83(b) clock is ticking on those shares",
+    "QSBS": "she wants to know if the shares still qualify for QSBS",
+    "preferred stack": "the new investor sits above her in the preferred stack",
+    "true-up": "the true-up adjustment lands once the audit closes",
+    "vesting cliff": "her vesting cliff hits in March",
+}
+
+
+def test_every_seeded_term_fires_on_a_representative_sentence():
+    terms = load_jargon_terms()
+    # A term added to or dropped from jargon.yaml without a matching sentence added here must
+    # fail loud, not silently go untested — so pin the seeded set itself first.
+    assert {t for t, _ in terms} == set(SEEDED_TERM_SENTENCES)
+    for term, sentence in SEEDED_TERM_SENTENCES.items():
+        assert offending_terms(sentence, terms) == [term], term
+
+
+def test_the_preference_stack_variant_fires():
+    # "preferred stack"'s SECOND variant ("preference stack") — previously untested; a
+    # truncate-to-first-variant mutation drops it silently.
+    terms = load_jargon_terms()
+    text = "everyone is watching where they land in the preference stack"
+    assert offending_terms(text, terms) == ["preferred stack"]
+
+
+def test_the_cliff_vesting_variant_fires():
+    # "vesting cliff"'s SECOND variant ("cliff vesting") — previously untested for the same
+    # reason as above.
+    terms = load_jargon_terms()
+    text = "the offer uses standard cliff vesting over four years"
+    assert offending_terms(text, terms) == ["vesting cliff"]
+
+
+# Deliberately NOT tested here: "83(b)"'s own secondary variants ("83b", "section 83(b)"). All
+# three of that entry's variants compact to strings CONTAINING "83b" — compact("83(b)") ==
+# compact("83b") == "83b", and compact("section 83(b)") == "section83b", which itself contains
+# "83b" as a substring. A truncate-to-first-variant mutation keeps "83(b)" (variant 0), which
+# compacts identically to the ones it would drop, so no sentence can distinguish the truncated
+# list from the full one for this entry — inventing a test here would just be
+# test_the_83b_family_all_match_one_variant again, unable to ever fail.
+
+
 def test_a_missing_list_makes_the_gate_inert(tmp_path):
     # Fallback is silence: a missing or unreadable list must NEVER block every forge.
     assert load_jargon_terms(root=tmp_path) == []
