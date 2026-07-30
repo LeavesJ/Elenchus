@@ -2513,6 +2513,46 @@ def test_fallback_rides_the_bridge_and_continue_retries_the_forge(tmp_path, make
     assert calls["n"] == 4  # the forge RAN again on the next continue (no poisoning)
 
 
+def test_a_forge_rejection_writes_real_gate_rejection_rows(tmp_path, make_fake):
+    """T3 review, Important 2. The forge tests (test_forge.py) stop at ForgeResult and the
+    store tests (test_sitting_store.py) call add_gate_rejection with hand-built literals —
+    nothing joins them, so the production path at session_runner.py's `forge_selection`
+    (`for attempt, code, detail in res.rejections: self._store.add_gate_rejection(...)`, only
+    reached when res.rejections is non-empty) has never actually produced a row. Script
+    forge_scenario to always reach for a listed jargon term at base (spec §4.2), the same
+    over-strict-list shape as test_forge.py's _JargonModel, so BOTH the generation and the one
+    steered regen fail gate 4 and drive that loop body for real."""
+
+    def jargon_factory():
+        m = _world_factory(make_fake)()
+        m.forge_scenario = lambda brief, steer="": (
+            "The 83(b) clock is ticking on those shares. " + _SCENARIO
+        )
+        return m
+
+    db = str(tmp_path / "fd-gate-rej.db")
+    reg = SessionRegistry(db, model_factory=jargon_factory)
+    data = _open_world(reg, now=NOW)
+
+    from elenchus.forge import _FALLBACK_BRIDGE
+
+    assert data.get("bridge") == _FALLBACK_BRIDGE  # both attempts failed -> the honest fallback
+
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+
+    import sqlite3
+
+    conn = sqlite3.connect(db)
+    rows = conn.execute(
+        "select sitting_id, attempt, code, detail from web_gate_rejection "
+        "where sitting_id=? order by attempt",
+        (sit,),
+    ).fetchall()
+    conn.close()
+    assert rows == [(sit, 1, "jargon", "83(b)"), (sit, 2, "jargon", "83(b)")]
+
+
 def test_level_steps_one_per_move_and_snaps_back(tmp_path, make_fake):
     """§2e: the brief's Level line walks base → firm → tight one step per converged move and
     snaps back one step on any non-converged stop; never a prose delta."""

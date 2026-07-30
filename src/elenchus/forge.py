@@ -154,6 +154,9 @@ def _anti_label_reason(scenario: str, rubric: Rubric) -> str | None:
     return None
 
 
+_JARGON_PREFIX = "jargon:"
+
+
 def _jargon_reason(scenario: str, level: str) -> str | None:
     """Gate 4 (spec 2026-07-29-jargon-gate-design §4.2): listed vocabulary is banned at `base`.
 
@@ -174,9 +177,6 @@ def _jargon_reason(scenario: str, level: str) -> str | None:
         f"{_JARGON_PREFIX}{term}|the scenario uses the term {term!r}, which this reader does not "
         f"know — say the same thing in plain words, without the term"
     )
-
-
-_JARGON_PREFIX = "jargon:"
 
 
 def _reason_code(reason: str) -> str:

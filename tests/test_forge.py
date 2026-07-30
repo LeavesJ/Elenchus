@@ -596,6 +596,10 @@ def test_the_jargon_gate_rejects_at_base_and_the_steer_names_the_term(tmp_path, 
     assert reason is not None
     prose = reason.split("|", 1)[-1]
     assert "83(b)" in prose, "the steer must name the term, or the regen is guessing"
+    # Without a "|" separator, split("|", 1)[-1] returns the whole prefixed string unchanged —
+    # "83(b)" in prose above would still pass. This is the guard that actually catches a missing
+    # split (T3 review, Important 1c).
+    assert not prose.startswith("jargon:"), "prose must have the machine prefix stripped"
 
 
 def test_the_jargon_gate_does_not_run_above_base():
@@ -627,8 +631,27 @@ def test_a_rejected_generation_records_its_reason_code(tmp_path):
     """Spec §4.4. Logging is passive and the degradation is silent BY DESIGN — a rejected
     generation falls back to a curated problem with no user-visible error. Two independent
     causes must not land as one indistinguishable symptom."""
-    res = _forge(_JargonModel(), _engine_store(tmp_path), level="base")
+    m = _JargonModel()
+    res = _forge(m, _engine_store(tmp_path), level="base")
     assert [c for _, c, _ in res.rejections] == ["jargon", "jargon"]  # attempt 1 and the regen
+    # The invariant the spec calls out in bold (T3 review, Important 1b): the steer the regen
+    # actually reads is stripped of the machine prefix. m.briefs[1] is the regen call (index 0
+    # is the first generation, steer=""); its steer must be prose the model can act on, never
+    # the raw "jargon:{term}|..." reason string.
+    assert not m.briefs[1][1].startswith("jargon:")
+    assert "83(b)" in m.briefs[1][1]
+
+
+def test_a_non_jargon_rejection_records_code_other_with_no_detail(tmp_path):
+    """Spec §4.4, the discriminating half (T3 review, Important 1a): `_reason_code` must tell a
+    non-jargon rejection apart from a jargon one, or a `_reason_code` rewritten to
+    `return "jargon"` unconditionally would leave this suite green. A fit-check rejection (gate
+    2) is a real non-jargon cause the loop already exercises elsewhere (see
+    test_fit_reject_steers_with_the_reason_then_serves)."""
+    m = _FitRejectModel([FitCheck(fits=False, reason="the scenario establishes no deadline")])
+    res = _forge(m, _engine_store(tmp_path))
+    assert [c for _, c, _ in res.rejections] == ["other"]
+    assert [d for _, _, d in res.rejections] == [""]
 
 
 def test_a_rejection_records_the_term_and_the_attempt(tmp_path):
