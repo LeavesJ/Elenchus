@@ -21,7 +21,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .content_loader import load_denylist, load_library, load_territory_text
+from .content_loader import load_denylist, load_jargon_terms, load_library, load_territory_text
+from .jargon import offending_term
 from .generator import GateError, validate_scene
 from .model import Model
 from .persistence import Store
@@ -150,6 +151,28 @@ def _anti_label_reason(scenario: str, rubric: Rubric) -> str | None:
     return None
 
 
+def _jargon_reason(scenario: str, level: str) -> str | None:
+    """Gate 4 (spec 2026-07-29-jargon-gate-design §4.2): listed vocabulary is banned at `base`.
+
+    `LEVELS` is ours and not the model's, so the condition is fully deterministic. The stated
+    cost is that this re-couples vocabulary to the PRESSURE ladder, which the spec's own §1
+    argues are orthogonal: an experienced founder's first sitting therefore gets a jargon-free
+    scenario. That is mildly wrong and harmless, and buying a real second axis is the register's
+    job, not this gate's.
+
+    The reason NAMES the term because it becomes `steer` for the one regen the loop already
+    makes — a regen told only "you used jargon" is guessing."""
+    if level != "base":
+        return None
+    term = offending_term(scenario, load_jargon_terms())
+    if term is None:
+        return None
+    return (
+        f"the scenario uses the term {term!r}, which this reader does not know — say the same "
+        f"thing in plain words, without the term"
+    )
+
+
 def _fit_requirements(rubric: Rubric) -> str:
     """Server-side precondition text for the reject-only fit gate (spec §2b gate 2). Frame-AWARE
     is allowed HERE — this text never reaches the wire; only the FitCheck.reason (precondition /
@@ -236,7 +259,11 @@ def forge_experience(
     steer = ""
     for _ in range(2):  # one generation + ONE steered regen (spec §2b)
         scenario = model.forge_scenario(brief, steer=steer)
-        reason = _structural_reason(scenario) or _anti_label_reason(scenario, base.rubric)
+        reason = (
+            _structural_reason(scenario)
+            or _anti_label_reason(scenario, base.rubric)
+            or _jargon_reason(scenario, level)
+        )
         if reason is None:
             fit = model.fit_check(scenario, requirements)
             if not fit.fits:

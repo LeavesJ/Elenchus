@@ -585,3 +585,28 @@ def test_forge_scenario_prompt_carries_the_focus_line():
 
     low = load_prompt("forge_scenario").lower()
     assert "focus" in low
+
+
+def test_the_jargon_gate_rejects_at_base_and_the_steer_names_the_term(tmp_path, make_fake):
+    """Spec §4.2/§4.5. At `base` a listed term is rejected, and the retry is the loop that
+    already exists: `steer = reason`, so the regen is TOLD which word to drop."""
+    from elenchus.forge import _jargon_reason
+
+    reason = _jargon_reason("The 83(b) clock is ticking on those shares.", "base")
+    assert reason is not None
+    assert "83(b)" in reason, "the steer must name the term, or the regen is guessing"
+
+
+def test_the_jargon_gate_does_not_run_above_base():
+    """Spec §4.2: banned at `base`, permitted from `firm`. `LEVELS` is ours, not the model's,
+    which is what keeps the condition deterministic."""
+    from elenchus.forge import _jargon_reason
+
+    for level in ("firm", "tight"):
+        assert _jargon_reason("The 83(b) clock is ticking.", level) is None, level
+
+
+def test_the_jargon_gate_passes_clean_text_at_base():
+    from elenchus.forge import _jargon_reason
+
+    assert _jargon_reason("You have to decide what to tell her on Monday.", "base") is None
