@@ -8,7 +8,11 @@
 #
 # Entries must survive compaction without overfiring. Bare `cliff` is deliberately ABSENT: it
 # would fire on "went off a cliff". Single-token entries are admissible only when unambiguous.
-# tests/test_jargon.py::test_the_overfire_canary_over_all_existing_content enforces this.
+# tests/test_jargon.py::test_the_overfire_canary_over_all_existing_content enforces this against
+# every territory, rubric, prompt, persona, and voice file under content/ — widened past the
+# original two globs, which contained none of the vocabulary above and so could not have caught
+# a bad entry (T2 review, Fix 2); ::test_the_overfire_canary_actually_bites proves the corpus is
+# wide enough to catch one.
 - term: "83(b)"
   variants: ["83(b)", "83b", "section 83(b)"]
 - term: "QSBS"

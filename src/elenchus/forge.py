@@ -22,7 +22,7 @@ import re
 from dataclasses import dataclass
 
 from .content_loader import load_denylist, load_jargon_terms, load_library, load_territory_text
-from .jargon import offending_term
+from .jargon import offending_terms
 from .generator import GateError, validate_scene
 from .model import Model
 from .persistence import Store
@@ -154,10 +154,20 @@ def _anti_label_reason(scenario: str, rubric: Rubric) -> str | None:
     return None
 
 
-_JARGON_PREFIX = "jargon:"
+@dataclass(frozen=True)
+class _JargonRejection:
+    """A jargon-gate rejection, carried as a TYPE rather than a prefixed string (T2 review,
+    Fix 1). `reason` in the generation loop also holds model-authored text (`fit.reason`), so a
+    prefix-in-a-string control channel let a model that merely began its reason with "jargon:"
+    write the accounting columns and truncate its own steer at the first "|" it typed. Model
+    output can never be an instance of a private class — `isinstance` is not spoofable the way
+    `str.startswith` is."""
+
+    terms: tuple[str, ...]
+    prose: str
 
 
-def _jargon_reason(scenario: str, level: str) -> str | None:
+def _jargon_reason(scenario: str, level: str) -> _JargonRejection | None:
     """Gate 4 (spec 2026-07-29-jargon-gate-design §4.2): listed vocabulary is banned at `base`.
 
     `LEVELS` is ours and not the model's, so the condition is fully deterministic. The stated
@@ -166,32 +176,37 @@ def _jargon_reason(scenario: str, level: str) -> str | None:
     scenario. That is mildly wrong and harmless, and buying a real second axis is the register's
     job, not this gate's.
 
-    The reason NAMES the term because it becomes `steer` for the one regen the loop already
-    makes — a regen told only "you used jargon" is guessing."""
+    The prose NAMES every offending term (T2 review, Fix 3 — not just the first) because it
+    becomes `steer` for the one regen the loop already makes — a regen told only "you used
+    jargon" is guessing, and a regen told about only one of two terms still fails the second."""
     if level != "base":
         return None
-    term = offending_term(scenario, load_jargon_terms())
-    if term is None:
+    terms = offending_terms(scenario, load_jargon_terms())
+    if not terms:
         return None
-    return (
-        f"{_JARGON_PREFIX}{term}|the scenario uses the term {term!r}, which this reader does not "
-        f"know — say the same thing in plain words, without the term"
+    plural = len(terms) > 1
+    names = ", ".join(repr(t) for t in terms)
+    prose = (
+        f"the scenario uses the term{'s' if plural else ''} {names}, which this reader does not "
+        f"know — say the same thing in plain words, without {'them' if plural else 'it'}"
     )
+    return _JargonRejection(terms=tuple(terms), prose=prose)
 
 
-def _reason_code(reason: str) -> str:
+def _reason_code(reason: str | _JargonRejection) -> str:
     """The stable machine-facing code for a rejection (spec §4.4). Prose is for the model; this
     is for counting. `anti_label` and `structural` are the two pre-existing causes that used to
-    be indistinguishable from a jargon rejection in aggregate."""
-    if reason.startswith(_JARGON_PREFIX):
+    be indistinguishable from a jargon rejection in aggregate. Keys on `isinstance`, not string
+    content (T2 review, Fix 1): model-authored text can never BE a `_JargonRejection`."""
+    if isinstance(reason, _JargonRejection):
         return "jargon"
     return "other"
 
 
-def _reason_detail(reason: str) -> str:
-    """For a jargon rejection, the term that fired; empty otherwise."""
-    if reason.startswith(_JARGON_PREFIX):
-        return reason[len(_JARGON_PREFIX) :].split("|", 1)[0]
+def _reason_detail(reason: str | _JargonRejection) -> str:
+    """For a jargon rejection, every offending term joined with ", "; empty otherwise."""
+    if isinstance(reason, _JargonRejection):
+        return ", ".join(reason.terms)
     return ""
 
 
@@ -282,7 +297,7 @@ def forge_experience(
     rejections: list[tuple[int, str, str]] = []
     for attempt in range(1, 3):  # one generation + ONE steered regen (spec §2b)
         scenario = model.forge_scenario(brief, steer=steer)
-        reason = (
+        reason: str | _JargonRejection | None = (
             _structural_reason(scenario)
             or _anti_label_reason(scenario, base.rubric)
             or _jargon_reason(scenario, level)
@@ -312,7 +327,7 @@ def forge_experience(
                 rejections=tuple(rejections),
             )
         rejections.append((attempt, _reason_code(reason), _reason_detail(reason)))
-        steer = reason.split("|", 1)[-1] if reason.startswith(_JARGON_PREFIX) else reason
+        steer = reason.prose if isinstance(reason, _JargonRejection) else reason
 
     # Honest fallback (review P1): the curated base, byte-untouched — its curated ledger_ref
     # keeps banking honest; the bridge line rides the payload; the world row (caller-owned)

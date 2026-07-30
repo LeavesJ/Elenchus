@@ -21,16 +21,15 @@ def compact(text: str | None) -> str:
     return _NON_ALNUM_RE.sub("", (text or "").lower())
 
 
-def offending_term(text: str | None, terms: list[tuple[str, list[str]]]) -> str | None:
-    """The first listed term present in `text`, else None.
+def offending_terms(text: str | None, terms: list[tuple[str, list[str]]]) -> list[str]:
+    """Every listed term present in `text`, in `terms` order, else [].
 
     `terms` carries variants ALREADY compacted (the loader does it once at load, not per call).
     An empty `terms` makes this a no-op, which is how a missing list goes inert instead of
-    blocking every forge."""
+    blocking every forge. Reports ALL matches, not just the first (T2 review, Fix 3) — a scenario
+    naming two listed terms burned the caller's single retry fixing one and still fell back on
+    the other when only the first hit was visible."""
     hay = compact(text)
     if not hay:
-        return None
-    for term, variants in terms:
-        if any(v and v in hay for v in variants):
-            return term
-    return None
+        return []
+    return [term for term, variants in terms if any(v and v in hay for v in variants)]

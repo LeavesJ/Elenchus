@@ -588,18 +588,15 @@ def test_forge_scenario_prompt_carries_the_focus_line():
 
 
 def test_the_jargon_gate_rejects_at_base_and_the_steer_names_the_term(tmp_path, make_fake):
-    """Spec §4.2/§4.5. At `base` a listed term is rejected, and the retry is the loop that
-    already exists: `steer = reason`, so the regen is TOLD which word to drop."""
-    from elenchus.forge import _jargon_reason
+    """Spec §4.2/§4.5. At `base` a listed term is rejected as a `_JargonRejection` TYPE (T2
+    review, Fix 1) — never a prefixed string, which model-authored text could forge — and its
+    `.prose` becomes the steer for the one regen the loop already makes."""
+    from elenchus.forge import _JargonRejection, _jargon_reason
 
     reason = _jargon_reason("The 83(b) clock is ticking on those shares.", "base")
-    assert reason is not None
-    prose = reason.split("|", 1)[-1]
-    assert "83(b)" in prose, "the steer must name the term, or the regen is guessing"
-    # Without a "|" separator, split("|", 1)[-1] returns the whole prefixed string unchanged —
-    # "83(b)" in prose above would still pass. This is the guard that actually catches a missing
-    # split (T3 review, Important 1c).
-    assert not prose.startswith("jargon:"), "prose must have the machine prefix stripped"
+    assert isinstance(reason, _JargonRejection)
+    assert reason.terms == ("83(b)",)
+    assert "83(b)" in reason.prose, "the steer must name the term, or the regen is guessing"
 
 
 def test_the_jargon_gate_does_not_run_above_base():
@@ -634,12 +631,35 @@ def test_a_rejected_generation_records_its_reason_code(tmp_path):
     m = _JargonModel()
     res = _forge(m, _engine_store(tmp_path), level="base")
     assert [c for _, c, _ in res.rejections] == ["jargon", "jargon"]  # attempt 1 and the regen
-    # The invariant the spec calls out in bold (T3 review, Important 1b): the steer the regen
-    # actually reads is stripped of the machine prefix. m.briefs[1] is the regen call (index 0
-    # is the first generation, steer=""); its steer must be prose the model can act on, never
-    # the raw "jargon:{term}|..." reason string.
-    assert not m.briefs[1][1].startswith("jargon:")
+    # m.briefs[1] is the regen call (index 0 is the first generation, steer=""); its steer is the
+    # _JargonRejection's `.prose` (T2 review, Fix 1) — never a raw prefixed string the loop had
+    # to strip, since a `_JargonRejection` is a TYPE model-authored text can never produce.
     assert "83(b)" in m.briefs[1][1]
+
+
+def test_a_spoofed_fit_reason_cannot_forge_the_jargon_code_or_truncate_its_steer(tmp_path):
+    """T2 review, Fix 1 — the point of the sentinel TYPE, reproduced rather than theoretical. The
+    prefix-string implementation keyed `_reason_code`, `_reason_detail`, and the steer assignment
+    on `reason.startswith("jargon:")` — a test that model-authored `fit.reason` text can
+    trivially pass. This FitCheck reason (reusing `_FitRejectModel`, the existing fit-rejection
+    fixture) both begins "jargon:" and carries a "|" the old code split on. It is a FIT
+    rejection (gate 2), not a jargon rejection (gate 4): it must record code "other" with empty
+    detail, and the steer the regen reads must be the model's FULL reason, untruncated.
+
+    This test FAILS against the old prefix implementation: `_reason_code` returns "jargon",
+    `_reason_detail` extracts the text before the "|" as if it were a real jargon term, and the
+    steer is truncated to only the text after the "|" — the model's own explanation for WHY it
+    failed the fit check never reaches the regen."""
+    spoof = (
+        "jargon: the term 'preferred stack' appears here | but no deadline is established "
+        "anywhere in the scenario"
+    )
+    m = _FitRejectModel([FitCheck(fits=False, reason=spoof)])
+    res = _forge(m, _engine_store(tmp_path))
+    assert res.fallback is False  # attempt 2 (unscripted) fits cleanly
+    assert [c for _, c, _ in res.rejections] == ["other"]
+    assert [d for _, _, d in res.rejections] == [""]
+    assert m.briefs[1][1] == spoof  # the model's FULL reason reaches the regen, untruncated
 
 
 def test_a_non_jargon_rejection_records_code_other_with_no_detail(tmp_path):
@@ -659,6 +679,31 @@ def test_a_rejection_records_the_term_and_the_attempt(tmp_path):
     assert [a for a, _, _ in res.rejections] == [1, 2]
     assert all(d == "83(b)" for _, _, d in res.rejections)
     assert res.fallback is True  # both attempts failed -> the curated base served
+
+
+class _MultiJargonModel(_ForgeFake):
+    """Reaches for TWO banned terms in the same generation — the case Fix 3 exists for: reporting
+    only the first term burns the single retry fixing it while the second rides along to the
+    fallback anyway."""
+
+    def forge_scenario(self, brief, steer=""):
+        return (
+            "Her vesting cliff hits the same week the 83(b) clock runs out. "
+            + super().forge_scenario(brief, steer=steer)
+        )
+
+
+def test_a_multi_term_rejection_records_and_steers_with_every_term(tmp_path):
+    """T2 review, Fix 3. Both attempts fail (the scripted scenario always carries both terms),
+    but every rejection's detail names BOTH terms, in list order, and the regen's steer names
+    both too — a model reading a steer that named only the first term would have no reason to
+    drop the second."""
+    m = _MultiJargonModel()
+    res = _forge(m, _engine_store(tmp_path), level="base")
+    assert [c for _, c, _ in res.rejections] == ["jargon", "jargon"]
+    assert [d for _, _, d in res.rejections] == ["83(b), vesting cliff"] * 2
+    steer = m.briefs[1][1]
+    assert "83(b)" in steer and "vesting cliff" in steer
 
 
 def test_a_clean_forge_records_nothing(tmp_path):
