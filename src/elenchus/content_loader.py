@@ -207,3 +207,32 @@ def persona_for_posture(posture: str | None, root: Path | None = None) -> str:
     if not p.exists():
         return "vera"
     return str(yaml.safe_load(p.read_text()).get("persona", "vera"))
+
+
+def load_jargon_terms(root: Path | None = None) -> list[tuple[str, list[str]]]:
+    """The jargon gate's term list as (term, COMPACTED variants) pairs (spec §4.3).
+
+    Variants are compacted once here rather than on every match. A missing, unreadable, or
+    malformed file returns [] — the gate goes INERT rather than rejecting every generation, which
+    is the difference between a degraded feature and a silently broken product."""
+    from .jargon import compact  # local: keeps the pure matcher free of content-path knowledge
+
+    path = _root(root) / "gate" / "jargon.yaml"
+    try:
+        data = yaml.safe_load(path.read_text())
+    except (OSError, yaml.YAMLError):
+        return []
+    if not isinstance(data, list):
+        return []
+    out: list[tuple[str, list[str]]] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        term = str(entry.get("term", "")).strip()
+        variants = entry.get("variants") or []
+        if not term or not isinstance(variants, list):
+            continue
+        compacted = [c for c in (compact(str(v)) for v in variants) if c]
+        if compacted:
+            out.append((term, compacted))
+    return out

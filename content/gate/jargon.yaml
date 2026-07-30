@@ -1,0 +1,21 @@
+# The jargon gate's term list (spec 2026-07-29-jargon-gate-design §4.3).
+#
+# Terms banned from a GENERATED opening scenario at the `base` level. Doctrine as data: edit this
+# file, not code. Matching compacts both sides to alphanumerics only, so `83(b)`, `83 (b)` and
+# `Section 83(b)` all reduce to a string containing `83b`.
+#
+# GROWS ON EVIDENCE ONLY. Seeded from the terms that actually lost testers on 2026-07-29.
+#
+# Entries must survive compaction without overfiring. Bare `cliff` is deliberately ABSENT: it
+# would fire on "went off a cliff". Single-token entries are admissible only when unambiguous.
+# tests/test_jargon.py::test_the_overfire_canary_over_all_existing_content enforces this.
+- term: "83(b)"
+  variants: ["83(b)", "83b", "section 83(b)"]
+- term: "QSBS"
+  variants: ["QSBS"]
+- term: "preferred stack"
+  variants: ["preferred stack", "preference stack"]
+- term: "true-up"
+  variants: ["true-up", "true up"]
+- term: "vesting cliff"
+  variants: ["vesting cliff", "cliff vesting"]
