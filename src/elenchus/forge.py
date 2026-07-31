@@ -26,6 +26,7 @@ from .jargon import offending_terms
 from .generator import GateError, validate_scene
 from .model import Model
 from .persistence import Store
+from .prompt_text import bulleted, labelled
 from .types import Experience, LedgerEntry, Rubric, Scene, hidden_move_details
 
 # The bounded coarse difficulty enum (spec §2e): never a prose delta; one step per move.
@@ -69,6 +70,42 @@ class ForgeResult:
     rejections: tuple[tuple[int, str, str], ...] = ()
 
 
+# The learner text boundary (task 3): situation, positions, and focus are her own words and
+# cross the `prompt_text` seam -- `labelled` for situation/focus (each one blob under a
+# heading), `bulleted` for positions (a list, one per converged segment). `story` does NOT cross
+# it: it is the PRIOR chapter's forged scenario, authored by the model in an earlier turn of this
+# same pipeline, never something she typed (spec §2b's sequel; `web/session_runner.py._story`
+# reads it off a persisted `scenario`, not off a turn payload) -- capping or indenting it is a
+# different task's job, not this one's.
+#
+# Each rendered blob is capped at `_BRIEF_BLOB_CAP` characters, measured AFTER bulleted/labelled
+# render, never on the raw text handed to them -- the fix `model._cap_rendered_turn` makes to the
+# mistake `judgment_loop._POSITION_CAP`'s own comment records: a cap measured before render does
+# not bound what comes out, since a newline-heavy input can render to several times its own
+# length once every continuation line gets its own indent. The cap is applied per BLOB, not once
+# across the whole assembled brief, so the composer's own fixed lines that follow a learner blob
+# in `lines` -- Role register, Level, `_WIDEN` -- can never be pushed out by a long one; the same
+# reason `model._render_turns` caps each turn before its fixed "Recent exchange:" header is
+# prepended, never the joined block after.
+#
+# 2000 reuses `model._TURN_RENDER_CAP`'s own number and reasoning: her situation and her focus
+# are each one typed message, the same shape as a single dialogue turn (a sentence or two in the
+# ordinary case; generous headroom for a real one). The positions block gets the same cap rather
+# than a smaller one: it is the sum of one committed position per converged segment over a whole
+# sitting, strictly larger than a single message, so the shared cap already bounds it at least as
+# tightly as a per-position cap would, without a second number to justify separately.
+_BRIEF_BLOB_CAP = 2000
+
+
+def _cap_blob(rendered: str, cap: int = _BRIEF_BLOB_CAP) -> str:
+    """Truncate an already-rendered learner blob at `cap` characters, marking the elision.
+
+    Applied AFTER `prompt_text.bulleted`/`labelled`, never before -- see `_BRIEF_BLOB_CAP`."""
+    if len(rendered) <= cap:
+        return rendered
+    return rendered[:cap] + "…[trimmed]"
+
+
 def build_brief(
     territory: str,
     situation: str,
@@ -84,10 +121,21 @@ def build_brief(
     (her final substantive `you` turns — never landing or any Vera-authored text), the role
     register, and the bounded 3-value level line. Optionally a `story` (prior chapter's world) and
     a `focus` (her own next pressure, user-steered chapters §2e). Never frame/trap details, rubric
-    text, or engine state (tests spy on this)."""
+    text, or engine state (tests spy on this).
+
+    Her situation, her positions, and her focus are learner text and cross the `prompt_text`
+    boundary (see the module comment above); `story` does not. A single-line situation/focus now
+    renders as a heading line plus an indented blob rather than the old bare `"Label: text"` --
+    `labelled` is not byte-stable the way `bulleted` is, so this is a real prompt-shape change,
+    not a no-op. Positions render with the seam's own bullet ("  - ", two spaces) rather than the
+    ad hoc "- " this site used before -- also a real change, reported, not slipped in."""
     if level not in LEVELS:
         raise ValueError(f"level must be one of {LEVELS}, got {level!r}")
-    lines = [f"Territory: {territory.strip()}", "", f"Her situation: {situation.strip()}"]
+    lines = [
+        f"Territory: {territory.strip()}",
+        "",
+        _cap_blob(labelled("Her situation:", situation.strip())),
+    ]
     if story:
         # Sequel (spec §2b): the prior chapter's world to continue — decision-informed (the new
         # pressure is a consequence of the SPECIFIC call she made, never a generic development).
@@ -104,13 +152,20 @@ def build_brief(
         # direction). Server-side (L-13): the scenario is union-screened on output like story.
         lines += [
             "",
-            "The pressure she wants to press next (her own words — pose THIS decision, in this "
-            "world):",
-            focus.strip(),
+            _cap_blob(
+                labelled(
+                    "The pressure she wants to press next (her own words — pose THIS decision, "
+                    "in this world):",
+                    focus.strip(),
+                )
+            ),
         ]
     if positions:
-        lines += ["", "Her committed positions (her own words):"]
-        lines += [f"- {p}" for p in positions]
+        lines += [
+            "",
+            "Her committed positions (her own words):",
+            _cap_blob(bulleted(positions)),
+        ]
     if role:
         lines += ["", f"Role register: {role}"]
     lines += ["", f"Level: {level}", "", _WIDEN]

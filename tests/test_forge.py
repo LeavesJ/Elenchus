@@ -478,6 +478,104 @@ def test_forge_passes_build_brief_output_verbatim(tmp_path):
     assert m.briefs[0][0] == expected  # brief inputs are EXACTLY build_brief's — no extras
 
 
+# --- Task 3 (learner text boundary): build_brief indents her words and bounds them -------------
+
+# Private-use methodology (tests/test_prompt_text.py): characters from U+E000+ never appear in
+# this module's own template text (the labels, the bullet, LEARNER_INDENT), so any payload
+# character surviving as a line's leading non-blank character is unambiguous proof of a leak, not
+# a coincidence of overlapping alphabets.
+_BRIEF_PAYLOAD_FIRST = chr(0xE000)
+_BRIEF_PAYLOAD_SECOND = chr(0xE001)
+
+
+def _brief_leading_nonspace_chars(rendered):
+    return [line[0] for line in rendered.split("\n") if line and not line[0].isspace()]
+
+
+def test_build_brief_position_newline_no_column_0_leak():
+    payload = f"{_BRIEF_PAYLOAD_FIRST}\n{_BRIEF_PAYLOAD_SECOND}"
+    brief = forge.build_brief("T", "S", [payload], None, "base")
+    leaders = _brief_leading_nonspace_chars(brief)
+    assert _BRIEF_PAYLOAD_SECOND not in leaders  # the continuation byte is indented past column 0
+
+
+def test_build_brief_situation_newline_no_column_0_leak():
+    payload = f"{_BRIEF_PAYLOAD_FIRST}\n{_BRIEF_PAYLOAD_SECOND}"
+    brief = forge.build_brief("T", payload, [], None, "base")
+    leaders = _brief_leading_nonspace_chars(brief)
+    assert _BRIEF_PAYLOAD_SECOND not in leaders
+
+
+def test_build_brief_focus_newline_no_column_0_leak():
+    payload = f"{_BRIEF_PAYLOAD_FIRST}\n{_BRIEF_PAYLOAD_SECOND}"
+    brief = forge.build_brief("T", "S", [], None, "base", focus=payload)
+    leaders = _brief_leading_nonspace_chars(brief)
+    assert _BRIEF_PAYLOAD_SECOND not in leaders
+
+
+def test_build_brief_composer_prose_is_not_indented():
+    """The learner-text indent discipline must not swallow the composer's own fixed lines --
+    otherwise the brief stops reading as a labelled structure to the model. Checked against every
+    fixed heading that sits next to a learner blob: a bug that over-indents (e.g. threading
+    LEARNER_INDENT into the wrong argument) would push one of these off column 0 too."""
+    brief = forge.build_brief("T", "S", ["p"], "ceo", "base", focus="f")
+    lines = brief.splitlines()
+    assert "Territory: T" in lines
+    assert "Her committed positions (her own words):" in lines
+    assert "Role register: ceo" in lines
+    assert "Level: base" in lines
+
+
+def test_build_brief_position_uses_the_seam_bulleted_form():
+    """The seam's canonical bullet ("  - ", two leading spaces, `prompt_text.bulleted`) replaces
+    the ad hoc "- " this site used before -- a real, reported prompt-shape change, not a hidden
+    no-op: every single-line position now renders two columns further right than it used to."""
+    brief = forge.build_brief("T", "S", ["ARGUED HERE"], None, "base")
+    lines = brief.splitlines()
+    assert "  - ARGUED HERE" in lines
+    assert "- ARGUED HERE" not in lines
+
+
+def test_build_brief_situation_is_labelled_and_indented():
+    """`labelled` indents the first line too, unlike `bulleted` -- so single-line input changes
+    shape from the old inline "Her situation: S" to a heading line plus an indented blob."""
+    brief = forge.build_brief("T", "S", [], None, "base")
+    lines = brief.splitlines()
+    assert "Her situation:" in lines
+    assert "    S" in lines
+    assert "Her situation: S" not in lines
+
+
+def test_build_brief_focus_is_labelled_and_indented():
+    brief = forge.build_brief("T", "S", [], None, "base", focus="F")
+    lines = brief.splitlines()
+    assert any(line.startswith("The pressure she wants to press next") for line in lines)
+    assert "    F" in lines
+
+
+def test_build_brief_bounded_on_a_pathological_position():
+    """Pinned on the RENDERED output, not the raw input -- the same fix `model._cap_rendered_turn`
+    makes to the mistake `judgment_loop._POSITION_CAP`'s own comment records: a cap measured
+    before render does not bound what comes out, since a newline-heavy input renders to several
+    times its own length once every continuation line gets an indent. 50,000 raw characters of a
+    single position must not reach the model as 50,000 characters."""
+    pathological = "\n" * 50_000
+    brief = forge.build_brief("T", "S", [pathological], None, "base")
+    assert len(brief) < forge._BRIEF_BLOB_CAP + 1000  # bounded far under the raw input's size
+
+
+def test_build_brief_bounded_on_a_pathological_situation():
+    pathological = "\n" * 50_000
+    brief = forge.build_brief("T", pathological, [], None, "base")
+    assert len(brief) < forge._BRIEF_BLOB_CAP + 1000
+
+
+def test_build_brief_bounded_on_a_pathological_focus():
+    pathological = "\n" * 50_000
+    brief = forge.build_brief("T", "S", [], None, "base", focus=pathological)
+    assert len(brief) < forge._BRIEF_BLOB_CAP + 1000
+
+
 def test_union_screen_covers_base_moves_and_engaged_frames(tmp_path):
     base = load_experience("license_continuity")
     m = _MovesSpyModel()
