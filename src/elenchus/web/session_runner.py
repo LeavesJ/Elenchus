@@ -596,6 +596,10 @@ def _serialize_record(rec: dict) -> dict | None:
         "ledger_ref": rec.get("ledger_ref") or exp.ledger_ref,
         "posture": rec.get("posture"),
         "recent": [list(t) for t in rec.get("recent", [])],
+        # Server-side only (spec §6, L-13): the raw Push.text per engine turn, never projected to
+        # the client — only "recent" (the Concierge's re-voice) rides the wire. Lets a founder
+        # reading the db put Push.text beside the served line for the acceptance gate.
+        "pushes": rec.get("pushes", []),
         "stop_reason": rec.get("stop_reason", "converged"),
         "terrain": rec.get("terrain", []),
         "houses": rec.get("houses", []),
@@ -1271,6 +1275,13 @@ class SessionRegistry:
                         # curated ref) — what _serialize_record persists for rebuild fidelity.
                         "ledger_ref": captured.get("instance_ref") or captured["exp"].ledger_ref,
                         "recent": captured["recent"],
+                        # The raw pushes, one per engine turn (spec §6): "recent" carries the
+                        # Concierge's re-voice (what the client saw), never Push.text itself — the
+                        # founder judging the acceptance gate needs the mechanism-pressing text he
+                        # actually supplied, which he never sees on screen. Server-side only via
+                        # _serialize_record's allowlist (L-13) — _rebuild carries it back in so a
+                        # later converse/close re-serialize does not silently drop it.
+                        "pushes": [p.text for p in assessment.trajectory],
                         "stop_reason": assessment.stop_reason.value,
                         "terrain": project_terrain(state, now).learner_view(),
                     }
@@ -1615,6 +1626,10 @@ class SessionRegistry:
                 "exp": exp,
                 "ledger_ref": ser_ref or (exp.ledger_ref if exp is not None else ""),
                 "recent": [tuple(t) for t in ser.get("recent", [])],
+                # Server-side only (spec §6, L-13), carried back in so a later converse/close
+                # re-serialize (_serialize_record) does not silently drop what a prior process
+                # already persisted — never read to build a client payload.
+                "pushes": ser.get("pushes", []),
                 "stop_reason": ser.get("stop_reason", "converged"),
                 "terrain": ser.get("terrain", []),
                 # Frozen beside the terrain at the landing (L5); pre-L5 records rebuild with

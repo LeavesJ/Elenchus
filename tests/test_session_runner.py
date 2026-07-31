@@ -189,6 +189,62 @@ def _four_closed() -> dict[str, list[ResponseClassification]]:
     }
 
 
+class _ReVoicingModel(FakeModel):
+    """Concierge genuinely re-voices the push (no substring overlap), unlike FakeModel's default
+    concierge_turn which echoes `push` verbatim (see _fid_factory above). Under that default the
+    raw push IS the displayed text, so an L-13 "never rides the wire" assertion would pass
+    vacuously no matter what the record change does. This mirrors AnthropicModel's real behavior
+    (the founder never sees Push.text, only the Concierge's re-voice) closely enough to give the
+    assertion below actual teeth."""
+
+    def concierge_turn(self, problem, push, recent, *, arc=None, voice=""):
+        return (
+            "Sit with that pressure a moment longer -- what's the actual mechanism holding it?"
+            if push
+            else "take a real position"
+        )
+
+
+def _revoicing_factory() -> FakeModel:
+    return _ReVoicingModel(_irreversible_anchor_intake(), _four_closed())
+
+
+def test_the_raw_push_is_retrievable_server_side_but_never_on_the_wire(tmp_path):
+    """Spec §6: the founder reads the concierge re-voicing on screen, never Push.text -- the
+    acceptance gate as written asks him to judge a string that never reaches him. The raw push
+    must be recoverable from the server-side record (so he can put Push.text beside the served
+    line) and must NEVER appear anywhere projected to the client (L-13).
+
+    `store.turns()` is the durable mirror of exactly the PROJECTED wire (see its own docstring at
+    test_write_through_persists_projected_transcript_and_state below: "vera/you/landing turns in
+    order... NO refs (L-13)") -- the ground truth for "never rode the wire". The registry's raw
+    Python return values are the wrong thing to json.dumps here: the done payload carries
+    Assessment/State objects that were never meant for -- and cannot even be serialized onto --
+    the client wire."""
+    import json
+
+    from elenchus.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "rawpush.db")
+    reg = SessionRegistry(db, model_factory=_revoicing_factory)
+    tag, _ = reg.start("s1", now=NOW)
+    assert tag == "say"  # front door
+    idx = reg.menu_index("s1", _ANCHOR)
+    tag, _ = reg.step("s1", idx)
+    assert tag == "say"  # scenario + invite
+    tag, data = _drive(reg, "s1", opening="reasoning that already holds the move")
+    assert tag == "done"
+
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    rec = store.read_state(sit)["record"]
+    assert "[push:frame]" in json.dumps(rec), "the raw push must be recoverable server-side"
+
+    turns = store.turns(sit)
+    wire = json.dumps([t["payload"] for t in turns])
+    assert "[push:frame]" not in wire, "L-13: the raw push must never ride the wire"
+
+
 class _AlwaysGreetingModel(FakeModel):
     """Never enters the engine at the gate — every turn classifies as a (non-substantive) greeting."""
 

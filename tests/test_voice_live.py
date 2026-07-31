@@ -94,6 +94,37 @@ def _voice(exp):
 
 
 @pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
+def test_generate_push_with_real_positions_still_names_no_frame(tmp_path):
+    """Coverage-rot guard (2026-07-30 plan, task 5): every OTHER live caller in this file passes
+    generate_push no positions, so after the Positions plan landed, the live suite exercised only
+    the empty/fallback path (today's behaviour) while continuing to pass green. That is coverage
+    rot caused by the very default (Positions()) that keeps a pre-plan caller's signature from
+    rotting. This is the one live caller that actually feeds real learner positions through the
+    REAL model — proving the composed prompt (elenchus.model._target_detail + the on_angle block)
+    still yields a push that presses the mechanism without naming the frame's own jargon."""
+    from elenchus.types import Positions
+
+    exp = _first_open_exp(str(tmp_path / "live.db"))
+    m = AnthropicModel()
+    f = exp.rubric.frames[0]
+    push = m.generate_push(
+        exp,
+        "frame",
+        f.frame_code,
+        stress=False,
+        positions=Positions(
+            on_angle=(
+                "I'd cap the custom work at two weeks and tell them the roadmap holds. "
+                "If they walk, the self-serve launch still ships on time.",
+            )
+        ),
+    )
+    assert push.strip()
+    assert f.frame_code not in push
+    assert f.frame_code.replace("_", " ") not in push.lower()
+
+
+@pytest.mark.skipif(not os.getenv("ANTHROPIC_API_KEY"), reason="no key")
 def test_echo_gate_does_not_flag_a_faithful_revoice(tmp_path):
     """The REAL no-op detector (review #3/#7): the batched added-revelation gate, judged by the REAL
     model against the REAL frames+traps, must PASS a faithful re-voice (same challenge, no named
