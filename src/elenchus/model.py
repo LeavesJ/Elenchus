@@ -5,6 +5,7 @@ from typing import Literal, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from .content_loader import load_prompt, load_spike_prompt
+from .prompt_text import LEARNER_INDENT, _indent_after_first
 from .types import (
     CandidateFrame,
     CheckableGrade,
@@ -347,10 +348,55 @@ def _render_rubric(rubric) -> str:
     return "\n".join(lines)
 
 
+_TURN_RENDER_CAP = 2000  # characters, measured on the RENDERED turn (after _indent_after_first),
+# not the raw text handed in. judgment_loop._POSITION_CAP's own comment records that a cap
+# measured before render does not bound what comes out: a newline-heavy raw text can render to
+# several times its own length once every continuation line gets its own LEARNER_INDENT prefix.
+# Capping the rendered string directly sidesteps that arithmetic: the bound holds regardless of
+# how the raw turn is shaped -- one enormous line, thousands of empty ones, anything between.
+# 2000 is generous against real content: _ECHO_MAX_TOKENS tunes Vera's own turns for "a sentence
+# or two" (a few hundred characters), and a single student turn is one reply, not the multi-push
+# aggregate judgment_loop._POSITION_CAP (1200 raw characters) bounds. No ordinary turn is expected
+# to hit this; it exists for the turn that tries to be 50,000 characters of newlines.
+
+
+def _cap_rendered_turn(rendered: str, cap: int = _TURN_RENDER_CAP) -> str:
+    """Truncate an already-rendered turn at `cap` characters, marking the elision.
+
+    Applied AFTER `_indent_after_first`, never before -- the fix for the mistake
+    `judgment_loop._POSITION_CAP` documents in its own comment, where the cap bounded the text
+    handed TO the renderer rather than the string that came OUT of it. Slicing the rendered
+    string can only shorten an existing line or drop a trailing one; it can never introduce a new
+    line, so it cannot undo the indent discipline that keeps a learner byte off column 0."""
+    if len(rendered) <= cap:
+        return rendered
+    return rendered[:cap] + "…[trimmed]"
+
+
 def _render_turns(recent: list[tuple[str, str]], limit: int = 6) -> str:
+    """Render the trailing window of dialogue turns for a composed prompt.
+
+    Every continuation line of a turn is indented past its `"{role}: "` prefix -- the same
+    discipline `prompt_text.bulleted` applies to a position: the first line carries the prefix,
+    every later line gets `prompt_text.LEARNER_INDENT`, so a newline in a learner's reply can
+    never open a line at column 0, where the composed prompt's own headings live. A single-line
+    turn -- the ordinary case, almost all real input -- renders byte-identically to the old bare
+    `f"{role}: {text}"`: the indent machinery is a no-op when a turn has no second line to indent.
+
+    Each turn is then capped at `_TURN_RENDER_CAP` characters, measured on its RENDERED text, not
+    the raw text handed in (see `_cap_rendered_turn`). The cap is applied per turn, not once
+    across the whole block: the number of turns is already bounded by `limit`, a code constant
+    (6, or 20 for the wind-down callers) that no learner input ever touches, so a per-turn cap
+    already fixes the worst-case size of the whole block at `limit * _TURN_RENDER_CAP`, plus the
+    fixed "Recent exchange:" header and the role-prefix overhead. A second cap spanning the block
+    would only bound a quantity the per-turn cap has already determined.
+    """
     if not recent:
         return ""
-    lines = [f"{role}: {text}" for role, text in recent[-limit:]]
+    lines = [
+        _cap_rendered_turn(_indent_after_first(text, f"{role}: ", LEARNER_INDENT))
+        for role, text in recent[-limit:]
+    ]
     return "Recent exchange:\n" + "\n".join(lines) + "\n\n"
 
 

@@ -1,3 +1,5 @@
+import pytest
+
 from elenchus.model import (
     AnthropicModel,
     FakeModel,
@@ -663,6 +665,90 @@ def test_render_turns_empty_is_blank():
 
     assert _render_turns([]) == ""
     assert _render_turns([], limit=20) == ""
+
+
+# --- _render_turns: no learner byte at column 0, bounded on what is actually rendered -----------
+
+# Private-use methodology (Task 1, tests/test_prompt_text.py): a character from U+E000+ never
+# appears in this module's own template text ("Recent exchange:", the role names, or
+# LEARNER_INDENT), so any payload character surviving as a line's leading non-blank character is
+# unambiguous proof of a leak, not a coincidence of overlapping alphabets. The separator matrix
+# itself (the full width of str.splitlines()) is already exhaustively parametrized against
+# _indent_after_first in test_prompt_text.py; these only prove _render_turns' own wiring -- the
+# role prefix, the per-turn cap -- doesn't reopen the hole that discipline closes.
+_TURN_PAYLOAD_FIRST = chr(0xE000)
+_TURN_PAYLOAD_SECOND = chr(0xE001)
+
+
+def _leading_nonspace_chars(rendered):
+    return [line[0] for line in rendered.split("\n") if line and not line[0].isspace()]
+
+
+@pytest.mark.parametrize("sep", ["\n", "\r\n"])
+def test_render_turns_no_payload_byte_reaches_column_0(sep):
+    from elenchus.model import _render_turns
+
+    turn = f"{_TURN_PAYLOAD_FIRST}{sep}{_TURN_PAYLOAD_SECOND}"
+    out = _render_turns([("student", turn)])
+    leaders = _leading_nonspace_chars(out)
+    assert _TURN_PAYLOAD_SECOND not in leaders  # the continuation byte is indented past column 0
+
+
+@pytest.mark.parametrize("sep", ["\n", "\r\n", chr(0x2028)])
+def test_render_turns_indents_every_splitlines_recognised_break(sep):
+    """U+2028 (LINE SEPARATOR) is not `"\\n"`, so a bare `.split("\\n")` check (the test above)
+    cannot see it -- it never opens a `"\\n"`-delimited line either before or after the fix, so an
+    absence-from-column-0 check alone passes vacuously for it in both cases. This asserts on the
+    PRESENCE of the indented continuation line instead, which only exists once `_render_turns`
+    recognises the separator (splitlines() width) AND indents past it -- both halves of the fix,
+    for every separator splitlines() recognises, not just the two that also happen to be `"\\n"`
+    literals."""
+    from elenchus.model import _render_turns
+
+    turn = f"{_TURN_PAYLOAD_FIRST}{sep}{_TURN_PAYLOAD_SECOND}"
+    out = _render_turns([("student", turn)])
+    lines = out.split("\n")
+    assert lines[1] == f"student: {_TURN_PAYLOAD_FIRST}"
+    assert f"    {_TURN_PAYLOAD_SECOND}" in lines
+
+
+def test_render_turns_role_prefix_stays_legible_at_column_0():
+    """The role name IS meant to open its line -- that's the only way a reader tells `student`
+    from `Vera` apart. Only the learner's OWN continuation bytes must be pushed off column 0."""
+    from elenchus.model import _render_turns
+
+    out = _render_turns([("student", "one\ntwo"), ("Vera", "three\nfour")])
+    lines = out.split("\n")
+    assert "student: one" in lines
+    assert "Vera: three" in lines
+
+
+def test_render_turns_single_line_turn_is_byte_identical_to_the_old_form():
+    """R2 byte-stability, asserted against a literal: the pre-fix rendering
+    (`f"{role}: {text}"`) for the common, single-line case, which is almost all real input."""
+    from elenchus.model import _render_turns
+
+    out = _render_turns([("student", "Verifiable audits and data are what's essential.")])
+    assert out == "Recent exchange:\nstudent: Verifiable audits and data are what's essential.\n\n"
+
+
+def test_render_turns_multiple_single_line_turns_are_byte_identical_to_the_old_form():
+    from elenchus.model import _render_turns
+
+    out = _render_turns([("student", "hi"), ("Vera", "hello there")])
+    assert out == "Recent exchange:\nstudent: hi\nVera: hello there\n\n"
+
+
+def test_render_turns_bounds_a_pathological_turn_on_the_rendered_output():
+    """Pinned on the RENDERED string, not the input. `judgment_loop._POSITION_CAP`'s own comment
+    records that a cap measured before render does not bound what comes out: a newline-heavy
+    input renders to several times its own length once every continuation line gets an indent.
+    50,000 raw characters (25x the render cap) must not reach the model as 50,000 characters."""
+    from elenchus.model import _TURN_RENDER_CAP, _render_turns
+
+    pathological = "\n" * 50_000
+    out = _render_turns([("student", pathological)])
+    assert len(out) < _TURN_RENDER_CAP + 100  # bounded far under the raw input's size
 
 
 def test_concierge_converse_prompt_defers_a_fresh_pressure_to_the_next_chapter():
