@@ -5,7 +5,7 @@ from typing import Literal, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from .content_loader import load_prompt, load_spike_prompt
-from .prompt_text import LEARNER_INDENT, indent_after_first
+from .prompt_text import LEARNER_INDENT, indent_after_first, labelled
 from .types import (
     CandidateFrame,
     CheckableGrade,
@@ -382,18 +382,42 @@ _TURN_RENDER_CAP = 6000  # characters, measured on the RENDERED turn (after inde
 # 6000 * 20 = 120,000 characters (`python3 -c "print(6000*20)"`), plus the fixed "Recent
 # exchange:" header and the role-prefix overhead.
 
+# Task 4 (graded/routing sites: classify_response, classify_entry, map_territories): a SMALLER
+# cap for text that is typed directly by a person, never something the model wrote back. Unlike
+# `_TURN_RENDER_CAP`, this number has no model max_tokens ceiling it has to clear -- the concern
+# that forced `_TURN_RENDER_CAP` up from 2000 to 6000 was Vera's OWN turns being re-fed through
+# `recent` and re-rendered (session_runner.py appends a probe/re-invite/converse reply, then
+# passes it back through `_render_turns` on the next call); nothing here re-feeds a model
+# completion back through these four sites. This mirrors `forge.build_brief`'s `_BRIEF_BLOB_CAP`
+# (forge.py:101) exactly, restated here for a sibling site over the identical KIND of text -- and
+# for `map_territories`, over the identical DATA: its front-door call passes the same `situation`
+# string session_runner.py already threads into `build_brief`, so capping it at the same number
+# here is matching an existing precedent for this data, not inventing a new one. (map_territories'
+# other caller, `_capture_steer`, passes `next_pressure` instead -- a model-DISTILLED value, per
+# its own field doc in types.ConverseTurn "a distilled fresh decision" whose "label echoes her raw
+# words" -- i.e. a short phrase, not a full authored reply, so it carries none of the re-fed-turn
+# concern either; ASSUMED short based on that doc, not measured, since no offline path produces
+# one.) 2000 stays generous against a real typed message on its own terms.
+_LEARNER_TEXT_CAP = 2000
 
-def _cap_rendered_turn(rendered: str) -> str:
-    """Truncate an already-rendered turn at `_TURN_RENDER_CAP` characters, marking the elision.
 
-    Applied AFTER `indent_after_first`, never before -- the fix for the mistake
+def _cap_rendered_turn(rendered: str, cap: int = _TURN_RENDER_CAP) -> str:
+    """Truncate an already-rendered blob at `cap` characters (default `_TURN_RENDER_CAP`),
+    marking the elision.
+
+    Applied AFTER `indent_after_first`/`labelled`, never before -- the fix for the mistake
     `judgment_loop._POSITION_CAP` documents in its own comment, where the cap bounded the text
     handed TO the renderer rather than the string that came OUT of it. Slicing the rendered
     string can only shorten an existing line or drop a trailing one; it can never introduce a new
-    line, so it cannot undo the indent discipline that keeps a learner byte off column 0."""
-    if len(rendered) <= _TURN_RENDER_CAP:
+    line, so it cannot undo the indent discipline that keeps a learner byte off column 0.
+
+    Originally turn-specific (`_render_turns`' per-turn cap, the only caller until task 4); the
+    `cap` parameter generalises it for the four graded/routing sites, some of which pass
+    `_LEARNER_TEXT_CAP` instead of the default -- see that constant's comment for which site uses
+    which and why."""
+    if len(rendered) <= cap:
         return rendered
-    return rendered[:_TURN_RENDER_CAP] + "…[trimmed]"
+    return rendered[:cap] + "…[trimmed]"
 
 
 def _render_turns(recent: list[tuple[str, str]], limit: int = 6) -> str:
@@ -589,7 +613,12 @@ class AnthropicModel:
             + f"\nBinding constraint: {exp.rubric.binding_constraint}"
             + f"\nTarget angle: {detail}"
         )
-        user = f"Push:\n{push}\n\nStudent reply:\n{response}"
+        # Task 4: `response` is the learner's own reply -- the boundary seam, `_LEARNER_TEXT_CAP`
+        # (see its comment). `push` is the engine's own generated angle, never learner text, and
+        # stays outside the seam.
+        user = f"Push:\n{push}\n\n" + _cap_rendered_turn(
+            labelled("Student reply:", response), cap=_LEARNER_TEXT_CAP
+        )
         resp = self._parse_required(
             max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,
@@ -603,7 +632,12 @@ class AnthropicModel:
         self, prompt: str, opening: str, recent: list[tuple[str, str]]
     ) -> EntryClassification:
         system = load_prompt("entry")  # frame-blind: doctrine only, never the rubric
-        user = f"Problem:\n{prompt}\n\n{_render_turns(recent)}Student's latest message:\n{opening}"
+        # Task 4: `opening` is the learner's own latest message -- the boundary seam,
+        # `_LEARNER_TEXT_CAP` (see its comment). `_render_turns(recent)` already caps its own
+        # dialogue turns at `_TURN_RENDER_CAP` (untouched here).
+        user = f"Problem:\n{prompt}\n\n{_render_turns(recent)}" + _cap_rendered_turn(
+            labelled("Student's latest message:", opening), cap=_LEARNER_TEXT_CAP
+        )
         resp = self._parse_required(
             max_tokens=2048,
             system=system,
@@ -837,9 +871,20 @@ class AnthropicModel:
         # Batched egress (the L-13 backstop): which of the hidden moves does `text` PERFORM, in ONE
         # call over the whole list, instead of one check_injection_expressed per move. The lift
         # harness keeps check_injection_expressed (high effort); this auditor runs at medium.
+        #
+        # Task 4 audit (web/voice.py): `text` is NOT exclusively learner text. Most callers pass a
+        # Vera-AUTHORED reply -- concierge_turn/close/open/land/converse's `reply`, forge_scenario's
+        # scenario (forge.py:369), concierge_sitting_close's close -- content already governed by a
+        # model max_tokens budget, the same shape `_render_turns`' re-fed dialogue turns are. One
+        # caller, voice.land's baseline check, DOES pass real learner text: `_student_text(recent)`,
+        # every student turn in the session joined. Both need the render-side cap to clear the
+        # model's own output ceiling rather than clip content this L-13 backstop must still see in
+        # full, so this reuses `_TURN_RENDER_CAP` (the default), not the smaller `_LEARNER_TEXT_CAP`.
         numbered = "\n".join(f"{i + 1}. {m}" for i, m in enumerate(moves))
         system = load_prompt("egress")
-        user = f"Hidden moves:\n{numbered}\n\nText to screen:\n{text}"
+        user = f"Hidden moves:\n{numbered}\n\n" + _cap_rendered_turn(
+            labelled("Text to screen:", text)
+        )
         resp = self._parse_required(
             max_tokens=_SCREEN_MAX_TOKENS,
             system=system,
@@ -884,7 +929,14 @@ class AnthropicModel:
             "decision, never the territory text, never advice, never analysis vocabulary, never a "
             'question. It reads naturally after "the sharpest pressure I can put on it: ".'
         )
-        user = f"Her situation:\n{situation}\n\nTerritories:\n{numbered}"
+        # Task 4: `situation` is her own words at this call's primary site (session_runner.py's
+        # front door, the same string threaded into forge.build_brief -- see `_LEARNER_TEXT_CAP`'s
+        # comment for why this reuses that cap). The second caller (`_capture_steer`) passes a
+        # model-distilled `next_pressure` instead; the territories are curated content, never hers.
+        user = (
+            _cap_rendered_turn(labelled("Her situation:", situation), cap=_LEARNER_TEXT_CAP)
+            + f"\n\nTerritories:\n{numbered}"
+        )
         resp = self._parse_required(
             max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,

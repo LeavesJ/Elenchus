@@ -639,3 +639,180 @@ def test_a_position_with_crlf_endings_indents_the_second_line(group):
     lines = user.splitlines()
     idx = lines.index("  - first")
     assert lines[idx + 1] == "    second"
+
+
+# ---------------------------------------------------------------------------
+# Task 4: the four GRADED/ROUTING sites route through `labelled`, not `bulleted`. Unlike the
+# bulleted sites above, the first line of the learner text is ALSO indented -- a single-line input
+# (almost all real input) renders differently from before, not byte-identically. Each site gets:
+# (1) an indent-pin proving the exact before/after shape on a single-line input, against a
+# literal, never built by calling the function under test; (2) a column-0 property test using the
+# private-use-area methodology from tests/test_prompt_text.py -- a payload character from
+# U+E000+ never appears in this module's own template text, so any payload character surviving as
+# a line's leading non-blank character is unambiguous proof of a leak; (3) a bound on the
+# RENDERED request for a pathological (all-newline) input, an ABSOLUTE literal, not
+# `cap + N` built from the constant under test.
+# ---------------------------------------------------------------------------
+
+_LEAK_FIRST = chr(0xE000)
+_LEAK_SECOND = chr(0xE001)
+
+
+def _leading_nonspace_chars(rendered):
+    return [line[0] for line in rendered.split("\n") if line and not line[0].isspace()]
+
+
+# --- classify_response: `response` is the boundary; `push` is engine-authored, not learner text ---
+
+
+def test_classify_response_indents_a_single_line_reply_under_the_label():
+    rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", "ARGUED HERE"
+    )
+    user = _user_text(client.messages.parse_calls[0])
+    assert user == "Push:\npush text\n\nStudent reply:\n    ARGUED HERE"
+
+
+def test_classify_response_no_payload_byte_reaches_column_0():
+    response = f"{_LEAK_FIRST}\n{_LEAK_SECOND}"
+    rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    user = _user_text(client.messages.parse_calls[0])
+    leaders = _leading_nonspace_chars(user)
+    assert _LEAK_FIRST not in leaders  # labelled indents the FIRST line too, unlike bulleted
+    assert _LEAK_SECOND not in leaders
+
+
+def test_classify_response_bounds_a_pathological_reply_on_the_rendered_output():
+    rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    pathological = "\n" * 50_000
+    AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", pathological
+    )
+    user = _user_text(client.messages.parse_calls[0])
+    # 2050 = _LEARNER_TEXT_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
+    # "Push:\npush text\n\nStudent reply:\n" wrapper (measured: 2027 chars for this case).
+    assert len(user) < 2100
+
+
+# --- classify_entry: the "Student's latest message:" compose; `opening` is the boundary ---------
+
+
+def test_classify_entry_indents_a_single_line_opening_under_the_label():
+    from elenchus.types import EntryClass, EntryClassification
+
+    ec = EntryClassification(entry_class=EntryClass.substantive, reply="")
+    client = _Client(parse_result=_Resp(parsed_output=ec))
+    AnthropicModel(client=client).classify_entry("Problem text", "ARGUED HERE", [])
+    user = _user_text(client.messages.parse_calls[0])
+    assert user == "Problem:\nProblem text\n\nStudent's latest message:\n    ARGUED HERE"
+
+
+def test_classify_entry_no_payload_byte_reaches_column_0():
+    from elenchus.types import EntryClass, EntryClassification
+
+    opening = f"{_LEAK_FIRST}\n{_LEAK_SECOND}"
+    ec = EntryClassification(entry_class=EntryClass.substantive, reply="")
+    client = _Client(parse_result=_Resp(parsed_output=ec))
+    AnthropicModel(client=client).classify_entry("Problem text", opening, [])
+    user = _user_text(client.messages.parse_calls[0])
+    leaders = _leading_nonspace_chars(user)
+    assert _LEAK_FIRST not in leaders
+    assert _LEAK_SECOND not in leaders
+
+
+def test_classify_entry_bounds_a_pathological_opening_on_the_rendered_output():
+    from elenchus.types import EntryClass, EntryClassification
+
+    ec = EntryClassification(entry_class=EntryClass.substantive, reply="")
+    client = _Client(parse_result=_Resp(parsed_output=ec))
+    pathological = "\n" * 50_000
+    AnthropicModel(client=client).classify_entry("Problem text", pathological, [])
+    user = _user_text(client.messages.parse_calls[0])
+    # 2075 = _LEARNER_TEXT_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
+    # "Problem:\nProblem text\n\nStudent's latest message:\n" wrapper (measured: 2033 chars).
+    assert len(user) < 2100
+
+
+# --- screen_moves: `text` is a MIX (mostly Vera-authored, one caller passes real learner text) ---
+
+
+def test_screen_moves_indents_a_single_line_text_under_the_label():
+    from elenchus.types import EgressScreen
+
+    screen = EgressScreen(performed=[], evidence="e")
+    client = _Client(parse_result=_Resp(parsed_output=screen))
+    AnthropicModel(client=client).screen_moves(["move one"], "ARGUED HERE")
+    user = _user_text(client.messages.parse_calls[0])
+    assert user == "Hidden moves:\n1. move one\n\nText to screen:\n    ARGUED HERE"
+
+
+def test_screen_moves_no_payload_byte_reaches_column_0():
+    from elenchus.types import EgressScreen
+
+    text = f"{_LEAK_FIRST}\n{_LEAK_SECOND}"
+    screen = EgressScreen(performed=[], evidence="e")
+    client = _Client(parse_result=_Resp(parsed_output=screen))
+    AnthropicModel(client=client).screen_moves(["move one"], text)
+    user = _user_text(client.messages.parse_calls[0])
+    leaders = _leading_nonspace_chars(user)
+    assert _LEAK_FIRST not in leaders
+    assert _LEAK_SECOND not in leaders
+
+
+def test_screen_moves_bounds_a_pathological_text_on_the_rendered_output():
+    from elenchus.types import EgressScreen
+
+    screen = EgressScreen(performed=[], evidence="e")
+    client = _Client(parse_result=_Resp(parsed_output=screen))
+    pathological = "\n" * 50_000
+    AnthropicModel(client=client).screen_moves(["move one"], pathological)
+    user = _user_text(client.messages.parse_calls[0])
+    # 6050 = _TURN_RENDER_CAP (6000) + slack for the "…[trimmed]" suffix and the fixed
+    # "Hidden moves:\n1. move one\n\nText to screen:\n" wrapper (measured: 6037 chars).
+    assert len(user) < 6100
+
+
+# --- map_territories: `situation` is her words at the front-door call; curated territories are not
+
+
+def test_map_territories_indents_a_single_line_situation_under_the_label():
+    from elenchus.types import TerritoryMap
+
+    wire = TerritoryMap(ranked=["e1"], confidence="high", reflection="r")
+    client = _Client(parse_result=_Resp(parsed_output=wire))
+    AnthropicModel(client=client).map_territories("ARGUED HERE", [("e1", "desc one")])
+    user = _user_text(client.messages.parse_calls[0])
+    assert user == "Her situation:\n    ARGUED HERE\n\nTerritories:\n1. [e1] desc one"
+
+
+def test_map_territories_no_payload_byte_reaches_column_0():
+    from elenchus.types import TerritoryMap
+
+    situation = f"{_LEAK_FIRST}\n{_LEAK_SECOND}"
+    wire = TerritoryMap(ranked=["e1"], confidence="high", reflection="r")
+    client = _Client(parse_result=_Resp(parsed_output=wire))
+    AnthropicModel(client=client).map_territories(situation, [("e1", "desc one")])
+    user = _user_text(client.messages.parse_calls[0])
+    leaders = _leading_nonspace_chars(user)
+    assert _LEAK_FIRST not in leaders
+    assert _LEAK_SECOND not in leaders
+
+
+def test_map_territories_bounds_a_pathological_situation_on_the_rendered_output():
+    from elenchus.types import TerritoryMap
+
+    wire = TerritoryMap(ranked=["e1"], confidence="high", reflection="r")
+    client = _Client(parse_result=_Resp(parsed_output=wire))
+    pathological = "\n" * 50_000
+    AnthropicModel(client=client).map_territories(pathological, [("e1", "desc one")])
+    user = _user_text(client.messages.parse_calls[0])
+    # 2050 = _LEARNER_TEXT_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
+    # "Her situation:\n\n\nTerritories:\n1. [e1] desc one" wrapper (measured: 2041 chars).
+    assert len(user) < 2100
