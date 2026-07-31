@@ -1,4 +1,12 @@
-from elenchus.model import FakeModel, IntakeClassification, ResponseClassification
+import inspect
+
+from elenchus.model import (
+    AnthropicModel,
+    FakeModel,
+    IntakeClassification,
+    Model,
+    ResponseClassification,
+)
 from elenchus.types import ConverseTurn, FrameState, TrapState
 
 
@@ -80,3 +88,26 @@ def test_fake_model_grade_sharper_scripted_then_default_agree():
     assert m.grade_sharper(None, "frame", "f", "push", "yeah you're right").sharper is False
     # an unscripted code -> the test double's grader agrees by default
     assert m.grade_sharper(None, "frame", "other", "push", "because mechanism X").sharper is True
+
+
+# ---------------------------------------------------------------------------
+# R3: generate_push gains a keyword-only steer on all three definitions
+# ---------------------------------------------------------------------------
+
+
+def test_generate_push_gains_a_keyword_only_steer_on_all_three_definitions():
+    """3a. The Protocol, FakeModel, and AnthropicModel must all carry the same shape: `steer` is
+    keyword-only with an empty default, mirroring `forge_scenario(brief, steer="")`."""
+    for owner in (Model, FakeModel, AnthropicModel):
+        sig = inspect.signature(owner.generate_push)
+        assert "steer" in sig.parameters, owner
+        assert sig.parameters["steer"].default == "", owner
+        assert sig.parameters["steer"].kind == inspect.Parameter.KEYWORD_ONLY, owner
+
+
+def test_fake_model_generate_push_accepts_a_steer_without_erroring():
+    intake = IntakeClassification(frame_states={}, trap_states={})
+    m = FakeModel(intake, responses={})
+    assert isinstance(
+        m.generate_push(_exp(), "frame", "protect_the_core_lane", steer="fix this"), str
+    )

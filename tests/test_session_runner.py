@@ -2616,16 +2616,20 @@ def test_a_leaked_push_writes_a_real_gate_rejection_row(tmp_path, make_fake):
     `_open_world` drives the front door only through the forged opening say -- judgment_loop's
     push loop (and so the leak) doesn't run until the opening reply is fed and the segment is
     drained to done, so this reaches for `_drive` (the file's own helper for exactly that) rather
-    than checking the DB right after `_open_world` alone."""
+    than checking the DB right after `_open_world` alone.
+
+    R3: the FIRST push of a fresh session has an empty trajectory, so it is blind in substance --
+    the leak here must file PUSH_LABEL_BLIND, never PUSH_LABEL_WITH_POSITIONS (that code is
+    reserved for a call that actually carried positions)."""
     import sqlite3
 
-    from elenchus.assessment.judgment_loop import PUSH_LABEL_WITH_POSITIONS
+    from elenchus.assessment.judgment_loop import PUSH_LABEL_BLIND
 
     def factory():
         m = _world_factory(make_fake)()
         first = [True]
 
-        def push(exp, kind, code, *, stress=False, positions=None):
+        def push(exp, kind, code, *, stress=False, positions=None, steer=""):
             if first:
                 first.pop()
                 return f"you are ignoring {code} here"  # leaks a literal frame code
@@ -2642,7 +2646,7 @@ def test_a_leaked_push_writes_a_real_gate_rejection_row(tmp_path, make_fake):
 
     c = sqlite3.connect(db)
     rows = c.execute(
-        "select code from web_gate_rejection where code = ?", (PUSH_LABEL_WITH_POSITIONS,)
+        "select code from web_gate_rejection where code = ?", (PUSH_LABEL_BLIND,)
     ).fetchall()
     c.close()
     assert rows, "a leaked push must persist a countable rejection, not just a log line"

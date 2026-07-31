@@ -454,3 +454,52 @@ def test_the_target_code_never_reaches_the_prompt():
     user = _user_text(client.messages.create_calls[0])
     assert "protect_the_core_lane" not in user
     assert "protect the core lane" not in user.lower()
+
+
+# ---------------------------------------------------------------------------
+# R3: generate_push gains a steer, composed exactly like forge_scenario's
+# ---------------------------------------------------------------------------
+
+
+def test_generate_push_with_empty_steer_is_byte_identical_to_no_steer():
+    """3a byte-stability: mirrors test_generate_push_with_empty_positions_is_byte_identical_to_
+    no_positions. Every existing caller (including test_voice_live.py's ten) passes no steer."""
+    c1 = _Client(create_result=_Resp(content=[_TextBlock("[push]")]))
+    AnthropicModel(client=c1).generate_push(_exp(), "frame", "protect_the_core_lane")
+    c2 = _Client(create_result=_Resp(content=[_TextBlock("[push]")]))
+    AnthropicModel(client=c2).generate_push(_exp(), "frame", "protect_the_core_lane", steer="")
+    call1 = c1.messages.create_calls[0]
+    call2 = c2.messages.create_calls[0]
+    assert call1["messages"] == call2["messages"]
+    assert call1["system"] == call2["system"]
+
+
+def test_generate_push_composes_the_steer_after_the_angle():
+    """3a. Composed exactly the way forge_scenario does (model.py:845), appended to the user
+    message after the angle block."""
+    client = _Client(create_result=_Resp(content=[_TextBlock("[push]")]))
+    AnthropicModel(client=client).generate_push(
+        _exp(), "frame", "protect_the_core_lane", steer="fix exactly this thing"
+    )
+    user = _user_text(client.messages.create_calls[0])
+    assert "Steer (fix exactly this): fix exactly this thing" in user
+    assert user.index("Angle to push on:") < user.index("Steer (fix exactly this):")
+
+
+def test_generate_push_steer_and_positions_compose_together():
+    """A retry keeps the positions AND adds the steer (R3 3c) — pin that neither composition
+    step clobbers the other."""
+    from elenchus.types import Positions
+
+    client = _Client(create_result=_Resp(content=[_TextBlock("[push]")]))
+    AnthropicModel(client=client).generate_push(
+        _exp(),
+        "frame",
+        "protect_the_core_lane",
+        positions=Positions(elsewhere=("earlier take",)),
+        steer="say it without the label",
+    )
+    user = _user_text(client.messages.create_calls[0])
+    assert "earlier take" in user
+    assert "Steer (fix exactly this): say it without the label" in user
+    assert user.index("earlier take") < user.index("Steer (fix exactly this):")

@@ -527,9 +527,11 @@ class _RecordingPushModel(FakeModel):
         super().__init__(intake, responses, grades, sharper_verdicts)
         self.recorded_positions: list[Positions] = []
 
-    def generate_push(self, exp, kind, code, *, stress=False, positions=Positions()):
+    def generate_push(self, exp, kind, code, *, stress=False, positions=Positions(), steer=""):
         self.recorded_positions.append(positions)
-        return super().generate_push(exp, kind, code, stress=stress, positions=positions)
+        return super().generate_push(
+            exp, kind, code, stress=stress, positions=positions, steer=steer
+        )
 
 
 def test_generate_push_receives_a_prior_pushes_own_words_through_assess():
@@ -639,15 +641,18 @@ class _ScriptedPushModel(_RecordingPushModel):
     `FakeModel`'s constant, so a leak can be provoked. `_RecordingPushModel.generate_push`
     delegates to `FakeModel.generate_push`, which always returns a constant and so can never
     leak -- this overrides that return path while keeping the same positions-recording as its
-    parent. `seen` aliases `recorded_positions`: the same list, the brief's name for it."""
+    parent. `seen` aliases `recorded_positions`: the same list, the brief's name for it. `steers`
+    records the `steer` argument of every call, in call order, for R3's steered-retry tests."""
 
     def __init__(self, intake, responses, pushes):
         super().__init__(intake, responses)
         self._pushes = list(pushes)
         self.seen = self.recorded_positions
+        self.steers: list[str] = []
 
-    def generate_push(self, exp, kind, code, *, stress=False, positions=Positions()):
+    def generate_push(self, exp, kind, code, *, stress=False, positions=Positions(), steer=""):
         self.recorded_positions.append(positions)
+        self.steers.append(steer)
         return self._pushes.pop(0) if self._pushes else "[clean push]"
 
 
@@ -665,9 +670,40 @@ def _one_frame_intake():
     )
 
 
-def test_a_leaked_push_re_authors_blind_and_counts_it():
-    """Spec §4.5. The fallback is the blind push, so the worst case of this change is exactly
-    today's behaviour."""
+def test_a_leaked_first_push_is_blind_and_the_retry_is_skipped():
+    """R3 (defect 1 + 2). A first push has an empty trajectory -> Positions() -> blind IN
+    SUBSTANCE, not by attempt index. The code is derived from what THIS call actually received,
+    so a leak here files PUSH_LABEL_BLIND, never PUSH_LABEL_WITH_POSITIONS. And a blind call gets
+    NO retry: re-authoring from a byte-identical prompt would be pure resampling at a paid call
+    (defect 3). The leaked push is served anyway and counted -- a served push has been screened
+    at least once and at most twice, and is never served without being counted."""
+    from elenchus.assessment.judgment_loop import PUSH_LABEL_BLIND
+
+    def closed():
+        return [ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)]
+
+    m = _ScriptedPushModel(
+        _one_frame_intake(),
+        {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()},
+        # push 1 (empty trajectory, blind) leaks a literal frame code; push 2 is clean
+        pushes=["you are ignoring protect_the_core_lane here", "[clean push]"],
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+
+    assert len(m.seen) == 2  # ONE call for push 1 (no retry) + one for push 2, never three
+    assert m.seen[0] == Positions()  # push 1 really is blind
+    assert m.steers[0] == ""  # a blind call is never steered -- there is nothing to steer with
+    # the leaked text is served VERBATIM: no retry, no re-authoring
+    assert a.trajectory[0].text == "you are ignoring protect_the_core_lane here"
+    codes = [c for _, c, _ in a.push_rejections]
+    assert codes == [PUSH_LABEL_BLIND]
+    assert a.push_rejections[0][0] == 1  # attempt 1
+
+
+def test_a_leaked_push_with_positions_retries_steered_with_positions_kept():
+    """R3 (defect 2). A NON-blind leak (this call carried real positions) gets a retry that
+    KEEPS those positions and adds a steer -- the opposite of a blind resample. Reuses the
+    jargon-gate's validated pattern (test_forge.py's steered regen), not a new one."""
     from elenchus.assessment.judgment_loop import PUSH_LABEL_WITH_POSITIONS
 
     def closed():
@@ -676,23 +712,30 @@ def test_a_leaked_push_re_authors_blind_and_counts_it():
     m = _ScriptedPushModel(
         _one_frame_intake(),
         {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()},
-        # first author leaks a literal frame code; the blind re-author is clean
-        pushes=["you are ignoring protect_the_core_lane here", "[clean push]"],
+        # push 1 (blind) is clean; push 2 (carries push 1's response in `elsewhere`) leaks a
+        # snake code on its first attempt, then the steered retry is clean
+        pushes=["[clean first push]", "protect_the_core_lane is the thing", "[clean retry]"],
     )
     a = judgment_loop.assess(_exp(), _work(), m)
 
-    assert len(m.seen) >= 2
-    assert m.seen[1] == Positions()  # the re-author is BLIND
-    assert a.trajectory[0].text == "[clean push]"  # the served push is the second one
+    assert len(m.seen) == 3
+    assert m.seen[1] != Positions()  # push 2's first attempt was NOT blind
+    assert m.seen[2] == m.seen[1]  # the retry kept the SAME positions -- never reset to Positions()
+    assert m.steers[1] == ""  # the first attempt at any target is never pre-emptively steered
+    assert m.steers[2] == (
+        "Your previous attempt echoed an internal label. Press the reasoning, never the name."
+    )
+    assert a.trajectory[1].text == "[clean retry]"  # the steered retry served, not the leak
     codes = [c for _, c, _ in a.push_rejections]
-    assert codes[0] == PUSH_LABEL_WITH_POSITIONS
-    assert a.push_rejections[0][0] == 1  # attempt 1
+    assert codes == [PUSH_LABEL_WITH_POSITIONS]
 
 
 def test_a_second_leak_serves_anyway_with_a_DIFFERENT_code():
-    """Spec §4.5. 'leaked with positions' is a cost this change introduced; 'leaked blind' is
-    evidence of the pre-existing unscreened-push condition. One string for both makes them
-    permanently inseparable."""
+    """R3. 'leaked with positions' is a cost this change introduced; 'leaked blind' is evidence
+    of the pre-existing unscreened-push condition SURVIVING A STEER. One string for both makes
+    them permanently inseparable. Push 1 (empty trajectory) is scripted clean so the leak under
+    test lands on push 2, which DOES carry positions -- its first attempt must file WITH_POSITIONS,
+    never BLIND, and the retry that also leaks keeps those SAME positions."""
     from elenchus.assessment.judgment_loop import PUSH_LABEL_BLIND, PUSH_LABEL_WITH_POSITIONS
 
     def closed():
@@ -702,14 +745,16 @@ def test_a_second_leak_serves_anyway_with_a_DIFFERENT_code():
     m = _ScriptedPushModel(
         _one_frame_intake(),
         {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()},
-        pushes=[leaky, leaky],  # BOTH attempts leak
+        pushes=["[clean first push]", leaky, leaky],  # push 2's BOTH attempts leak
     )
     a = judgment_loop.assess(_exp(), _work(), m)
 
-    assert a.trajectory[0].text == leaky  # served anyway: no raise, no dead end
+    assert a.trajectory[1].text == leaky  # served anyway: no raise, no dead end
     codes = [c for _, c, _ in a.push_rejections][:2]
     assert codes == [PUSH_LABEL_WITH_POSITIONS, PUSH_LABEL_BLIND]
     assert codes[0] != codes[1]
+    assert m.seen[2] == m.seen[1]  # the retry kept push 2's positions even though it leaked again
+    assert m.seen[1] != Positions()
 
 
 def test_the_two_codes_are_stable_strings():
@@ -783,3 +828,49 @@ def test_push_label_leak_clears_ordinary_pushes_on_real_content():
 
     spaced_push = "Isn't this just a case of commit under the deadline dressed up as ambiguity?"
     assert _push_label_leak(spaced_push, rubric) == "commit under the deadline"
+
+
+# ---------------------------------------------------------------------------
+# R3: the steer never contains a frame or trap code
+# ---------------------------------------------------------------------------
+
+
+def test_label_steer_names_the_term_for_a_framework_hit():
+    """3b. A framework-denylist hit steers by naming the term -- there is nothing secret about
+    it, it is a real named method, and naming it tells the author exactly what to drop."""
+    from elenchus.assessment.judgment_loop import _label_steer
+
+    rubric = _exp().rubric
+    assert _label_steer("swot", rubric) == 'Do not use the term "swot" or name any framework.'
+
+
+def test_label_steer_is_generic_for_a_code_hit():
+    """3b. A frame/trap code hit steers with a FIXED generic string that names no code --
+    putting the code in the prompt is exactly what raises the leak rate
+    (test_the_target_code_never_reaches_the_prompt)."""
+    from elenchus.assessment.judgment_loop import _label_steer
+
+    rubric = _exp().rubric
+    assert _label_steer("protect_the_core_lane", rubric) == (
+        "Your previous attempt echoed an internal label. Press the reasoning, never the name."
+    )
+    # the spaced form of a code takes the same branch as the snake form
+    assert _label_steer("commit under the deadline", rubric) == (
+        "Your previous attempt echoed an internal label. Press the reasoning, never the name."
+    )
+
+
+def test_code_hit_steer_never_contains_the_code_in_either_form():
+    """3b pin, the whole point of the split: a code-hit steer must never re-inject the code that
+    just leaked, in snake OR spaced form, for every code the rubric carries -- not just the one
+    exercised by the other two tests here. A steer that names the code would raise the leak rate
+    on the very retry meant to fix it."""
+    from elenchus.assessment.judgment_loop import _label_steer
+
+    rubric = _exp().rubric
+    codes = [f.frame_code for f in rubric.frames] + [t.trap_code for t in rubric.traps]
+    assert len(codes) >= 2, "the fixture rubric must carry real codes for this pin to mean anything"
+    for code in codes:
+        steer = _label_steer(code, rubric)
+        assert code not in steer, code
+        assert code.replace("_", " ") not in steer, code

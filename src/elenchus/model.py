@@ -53,6 +53,7 @@ class Model(Protocol):
         *,
         stress: bool = False,
         positions: Positions = Positions(),
+        steer: str = "",
     ) -> str: ...
     def classify_response(
         self,
@@ -149,6 +150,7 @@ class FakeModel:
         *,
         stress: bool = False,
         positions: Positions = Positions(),
+        steer: str = "",
     ) -> str:
         return f"[push:{kind}]"
 
@@ -445,6 +447,7 @@ class AnthropicModel:
         *,
         stress: bool = False,
         positions: Positions = Positions(),
+        steer: str = "",
     ) -> str:
         detail = _target_detail(exp.rubric, kind, code)
         prefix = f"Situation:\n{exp.scene.situation}\n\n" if getattr(exp, "scene", None) else ""
@@ -459,6 +462,10 @@ class AnthropicModel:
             said = "\n".join(f"  - {t}" for t in positions.elsewhere)
             blocks += f"Positions taken elsewhere in this sitting:\n{said}\n\n"
         user = f"{prefix}Experience:\n{exp.prompt}\n\n{blocks}Angle to push on:\n{detail}"
+        # The steered retry (R3): composed exactly like forge_scenario's, so an empty steer is
+        # byte-identical to no steer at all (every existing caller keeps passing none).
+        if steer:
+            user += f"\n\nSteer (fix exactly this): {steer}"
         system = load_prompt("push")
         if stress:
             system += "\n\n" + load_prompt("push_stress")

@@ -78,6 +78,24 @@ def _push_label_leak(push: str, rubric) -> str | None:
     return label_leak(push, rubric, load_denylist("framework_denylist"))
 
 
+def _label_steer(hit: str, rubric) -> str:
+    """R3. The one-shot retry steer for a leak `_push_label_leak` just caught -- never the code
+    itself (`test_the_target_code_never_reaches_the_prompt` exists because a code in the prompt
+    RAISES the leak rate). Two branches, decided by testing `hit` against the loaded framework
+    denylist `_push_label_leak` matched against:
+
+    - a framework hit names the term: there is nothing secret about a named method, and naming
+      it tells the author exactly what to drop.
+    - a frame/trap code hit gets a FIXED generic string that names no code. `label_leak` lowers
+      both the denylist and the code phrases it matches against before comparing, so `hit` is
+      always already lowercase here."""
+    from ..content_loader import load_denylist
+
+    if hit in load_denylist("framework_denylist"):
+        return f'Do not use the term "{hit}" or name any framework.'
+    return "Your previous attempt echoed an internal label. Press the reasoning, never the name."
+
+
 _LOWER = {
     FrameState.present_reasoned: FrameState.present_asserted,
     FrameState.present_asserted: FrameState.absent,
@@ -167,22 +185,38 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
         stress = kind == "frame" and frame_states.get(code) is FrameState.present_reasoned
         probed.add(code)
         rejections_here: list[tuple[int, str, str]] = []
-        push_text = model.generate_push(
-            exp,
-            kind,
-            code,
-            stress=stress,
-            positions=_group_positions(trajectory, kind, code),
-        )
-        leak = _push_label_leak(push_text, exp.rubric)
-        if leak is not None:
-            rejections_here.append((1, PUSH_LABEL_WITH_POSITIONS, leak))
-            push_text = model.generate_push(exp, kind, code, stress=stress)  # blind fallback
-            leak = _push_label_leak(push_text, exp.rubric)
-            if leak is not None:
-                # Pre-existing: today's blind push is unscreened too. Serve it (no regression)
-                # and count it, so the two causes never collapse into one number.
-                rejections_here.append((2, PUSH_LABEL_BLIND, leak))
+        pos = _group_positions(trajectory, kind, code)
+        push_text = model.generate_push(exp, kind, code, stress=stress, positions=pos)
+        blind = not (pos.on_angle or pos.elsewhere)
+        hit = _push_label_leak(push_text, exp.rubric)
+        if hit is not None:
+            # The code is derived from what THIS call actually received, never from the attempt
+            # index. A first push has an empty trajectory, so it is blind in substance, and filing
+            # it as "caused by positions" is the exact conflation the two codes exist to prevent.
+            rejections_here.append(
+                (1, PUSH_LABEL_BLIND if blind else PUSH_LABEL_WITH_POSITIONS, hit)
+            )
+            if not blind:
+                # A blind first call would be re-authored from a byte-identical prompt, so the
+                # retry would be pure resampling at a paid call -- skipped. Only a call that HAD
+                # positions can be meaningfully steered, so the retry keeps them and adds the
+                # steer derived from what leaked. New safety claim (the old "blind fallback"
+                # claim no longer holds): a served push has been screened at least once and at
+                # most twice, and is never served without being counted. That is still no worse
+                # than the pre-branch code, which screened the push zero times.
+                push_text = model.generate_push(
+                    exp,
+                    kind,
+                    code,
+                    stress=stress,
+                    positions=pos,
+                    steer=_label_steer(hit, exp.rubric),
+                )
+                hit = _push_label_leak(push_text, exp.rubric)
+                if hit is not None:
+                    # Stays PUSH_LABEL_BLIND: it now means "a leak that survived a steer", the
+                    # same pre-existing unscreened condition showing through.
+                    rejections_here.append((2, PUSH_LABEL_BLIND, hit))
         push_rejections.extend(rejections_here)
         response = work.respond(push_text)
         rc = model.classify_response(exp, kind, code, push_text, response, stress=stress)
