@@ -832,6 +832,58 @@ def test_push_label_leak_clears_ordinary_pushes_on_real_content():
 
 
 # ---------------------------------------------------------------------------
+# W1: _push_label_leak also screens the push-specific category denylist
+# ---------------------------------------------------------------------------
+
+
+def test_push_label_leak_catches_each_category_phrase():
+    """W1. The seven entries in content/gate/push_category_denylist.yaml each name the angle's
+    CATEGORY rather than pressing it -- push.md's first hard rule forbids naming the frame or its
+    category, and Invariant 6 makes the unlabeled problem the moat. Each push below carries exactly
+    one category phrase and no frame/trap code or framework term, so a hit can only come from the
+    new category scan, not the pre-existing label bar."""
+    from elenchus.assessment.judgment_loop import _push_label_leak
+
+    rubric = _exp().rubric
+    cases = [
+        ("classic case of", "This is a classic case of a promise you cannot afford twice."),
+        ("use the framework", "Go ahead and use the framework you already picked."),
+        ("the right framework", "Are you even sure this is the right framework for it?"),
+        ("which framework", "Which framework are you actually leaning on here?"),
+        ("this is an example of", "This is an example of a boundary you keep re-drawing."),
+        ("think of this as a", "Think of this as a test of what you actually owe them."),
+        ("treat this as a", "Do not treat this as a favor, treat it as a contract term."),
+    ]
+    for phrase, push in cases:
+        assert _push_label_leak(push, rubric) == phrase, push
+
+
+def test_push_label_leak_still_clears_the_two_phrases_left_on_the_scene_path():
+    """W1. 'this is a' and 'apply the' were measured over-broad on push prose (ordinary English in
+    an instructor's push) and were deliberately excluded from push_category_denylist.yaml. They
+    stay on generator.validate_scene's authored-scene path only."""
+    from elenchus.assessment.judgment_loop import _push_label_leak
+
+    rubric = _exp().rubric
+    assert _push_label_leak("This is a real account with a real renewal at stake.", rubric) is None
+    assert _push_label_leak("Go ahead and apply the same logic here.", rubric) is None
+
+
+def test_push_label_leak_label_bar_wins_over_category_bar_on_a_tie():
+    """W1. A push leaking BOTH a frame code and a category phrase must return the frame code: the
+    label bar runs first and wins the tie, because a leaked frame code is the more serious finding
+    and the one the ledger most needs to distinguish."""
+    from elenchus.assessment.judgment_loop import _push_label_leak
+
+    rubric = _exp().rubric
+    push = (
+        "You keep circling protect_the_core_lane -- isn't this just a classic case of "
+        "avoiding the real tradeoff?"
+    )
+    assert _push_label_leak(push, rubric) == "protect_the_core_lane"
+
+
+# ---------------------------------------------------------------------------
 # R3: the steer never contains a frame or trap code
 # ---------------------------------------------------------------------------
 

@@ -1,0 +1,11 @@
+# Category-cueing phrases that name the angle's TYPE rather than pressing it. push.md's first hard
+# rule forbids naming the frame or its category, and Invariant 6 makes the unlabeled problem the moat.
+# Deliberately EXCLUDES scaffold_denylist's 'this is a' and 'apply the': both are ordinary English in
+# instructor prose and were measured over-broad on push text. They remain on the authored-scene path.
+- classic case of
+- use the framework
+- the right framework
+- which framework
+- this is an example of
+- think of this as a
+- treat this as a

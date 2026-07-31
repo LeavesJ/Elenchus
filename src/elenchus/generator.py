@@ -57,6 +57,20 @@ def _frame_trap_phrases(rubric: Rubric) -> list[str]:
     return phrases
 
 
+def phrase_leak(text: str, phrases: list[str]) -> str | None:
+    """The first phrase present in `text` as a whole phrase, or None.
+
+    Exists because two callers need the same strip-and-scan over different phrase lists: label_leak,
+    which scans the framework denylist plus this rubric's frame and trap codes, and
+    judgment_loop._push_label_leak, which additionally scans the push category denylist. Returns the
+    matched phrase so a caller can put it in the ledger."""
+    text_lc = _strip_emphasis(text).lower()
+    for phrase in phrases:
+        if _contains_phrase(text_lc, phrase):
+            return phrase
+    return None
+
+
 def label_leak(text: str, rubric: Rubric, framework_denylist: list[str]) -> str | None:
     """The label bar alone: a named framework, or a frame/trap code in snake or spaced form.
 
@@ -71,11 +85,8 @@ def label_leak(text: str, rubric: Rubric, framework_denylist: list[str]) -> str 
     plus the scaffold and wrapper bars) rejects 5 of 12, this bar alone rejects 0 of 12, and this
     bar still catches all three real cases (a named framework, a snake frame code, a spaced frame
     code)."""
-    text_lc = _strip_emphasis(text).lower()
-    for phrase in [t.lower() for t in framework_denylist] + _frame_trap_phrases(rubric):
-        if _contains_phrase(text_lc, phrase):
-            return phrase
-    return None
+    phrases = [t.lower() for t in framework_denylist] + _frame_trap_phrases(rubric)
+    return phrase_leak(text, phrases)
 
 
 def validate_scene(

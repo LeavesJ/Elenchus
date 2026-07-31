@@ -60,29 +60,42 @@ def _group_positions(trajectory: list[Push], kind: str, code: str) -> Positions:
 
 
 def _push_label_leak(push: str, rubric) -> str | None:
-    """The label bar ALONE: a named framework, or a frame/trap code in snake or spaced form.
-    Returns the matched phrase (so a caller can put it in the ledger), or None.
+    """The label bar, plus the push-specific category denylist: a named framework, a frame/trap
+    code in snake or spaced form, or one of the seven category-cueing phrases in
+    content/gate/push_category_denylist.yaml ('classic case of', 'use the framework', 'the right
+    framework', 'which framework', 'this is an example of', 'think of this as a', 'treat this as
+    a'). The label bar is checked first and wins any tie, because a leaked frame code is the more
+    serious finding and the one the ledger most needs to distinguish. Returns the matched phrase
+    (so a caller can put it in the ledger), or None.
 
-    Deliberately NOT `generator.validate_scene`'s full bar. That bar adds the scaffold denylist
-    ('this is a', 'classic case of', ...) and WRAPPER_WORDS ('points', 'timer', 'reward', ...,
-    matched as bare substrings) on top of the label check -- both calibrated against AUTHORED
-    SCENE prompts, where a type-hint cues the problem category and a wrapper word means cosmetic
+    Still deliberately NOT `generator.validate_scene`'s full bar. That bar also carries the
+    REMAINING two scaffold_denylist entries ('this is a', 'apply the') and WRAPPER_WORDS ('points',
+    'timer', 'reward', ..., matched as bare substrings) -- all calibrated against AUTHORED SCENE
+    prompts, where a type-hint cues the problem category and a wrapper word means cosmetic
     gamification. A push is a different distribution: ordinary instructor prose, where "at several
     points" or "this is a real account" are unremarkable English. Per Invariant 7 (a safety
-    property is a property of gate times distribution), that calibration does not transfer. Measured
-    against the twelve-push corpus in
+    property is a property of gate times distribution), that calibration does not transfer, so
+    those two scaffold entries and WRAPPER_WORDS as a whole stay off the push path. The seven
+    category phrases DO travel with the push regardless of distribution: push.md's first hard rule
+    forbids naming the frame or its category, and Invariant 6 makes the unlabeled problem the moat,
+    so a phrase that states the angle's type is a real leak on either distribution. The T2 review
+    that adjudicated this addition measured all seven at 0 of 50 independently written instructor
+    pushes (that corpus is not reproduced in this repo). Measured against the twelve-push corpus in
     tests/test_judgment_loop.py::test_push_label_leak_clears_ordinary_pushes_on_real_content, run
-    against the real rubric content/rubrics/license_continuity.yaml: the full bar rejects 5 of 12
-    ordinary instructor pushes; the label bar alone rejects 0 of 12 and still catches a named
+    against the real rubric content/rubrics/license_continuity.yaml: the full validate_scene bar
+    rejects 5 of 12 ordinary instructor pushes; this bar rejects 0 of 12 and still catches a named
     framework, a snake frame code, and a spaced frame code.
 
     Screens the OUTPUT rather than sanitising the input: stripping labels from the learner's
     positions would destroy signal, because a learner naming a frame is itself information the
     loop should be able to press."""
     from ..content_loader import load_denylist
-    from ..generator import label_leak
+    from ..generator import label_leak, phrase_leak
 
-    return label_leak(push, rubric, load_denylist("framework_denylist"))
+    hit = label_leak(push, rubric, load_denylist("framework_denylist"))
+    if hit is not None:
+        return hit
+    return phrase_leak(push, load_denylist("push_category_denylist"))
 
 
 def _label_steer(hit: str, rubric) -> str:

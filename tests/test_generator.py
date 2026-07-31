@@ -335,6 +335,20 @@ def test_label_leak_returns_the_matched_phrase_or_none():
     assert label_leak("A same-day call forces a real trade-off.", rubric, fw) is None
 
 
+def test_phrase_leak_returns_the_first_match_in_LIST_order_not_text_order():
+    """W1. `phrase_leak` is the extracted strip-lower-scan `label_leak` now delegates to, and
+    `_push_label_leak` also scans the push category denylist through it. Both phrases below are
+    present in the text, and 'use the framework' appears EARLIER in the text than 'classic case
+    of' -- so if this returned by text position it would pick 'use the framework' regardless of
+    list order. Flipping the list order and getting the flipped answer proves the scan follows
+    the list, not the text."""
+    from elenchus.generator import phrase_leak
+
+    text = "Go ahead and use the framework here -- this is a classic case of scope creep."
+    assert phrase_leak(text, ["classic case of", "use the framework"]) == "classic case of"
+    assert phrase_leak(text, ["use the framework", "classic case of"]) == "use the framework"
+
+
 def test_validate_scene_passes_clean_and_rejects_leaks():
     from elenchus.generator import GateError, validate_scene
     from elenchus.types import Scene
