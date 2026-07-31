@@ -33,7 +33,7 @@ def _cap(text: str) -> str:
     return (head[: stop + 1] if stop > 0 else head.rstrip()) + "…[trimmed]"
 
 
-def _group_positions(trajectory, kind: str, code: str) -> Positions:
+def _group_positions(trajectory: list[Push], kind: str, code: str) -> Positions:
     """The learner's own words, split by whether they were argued on the angle being pressed.
 
     Keyed on the FULL (kind, code) target. Codes are unique across kinds today by accident, not

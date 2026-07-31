@@ -5,6 +5,7 @@ from elenchus.types import (
     Frame,
     FrameState,
     Mode,
+    Positions,
     Rubric,
     Regime,
     StopReason,
@@ -510,3 +511,119 @@ def test_a_short_position_is_returned_untouched():
     from elenchus.assessment.judgment_loop import _cap
 
     assert _cap("Short answer.") == "Short answer."
+
+
+# ---------------------------------------------------------------------------
+# Opus review fixes on Task 3 (positions=_group_positions(...) wiring + edges)
+# ---------------------------------------------------------------------------
+
+
+class _RecordingPushModel(FakeModel):
+    """FakeModel that also records the Positions passed to each generate_push call, in call
+    order. Named for reuse: a later task needs a model that both records positions and returns
+    scripted push text, and can subclass this instead of duplicating the FakeModel wiring."""
+
+    def __init__(self, intake, responses, grades=None, sharper_verdicts=None):
+        super().__init__(intake, responses, grades, sharper_verdicts)
+        self.recorded_positions: list[Positions] = []
+
+    def generate_push(self, exp, kind, code, *, stress=False, positions=Positions()):
+        self.recorded_positions.append(positions)
+        return super().generate_push(exp, kind, code, stress=stress, positions=positions)
+
+
+def test_generate_push_receives_a_prior_pushes_own_words_through_assess():
+    """Finding 1 (Opus review): `positions=_group_positions(trajectory, kind, code)` at the push
+    site had no assertion that goes through `assess` — deleting it silently reverts every push to
+    a default Positions() and the offline suite stayed green. Drives `assess` (never calls
+    `_group_positions` directly) and pins that a LATER push's `positions` argument carries an
+    EARLIER push's raw response text.
+
+    Under `_select_target`'s exhausted/probed bookkeeping, a (kind, code) target is pushed at
+    most once per `assess` run (closed -> present_reasoned skips it; anything else -> exhausted
+    skips it; regressed/hard_wrong stop the loop outright), so the real target sequence never
+    revisits a target. The reachable case is `elsewhere` (a later push on a DIFFERENT target
+    carries the earlier push's response) — this is that case, asserted against the literal
+    scripted response string, never against a value obtained by calling `_group_positions`.
+    """
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.absent,
+            "protect_the_core_lane": FrameState.absent,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+        },
+    )
+    scripted_responses = iter(
+        ["first take: the boundary is non-negotiable", "second take: locked in"]
+    )
+    work = Work(opening="here is my reasoning", respond=lambda push: next(scripted_responses))
+    m = _RecordingPushModel(
+        intake,
+        {
+            "lead_with_what_you_refuse_to_do": [
+                ResponseClassification(
+                    outcome="unchanged", mechanism_supplied=False, hard_wrong=False
+                )
+            ],
+            "protect_the_core_lane": [
+                ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+            ],
+        },
+    )
+    a = judgment_loop.assess(_exp(), work, m)
+
+    # the real target sequence this rubric+intake produces: two distinct frame targets
+    assert [p.target_code for p in a.trajectory] == [
+        "lead_with_what_you_refuse_to_do",
+        "protect_the_core_lane",
+    ]
+    assert len(m.recorded_positions) == 2
+    # push 1: nothing has been said yet in this sitting
+    assert m.recorded_positions[0] == Positions()
+    # push 2 targets a DIFFERENT (kind, code) than push 1 -> push 1's response lands in
+    # `elsewhere`, never `on_angle`
+    assert m.recorded_positions[1].on_angle == ()
+    assert m.recorded_positions[1].elsewhere == ("first take: the boundary is non-negotiable",)
+
+
+def test_cap_no_terminator_falls_back_to_rstripped_head():
+    """Finding 2: 1200+ characters with no '.', '?', or '!' anywhere in the first _POSITION_CAP
+    characters gives stop == -1, the head.rstrip() + marker branch. Pins that the head is
+    right-stripped before the marker is appended, not left with trailing whitespace."""
+    from elenchus.assessment.judgment_loop import _POSITION_CAP, _cap
+
+    head_no_terminator = "a" * (_POSITION_CAP - 5) + " " * 5  # exactly _POSITION_CAP chars
+    text = head_no_terminator + "b" * 50
+    assert _cap(text) == "a" * (_POSITION_CAP - 5) + "…[trimmed]"
+
+
+def test_cap_lone_leading_terminator_does_not_truncate_to_one_character():
+    """Finding 2 / repo doctrine: a '.' at head[0] and nowhere else in the first _POSITION_CAP
+    characters gives stop == 0. `stop > 0` (not `stop >= 0`) is deliberate: truncating to that
+    lone leading terminator would hand back a one-character position, worse than a mid-clause
+    cut. Pins the `> 0` boundary against a `>= 0` mutation."""
+    from elenchus.assessment.judgment_loop import _POSITION_CAP, _cap
+
+    text = "." + "a" * (_POSITION_CAP - 1) + "b" * 50  # exactly _POSITION_CAP chars in head
+    assert _cap(text) == "." + "a" * (_POSITION_CAP - 1) + "…[trimmed]"
+
+
+def test_cap_exact_boundary_length_is_returned_untouched():
+    """Finding 3: a text of exactly _POSITION_CAP characters must be returned untouched. The
+    only existing short-input test uses a 13-character string, which does not distinguish `<=`
+    from `<` at the boundary."""
+    from elenchus.assessment.judgment_loop import _POSITION_CAP, _cap
+
+    text = "x" * _POSITION_CAP
+    assert _cap(text) == text
+
+
+def test_group_positions_on_an_empty_trajectory():
+    """Finding 4: an empty trajectory is the state of the very first push in every real
+    session -- the most-executed input this function has. Pins Positions((), ())."""
+    from elenchus.assessment.judgment_loop import _group_positions
+
+    assert _group_positions([], "frame", "any_code") == Positions()
