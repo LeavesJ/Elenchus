@@ -2620,7 +2620,16 @@ def test_a_leaked_push_writes_a_real_gate_rejection_row(tmp_path, make_fake):
 
     R3: the FIRST push of a fresh session has an empty trajectory, so it is blind in substance --
     the leak here must file PUSH_LABEL_BLIND, never PUSH_LABEL_WITH_POSITIONS (that code is
-    reserved for a call that actually carried positions)."""
+    reserved for a call that actually carried positions).
+
+    R5 (5b): mirrors the sibling test_a_forge_rejection_writes_real_gate_rejection_rows -- selects
+    sitting_id, attempt, code, detail ordered by attempt and compares against a literal tuple,
+    never truthiness of an unscoped `code` column. `web_gate_rejection` carries no foreign key and
+    SQLite `foreign_keys` is off, so a hardcoded WRONG sitting id at the persist site would insert
+    an orphan row that a bare `assert rows` still finds. Leaks a named framework term ("swot",
+    from content/gate/framework_denylist.yaml) rather than embedding the dynamically selected
+    target code, so the expected `detail` is a literal known ahead of time, never a value obtained
+    by calling the code under test."""
     import sqlite3
 
     from elenchus.assessment.judgment_loop import PUSH_LABEL_BLIND
@@ -2632,7 +2641,7 @@ def test_a_leaked_push_writes_a_real_gate_rejection_row(tmp_path, make_fake):
         def push(exp, kind, code, *, stress=False, positions=None, steer=""):
             if first:
                 first.pop()
-                return f"you are ignoring {code} here"  # leaks a literal frame code
+                return "cite the SWOT framework here"  # leaks a named framework, not a frame code
             return "[clean push]"
 
         m.generate_push = push
@@ -2644,12 +2653,84 @@ def test_a_leaked_push_writes_a_real_gate_rejection_row(tmp_path, make_fake):
     tag, _ = _drive(reg, "s1", opening="here is my reasoning")
     assert tag == "done"
 
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+
     c = sqlite3.connect(db)
     rows = c.execute(
-        "select code from web_gate_rejection where code = ?", (PUSH_LABEL_BLIND,)
+        "select sitting_id, attempt, code, detail from web_gate_rejection "
+        "where sitting_id=? order by attempt",
+        (sit,),
     ).fetchall()
     c.close()
-    assert rows, "a leaked push must persist a countable rejection, not just a log line"
+    assert rows == [(sit, 1, PUSH_LABEL_BLIND, "swot")]
+
+
+def test_a_second_attempt_leak_writes_the_push_label_blind_row(tmp_path, make_fake):
+    """R5 (5c). The sibling above covers a FIRST-push leak, which files PUSH_LABEL_BLIND at
+    attempt 1 and skips the retry (R3: a blind call is never steered, so there is no attempt 2).
+    That leaves the OTHER producer of PUSH_LABEL_BLIND uncovered: a leak that SURVIVES the steered
+    retry, which files PUSH_LABEL_BLIND at attempt 2 -- reachable only when the initiating push
+    carried positions (judgment_loop.assess only retries a non-blind leak).
+
+    Drives push 1 clean so it never rejects, which leaves push 1's response in push 2's
+    Positions -- push 2 is therefore NOT blind, and its leak on the first attempt must file
+    PUSH_LABEL_WITH_POSITIONS. Push 2's steered retry ALSO leaks, which stays PUSH_LABEL_BLIND
+    (a leak surviving a steer is the pre-existing unscreened condition showing through, not a
+    new cost). All pushes after push 2 stay clean, so exactly two rows exist for these two codes
+    and the literal-tuple comparison below is not incidentally satisfied by unrelated leaks.
+
+    Leaks a named framework term ("swot") rather than the dynamically selected target code, same
+    as the sibling above, so both expected `detail` values are literals, never values obtained by
+    calling the code under test. Reaches through the real web path (SessionRegistry -> assess ->
+    session_runner's persist loop -> SQLite), never a hand-built Assessment.
+
+    `_open_world`'s default territory (`continuity_lock_in`) has exactly ONE frame and no
+    tripped traps, so it converges after a single push -- there is no push 2 to leak on. Steers
+    `map_territories` (same technique as `_arm_steer`) to rank `decision_under_stakes` (_T2, two
+    frames, no binding constraint) first instead, so a genuine push 2 exists."""
+    import sqlite3
+
+    from elenchus.assessment.judgment_loop import PUSH_LABEL_BLIND, PUSH_LABEL_WITH_POSITIONS
+
+    def factory():
+        m = _world_factory(make_fake)()
+        m.map_territories = lambda situation, territories: TerritoryMap(
+            ranked=[_T2] + [e for e, _ in territories if e != _T2],
+            confidence="high",
+            reflection="[reflect]",
+        )
+        calls = {"n": 0}
+
+        def push(exp, kind, code, *, stress=False, positions=None, steer=""):
+            calls["n"] += 1
+            if calls["n"] in (2, 3):  # push 2's first attempt AND its steered retry leak
+                return "cite the SWOT framework here"
+            return "[clean push]"  # push 1, and every push after push 2, stay clean
+
+        m.generate_push = push
+        return m
+
+    db = str(tmp_path / "push-leak-attempt2.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    _open_world(reg)
+    tag, _ = _drive(reg, "s1", opening="here is my reasoning")
+    assert tag == "done"
+
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+
+    c = sqlite3.connect(db)
+    rows = c.execute(
+        "select sitting_id, attempt, code, detail from web_gate_rejection "
+        "where sitting_id=? and code in (?, ?) order by attempt",
+        (sit, PUSH_LABEL_WITH_POSITIONS, PUSH_LABEL_BLIND),
+    ).fetchall()
+    c.close()
+    assert rows == [
+        (sit, 1, PUSH_LABEL_WITH_POSITIONS, "swot"),
+        (sit, 2, PUSH_LABEL_BLIND, "swot"),
+    ]
 
 
 def test_level_steps_one_per_move_and_snaps_back(tmp_path, make_fake):
