@@ -411,3 +411,25 @@ def test_territory_map_defaults_are_decision_and_empty_conversion():
     tm = TerritoryMap(ranked=["a"], confidence="high", reflection="r")
     assert tm.verdict == "decision"
     assert tm.conversion == ""
+
+
+def test_positions_defaults_to_two_empty_groups():
+    """Spec §4.1: a default-constructed Positions is both groups empty, which is the fallback
+    path and the byte-stability guarantee."""
+    from elenchus.types import Positions
+
+    p = Positions()
+    assert p.on_angle == ()
+    assert p.elsewhere == ()
+
+
+def test_positions_fields_are_named_not_positional():
+    """Spec §4.2: a positional pair puts 'which group is which' in an index, and a swap at BOTH
+    the call site and the composition site cancels out and passes a naive test. Named fields make
+    the swap unrepresentable."""
+    from elenchus.types import Positions
+
+    p = Positions(on_angle=("a",), elsewhere=("b",))
+    assert p.on_angle == ("a",)
+    assert p.elsewhere == ("b",)
+    assert p._fields == ("on_angle", "elsewhere")

@@ -393,3 +393,20 @@ def test_map_territories_instruction_carries_the_conversion_doctrine():
     assert "`conversion`" in sys
     assert "never answers her question" in sys
     assert "out of scope" in sys  # the instruction FORBIDS it by naming it
+
+
+def test_generate_push_with_empty_positions_is_byte_identical_to_no_positions():
+    """Spec §6 byte-stability: the regression guard for every existing caller, including the 10
+    in tests/test_voice_live.py that will keep passing no positions."""
+    from elenchus.types import Positions
+
+    c1 = _Client(create_result=_Resp(content=[_TextBlock("[push]")]))
+    AnthropicModel(client=c1).generate_push(_exp(), "frame", "protect_the_core_lane")
+    c2 = _Client(create_result=_Resp(content=[_TextBlock("[push]")]))
+    AnthropicModel(client=c2).generate_push(
+        _exp(), "frame", "protect_the_core_lane", positions=Positions()
+    )
+    call1 = c1.messages.create_calls[0]
+    call2 = c2.messages.create_calls[0]
+    assert call1["messages"] == call2["messages"]
+    assert call1["system"] == call2["system"]

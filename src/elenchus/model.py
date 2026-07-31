@@ -19,6 +19,7 @@ from .types import (
     FrameState,
     GeneratedOutput,
     InjectionExpressed,
+    Positions,
     PreferenceRating,
     SharperVerdict,
     TerritoryMap,
@@ -45,7 +46,13 @@ class ResponseClassification(BaseModel):
 class Model(Protocol):
     def classify_intake(self, exp: Experience, opening: str) -> IntakeClassification: ...
     def generate_push(
-        self, exp: Experience, kind: str, code: str, *, stress: bool = False
+        self,
+        exp: Experience,
+        kind: str,
+        code: str,
+        *,
+        stress: bool = False,
+        positions: Positions = Positions(),
     ) -> str: ...
     def classify_response(
         self,
@@ -134,7 +141,15 @@ class FakeModel:
     def classify_intake(self, exp: Experience, opening: str) -> IntakeClassification:
         return self._intake
 
-    def generate_push(self, exp: Experience, kind: str, code: str, *, stress: bool = False) -> str:
+    def generate_push(
+        self,
+        exp: Experience,
+        kind: str,
+        code: str,
+        *,
+        stress: bool = False,
+        positions: Positions = Positions(),
+    ) -> str:
         return f"[push:{kind}]"
 
     def classify_response(
@@ -422,7 +437,15 @@ class AnthropicModel:
                 trap_states[item.code] = item.state
         return IntakeClassification(frame_states=frame_states, trap_states=trap_states)
 
-    def generate_push(self, exp: Experience, kind: str, code: str, *, stress: bool = False) -> str:
+    def generate_push(
+        self,
+        exp: Experience,
+        kind: str,
+        code: str,
+        *,
+        stress: bool = False,
+        positions: Positions = Positions(),
+    ) -> str:
         detail = _target_detail(exp.rubric, kind, code)
         prefix = f"Situation:\n{exp.scene.situation}\n\n" if getattr(exp, "scene", None) else ""
         user = f"{prefix}Experience:\n{exp.prompt}\n\nAngle to push on:\n{detail}"

@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
@@ -193,6 +193,20 @@ class GateResult(BaseModel):
     rejects: list[GateCode]
     downgrades: list[GateCode]
     angle_count: int
+
+
+class Positions(NamedTuple):
+    """The learner's own words, handed to the push author (spec 2026-07-30 §4.2).
+
+    Two groups, because visibility without addressability does not deliver the claim:
+    `push_stress.md` forbids making the student restate what they already argued ABOUT THIS
+    ANGLE, and a flat list spanning several angles leaves the author guessing which position
+    that was. NAMED fields rather than a positional pair — a swap at both the call site and the
+    composition site cancels out and passes a naive test, and this rides a Protocol across
+    three implementations."""
+
+    on_angle: tuple[str, ...] = ()
+    elsewhere: tuple[str, ...] = ()
 
 
 class Push(BaseModel):
