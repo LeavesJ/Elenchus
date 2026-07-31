@@ -7,6 +7,7 @@ from ..types import (
     FrameDelta,
     FrameState,
     Mode,
+    Positions,
     Push,
     StopReason,
     TrapState,
@@ -15,6 +16,40 @@ from ..types import (
 from .sharper_grader import audit_sharper
 
 MAX_PUSHES = 8  # >= the 8-angle depth floor; budget-only (loop still pushes frames/traps — Step 5 probes dims)
+
+_POSITION_CAP = 1200  # characters per position; worst case 8 x 1200 = 9600 of learner text
+
+
+def _cap(text: str) -> str:
+    """Truncate at the last sentence boundary under the cap, marking the elision.
+
+    A mid-clause cut hands the push author a position that appears to end where the learner
+    stopped talking, and the author then presses the trailing thought — an artifact of our cap
+    rather than anything the learner argued. Deterministic; no model call."""
+    if len(text) <= _POSITION_CAP:
+        return text
+    head = text[:_POSITION_CAP]
+    stop = max(head.rfind("."), head.rfind("?"), head.rfind("!"))
+    return (head[: stop + 1] if stop > 0 else head.rstrip()) + "…[trimmed]"
+
+
+def _group_positions(trajectory, kind: str, code: str) -> Positions:
+    """The learner's own words, split by whether they were argued on the angle being pressed.
+
+    Keyed on the FULL (kind, code) target. Codes are unique across kinds today by accident, not
+    by enforcement, and the rubric bank grows by hand — a trap code matching a frame code would
+    put a trap position in `on_angle` and tell the stress author it was the reasoned engagement
+    with this angle. Silently.
+
+    `response_classification` is deliberately NOT read: a push author that knows the grader
+    called your last reply a deflection is one step from scolding you."""
+    here, there = [], []
+    for p in trajectory:
+        if not p.response:
+            continue
+        (here if (p.kind, p.target_code) == (kind, code) else there).append(_cap(p.response))
+    return Positions(on_angle=tuple(here), elsewhere=tuple(there))
+
 
 _LOWER = {
     FrameState.present_reasoned: FrameState.present_asserted,
@@ -103,7 +138,13 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
 
         stress = kind == "frame" and frame_states.get(code) is FrameState.present_reasoned
         probed.add(code)
-        push_text = model.generate_push(exp, kind, code, stress=stress)
+        push_text = model.generate_push(
+            exp,
+            kind,
+            code,
+            stress=stress,
+            positions=_group_positions(trajectory, kind, code),
+        )
         response = work.respond(push_text)
         rc = model.classify_response(exp, kind, code, push_text, response, stress=stress)
 

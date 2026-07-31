@@ -436,3 +436,77 @@ def test_regressed_under_stress_probe_excluded_from_reasoned_unprompted():
     assert a.stop_reason is StopReason.regression
     # Regressed frame dropped from final state — excluded by the final-state guard.
     assert "commit_under_the_deadline" not in a.reasoned_unprompted
+
+
+def test_positions_are_grouped_on_the_FULL_target_key():
+    """Spec §4.2. A target is (kind, code) everywhere else in the system. Frame and trap codes
+    do not collide today (5 frame, 8 trap, zero overlap) and NOTHING enforces that, while the
+    rubric bank is designed to grow by hand. A trap position landing in on_angle would tell the
+    stress author it was the reasoned engagement with the angle being pressed."""
+    from elenchus.assessment.judgment_loop import _group_positions
+    from elenchus.types import Push
+
+    traj = [
+        Push(
+            target_code="shared",
+            kind="frame",
+            text="p",
+            response_classification="closed",
+            response="FRAME POSITION",
+        ),
+        Push(
+            target_code="shared",
+            kind="trap",
+            text="p",
+            response_classification="closed",
+            response="TRAP POSITION",
+        ),
+    ]
+    grouped = _group_positions(traj, "frame", "shared")
+    assert grouped.on_angle == ("FRAME POSITION",)
+    assert grouped.elsewhere == ("TRAP POSITION",)
+
+
+def test_no_classification_value_reaches_the_groups():
+    """Spec §6. Tested with SENTINELS, not the real vocabulary: `closed` / `unchanged` /
+    `regressed` are ordinary English and asserting their absence would false-positive the moment
+    a learner writes 'I closed the round'."""
+    from elenchus.assessment.judgment_loop import _group_positions
+    from elenchus.types import Push
+
+    traj = [
+        Push(
+            target_code="c",
+            kind="frame",
+            text="p",
+            response_classification="ZZSENTINELVERDICTZZ",
+            response="my words",
+        ),
+    ]
+    grouped = _group_positions(traj, "frame", "c")
+    assert "ZZSENTINELVERDICTZZ" not in "".join(grouped.on_angle + grouped.elsewhere)
+
+
+def test_positions_are_capped_at_a_sentence_boundary_with_the_elision_marked():
+    """Spec §4.2. A mid-clause cut hands the author a position that appears to end where the
+    learner stopped talking; the author then presses a trailing thought that is an artifact of
+    our cap."""
+    from elenchus.assessment.judgment_loop import _POSITION_CAP, _cap
+
+    marker = "…[trimmed]"
+    long = ("First sentence here. " * 200).strip()
+    out = _cap(long)
+
+    # The exact boundary, derived from the fixture's own structure: 21 characters per sentence,
+    # so the last one ending under the cap ends at index 1195. Never from calling _cap.
+    assert out == "First sentence here. " * 56 + "First sentence here." + marker
+    assert len(out) <= _POSITION_CAP + len(marker)
+    assert out.endswith(marker)
+    assert out[: -len(marker)].endswith(".")
+    assert long.startswith(out[: -len(marker)])  # a prefix of the input, not a rewrite
+
+
+def test_a_short_position_is_returned_untouched():
+    from elenchus.assessment.judgment_loop import _cap
+
+    assert _cap("Short answer.") == "Short answer."
