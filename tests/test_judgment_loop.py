@@ -670,13 +670,15 @@ def _one_frame_intake():
     )
 
 
-def test_a_leaked_first_push_is_blind_and_the_retry_is_skipped():
-    """R3 (defect 1 + 2). A first push has an empty trajectory -> Positions() -> blind IN
-    SUBSTANCE, not by attempt index. The code is derived from what THIS call actually received,
-    so a leak here files PUSH_LABEL_BLIND, never PUSH_LABEL_WITH_POSITIONS. And a blind call gets
-    NO retry: re-authoring from a byte-identical prompt would be pure resampling at a paid call
-    (defect 3). The leaked push is served anyway and counted -- a served push has been screened
-    at least once and at most twice, and is never served without being counted."""
+def test_a_leaked_first_push_is_blind_and_still_gets_a_steered_retry():
+    """W2. A first push has an empty trajectory -> Positions() -> blind IN SUBSTANCE, not by
+    attempt index. `blind` still decides which rejection code attempt 1 is filed under: the code
+    is derived from what THIS call actually received, so a leak here files PUSH_LABEL_BLIND, never
+    PUSH_LABEL_WITH_POSITIONS. But `blind` no longer skips the retry -- the founder adjudicated
+    that the retry runs unconditionally, because `_label_steer` derives the steer from the LEAK
+    (the matched phrase), never from `positions`, so a blind call's re-authored prompt is
+    materially different from the one that just leaked. Not a resample. The re-authored text is
+    what gets served, never the leaked one."""
     from elenchus.assessment.judgment_loop import PUSH_LABEL_BLIND
 
     def closed():
@@ -685,19 +687,79 @@ def test_a_leaked_first_push_is_blind_and_the_retry_is_skipped():
     m = _ScriptedPushModel(
         _one_frame_intake(),
         {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()},
-        # push 1 (empty trajectory, blind) leaks a literal frame code; push 2 is clean
-        pushes=["you are ignoring protect_the_core_lane here", "[clean push]"],
+        # push 1 (empty trajectory, blind) leaks a literal frame code on attempt 1; the steered
+        # retry is clean; push 2 is clean on its first attempt
+        pushes=["you are ignoring protect_the_core_lane here", "[clean retry]", "[clean push]"],
     )
     a = judgment_loop.assess(_exp(), _work(), m)
 
-    assert len(m.seen) == 2  # ONE call for push 1 (no retry) + one for push 2, never three
-    assert m.seen[0] == Positions()  # push 1 really is blind
-    assert m.steers[0] == ""  # a blind call is never steered -- there is nothing to steer with
-    # the leaked text is served VERBATIM: no retry, no re-authoring
-    assert a.trajectory[0].text == "you are ignoring protect_the_core_lane here"
+    assert len(m.seen) == 3  # push 1's attempt 1 + its steered retry, then push 2's one call
+    assert m.seen[0] == Positions()  # attempt 1 really is blind
+    assert m.steers[0] == ""  # the first attempt at any target is never pre-emptively steered
+    assert m.seen[1] == Positions()  # the retry is still blind -- there is nothing to keep
+    assert m.steers[1] == (
+        "Your previous attempt echoed an internal label. Press the reasoning, never the name."
+    )
+    # the RE-AUTHORED text is served, never the leaked one
+    assert a.trajectory[0].text == "[clean retry]"
     codes = [c for _, c, _ in a.push_rejections]
-    assert codes == [PUSH_LABEL_BLIND]
+    assert codes == [PUSH_LABEL_BLIND]  # attempt 1 only -- the retry was clean, no second row
     assert a.push_rejections[0][0] == 1  # attempt 1
+
+
+def test_a_blind_first_push_whose_retry_also_leaks_serves_anyway():
+    """W2. If the steered retry on a blind first push ALSO leaks, attempt 2 stays
+    PUSH_LABEL_BLIND -- the same convention the non-blind path already uses in
+    test_a_second_leak_serves_anyway_with_a_DIFFERENT_code, meaning "a leak that survived a
+    steer" rather than "caused by positions". The loop serves the retried text anyway: no
+    exception reaches the learner, no dead end."""
+    from elenchus.assessment.judgment_loop import PUSH_LABEL_BLIND
+
+    def closed():
+        return [ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)]
+
+    leaky_retry = "you keep circling protect_the_core_lane without saying what it costs you"
+    m = _ScriptedPushModel(
+        _one_frame_intake(),
+        {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()},
+        # push 1's BOTH attempts leak; push 2 is clean
+        pushes=["you are ignoring protect_the_core_lane here", leaky_retry, "[clean push]"],
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+
+    assert a.trajectory[0].text == leaky_retry  # served anyway: no raise, no dead end
+    codes = [c for _, c, _ in a.push_rejections]
+    attempts = [attempt for attempt, _, _ in a.push_rejections]
+    assert codes[:2] == [PUSH_LABEL_BLIND, PUSH_LABEL_BLIND]
+    assert attempts[:2] == [1, 2]
+
+
+def test_paid_call_count_on_a_clean_sitting_is_unchanged():
+    """W2. The retry fires only after a leak -- a sitting where nothing ever leaks must still
+    cost exactly one generate_push call per target, same as before this change. Guards against a
+    mutant that makes the retry fire unconditionally rather than only on `hit is not None`."""
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.absent,
+            "protect_the_core_lane": FrameState.absent,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+        },
+    )
+
+    def closed():
+        return [ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)]
+
+    m = _RecordingPushModel(
+        intake, {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()}
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+
+    assert a.stop_reason is StopReason.converged
+    assert len(m.recorded_positions) == 2  # one call per target, no retries
+    assert a.push_rejections == ()
 
 
 def test_a_leaked_push_with_positions_retries_steered_with_positions_kept():
