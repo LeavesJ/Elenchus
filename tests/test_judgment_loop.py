@@ -675,10 +675,18 @@ def test_a_leaked_first_push_is_blind_and_still_gets_a_steered_retry():
     attempt index. `blind` still decides which rejection code attempt 1 is filed under: the code
     is derived from what THIS call actually received, so a leak here files PUSH_LABEL_BLIND, never
     PUSH_LABEL_WITH_POSITIONS. But `blind` no longer skips the retry -- the founder adjudicated
-    that the retry runs unconditionally, because `_label_steer` derives the steer from the LEAK
-    (the matched phrase), never from `positions`, so a blind call's re-authored prompt is
-    materially different from the one that just leaked. Not a resample. The re-authored text is
-    what gets served, never the leaked one."""
+    that the retry runs unconditionally, because `_label_steer` derives the steer from the LEAK,
+    never from `positions`, so a blind call's re-authored prompt is materially different from the
+    one that just leaked. Not a resample. The re-authored text is what gets served, never the
+    leaked one.
+
+    Does not assert `m.seen[1] == Positions()` on the retry call: on a blind push `pos` is already
+    Positions(), and `generate_push`'s own default is also Positions(), so that assertion cannot
+    tell `positions=pos` being passed from the keyword being dropped entirely -- both produce the
+    identical value. The retry actually KEEPING the caller's positions is covered where the two
+    cases can be told apart:
+    test_a_leaked_push_with_positions_retries_steered_with_positions_kept, on a push that carries
+    real positions."""
     from elenchus.assessment.judgment_loop import PUSH_LABEL_BLIND
 
     def closed():
@@ -696,7 +704,6 @@ def test_a_leaked_first_push_is_blind_and_still_gets_a_steered_retry():
     assert len(m.seen) == 3  # push 1's attempt 1 + its steered retry, then push 2's one call
     assert m.seen[0] == Positions()  # attempt 1 really is blind
     assert m.steers[0] == ""  # the first attempt at any target is never pre-emptively steered
-    assert m.seen[1] == Positions()  # the retry is still blind -- there is nothing to keep
     assert m.steers[1] == (
         "Your previous attempt echoed an internal label. Press the reasoning, never the name."
     )
@@ -730,30 +737,21 @@ def test_a_blind_first_push_whose_retry_also_leaks_serves_anyway():
     assert a.trajectory[0].text == leaky_retry  # served anyway: no raise, no dead end
     codes = [c for _, c, _ in a.push_rejections]
     attempts = [attempt for attempt, _, _ in a.push_rejections]
-    assert codes[:2] == [PUSH_LABEL_BLIND, PUSH_LABEL_BLIND]
-    assert attempts[:2] == [1, 2]
+    assert codes == [PUSH_LABEL_BLIND, PUSH_LABEL_BLIND]
+    assert attempts == [1, 2]
 
 
 def test_paid_call_count_on_a_clean_sitting_is_unchanged():
     """W2. The retry fires only after a leak -- a sitting where nothing ever leaks must still
     cost exactly one generate_push call per target, same as before this change. Guards against a
     mutant that makes the retry fire unconditionally rather than only on `hit is not None`."""
-    intake = IntakeClassification(
-        frame_states={
-            "lead_with_what_you_refuse_to_do": FrameState.absent,
-            "protect_the_core_lane": FrameState.absent,
-        },
-        trap_states={
-            "scope_creep_to_please": TrapState.not_tripped,
-            "erode_core_for_one_customer": TrapState.not_tripped,
-        },
-    )
 
     def closed():
         return [ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)]
 
     m = _RecordingPushModel(
-        intake, {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()}
+        _one_frame_intake(),
+        {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()},
     )
     a = judgment_loop.assess(_exp(), _work(), m)
 

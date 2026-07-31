@@ -2668,10 +2668,13 @@ def test_a_leaked_push_writes_a_real_gate_rejection_row(tmp_path, make_fake):
 
 def test_a_second_attempt_leak_writes_the_push_label_blind_row(tmp_path, make_fake):
     """R5 (5c). The sibling above covers a FIRST-push leak, which files PUSH_LABEL_BLIND at
-    attempt 1 and skips the retry (R3: a blind call is never steered, so there is no attempt 2).
-    That leaves the OTHER producer of PUSH_LABEL_BLIND uncovered: a leak that SURVIVES the steered
-    retry, which files PUSH_LABEL_BLIND at attempt 2 -- reachable only when the initiating push
-    carried positions (judgment_loop.assess only retries a non-blind leak).
+    attempt 1. The retry now runs unconditionally, blind or not, so that leak's steered retry
+    also fires in the sibling test -- it just comes back clean there, so no second row is filed.
+    That leaves the attempt-2 PUSH_LABEL_BLIND row uncovered here: a leak that SURVIVES the
+    steered retry. Two distinct pushes can produce that row now -- a blind first push whose retry
+    also leaks (tests/test_judgment_loop.py::test_a_blind_first_push_whose_retry_also_leaks_serves_anyway
+    covers that path directly) or, as here, a push that carried positions whose retry also leaks.
+    This test exercises the latter.
 
     Drives push 1 clean so it never rejects, which leaves push 1's response in push 2's
     Positions -- push 2 is therefore NOT blind, and its leak on the first attempt must file
@@ -2688,7 +2691,9 @@ def test_a_second_attempt_leak_writes_the_push_label_blind_row(tmp_path, make_fa
     `_open_world`'s default territory (`continuity_lock_in`) has exactly ONE frame and no
     tripped traps, so it converges after a single push -- there is no push 2 to leak on. Steers
     `map_territories` (same technique as `_arm_steer`) to rank `decision_under_stakes` (_T2, two
-    frames, no binding constraint) first instead, so a genuine push 2 exists."""
+    frames, no binding constraint) first instead, so a genuine push 2 exists. That is still a
+    legitimate way to reach an attempt-2 PUSH_LABEL_BLIND row on a push that carried positions --
+    it is just no longer the only way to reach that row, per the sibling-path note above."""
     import sqlite3
 
     from elenchus.assessment.judgment_loop import PUSH_LABEL_BLIND, PUSH_LABEL_WITH_POSITIONS

@@ -236,11 +236,14 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
                 (1, PUSH_LABEL_BLIND if blind else PUSH_LABEL_WITH_POSITIONS, hit)
             )
             # The retry runs unconditionally, blind or not: `_label_steer` derives the steer from
-            # what LEAKED (the matched phrase), never from `positions`, so even a blind call's
-            # re-authored prompt is materially different from the one that just leaked -- never a
-            # resample. `positions=pos` is already empty when blind, so nothing else changes. A
-            # served push has been screened at least once and at most twice, and is never served
-            # without being counted.
+            # what leaked, never from `positions` -- whether that steer names the leaked term or
+            # (for a rubric code hit) returns a fixed generic string that names nothing is a
+            # separate branch inside `_label_steer` itself, deliberate and pinned by its own
+            # tests. Either way attempt 1's steer is always "" and the retry's is not, so even a
+            # blind call's re-authored prompt is materially different from the one that just
+            # leaked -- never a resample. `positions=pos` is already empty when blind, so nothing
+            # else changes. A served push has been screened at least once and at most twice, and
+            # is never served without being counted.
             push_text = model.generate_push(
                 exp,
                 kind,
