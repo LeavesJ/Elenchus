@@ -718,3 +718,68 @@ def test_the_two_codes_are_stable_strings():
 
     assert PUSH_LABEL_WITH_POSITIONS == "push_label_with_positions"
     assert PUSH_LABEL_BLIND == "push_label_blind"
+
+
+# ---------------------------------------------------------------------------
+# R2: _push_label_leak narrows to the label bar, on the real content distribution
+# ---------------------------------------------------------------------------
+
+
+def test_push_label_leak_clears_ordinary_pushes_on_real_content():
+    """R2. `_push_label_leak` must screen the label bar ALONE (named framework, frame/trap code
+    snake or spaced) -- not `validate_scene`'s full bar, which also carries the scaffold and
+    wrapper-word bars calibrated on AUTHORED SCENES. On push prose those two extra bars fire on
+    ordinary English: 'this is a', 'points', 'timer', 'reward', 'at several points' are all
+    unremarkable in an instructor's push.
+
+    Pinned against a REAL rubric loaded via content_loader, not a hand-built one, because the
+    claim under test is about behavior on the distribution the push author actually writes for.
+    Under the OLD (validate_scene) implementation this test is expected to fail: 5 of these 12
+    pushes trip the scaffold or wrapper bar (items 6-10, the ones carrying 'at several points',
+    'this is a', 'points', 'timer', 'reward') and come back with a GateError message instead of
+    None. The docstring on `_push_label_leak` cites the controller's separately measured 9-of-12
+    figure on its own corpus; this test's 5-of-12 is this corpus's own measured count, not a
+    repeat of that number."""
+    from elenchus import content_loader
+    from elenchus.assessment.judgment_loop import _push_label_leak
+
+    rubric = content_loader.load_rubric("license_continuity")
+    # frames: lead_with_what_you_refuse_to_do, protect_the_core_lane, commit_under_the_deadline
+    # traps: scope_creep_to_please, erode_core_for_one_customer, commit_without_a_tripwire
+
+    ordinary_pushes = [
+        "You said the rollout comes first. Walk me through what happens to the other "
+        "customers if you hold that line for just this one account.",
+        "Where do you draw the boundary here, and what do you lose by drawing it there "
+        "instead of somewhere looser?",
+        "You have earned some goodwill with this account over the years. Does that change "
+        "what you owe them today, or is that a separate question?",
+        "If you grant the exception, what do you tell the next customer who reads the same "
+        "clause the same way?",
+        "Walk me through the sequence: what happens first, second, and third if you say no today?",
+        "You mentioned trust as a factor. At several points in your answer you treat trust "
+        "as settled -- is it, or are you assuming it?",
+        "This is a real account with a real renewal at stake. What do you actually owe them "
+        "under the contract as written, not as you wish it read?",
+        "How many points of leverage does the customer hold here beyond the ambiguous clause "
+        "itself?",
+        "Suppose the deadline slips by a week. Does the extra time change your answer, or "
+        "are you just buying a timer on the same decision?",
+        "What would make this the kind of call you'd reward later, versus one you'd regret "
+        "handing off to your successor?",
+        "You are describing a lot of process. Strip that away: what is the one sentence you "
+        "would say to the customer on the call?",
+        "If the answer costs you the relationship, is that a price you already accepted, or "
+        "one you are hoping not to pay?",
+    ]
+    for push in ordinary_pushes:
+        assert _push_label_leak(push, rubric) is None, push
+
+    framework_push = "Have you tried a SWOT to sort this out before you commit to anything?"
+    assert _push_label_leak(framework_push, rubric) == "swot"
+
+    snake_push = "You keep circling protect_the_core_lane without saying what it costs you."
+    assert _push_label_leak(snake_push, rubric) == "protect_the_core_lane"
+
+    spaced_push = "Isn't this just a case of commit under the deadline dressed up as ambiguity?"
+    assert _push_label_leak(spaced_push, rubric) == "commit under the deadline"

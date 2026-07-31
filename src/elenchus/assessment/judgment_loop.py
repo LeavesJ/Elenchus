@@ -55,26 +55,27 @@ def _group_positions(trajectory: list[Push], kind: str, code: str) -> Positions:
 
 
 def _push_label_leak(push: str, rubric) -> str | None:
-    """The anti-label bar, reused verbatim from the scenario path (generator.validate_scene):
-    framework denylist, scaffold denylist, frame/trap codes snake and spaced, emphasis stripped.
+    """The label bar ALONE: a named framework, or a frame/trap code in snake or spaced form.
+    Returns the matched phrase (so a caller can put it in the ledger), or None.
+
+    Deliberately NOT `generator.validate_scene`'s full bar. That bar adds the scaffold denylist
+    ('this is a', 'classic case of', ...) and WRAPPER_WORDS ('points', 'timer', 'reward', ...,
+    matched as bare substrings) on top of the label check -- both calibrated against AUTHORED
+    SCENE prompts, where a type-hint cues the problem category and a wrapper word means cosmetic
+    gamification. A push is a different distribution: ordinary instructor prose, where "at several
+    points" or "this is a real account" are unremarkable English. Per Invariant 7 (a safety
+    property is a property of gate times distribution), that calibration does not transfer. Measured
+    by the controller against a real rubric: the full bar rejects 9 of 12 ordinary instructor
+    pushes; the label bar alone rejects 0 of 12 and still catches a named framework, a snake frame
+    code, and a spaced frame code.
 
     Screens the OUTPUT rather than sanitising the input: stripping labels from the learner's
     positions would destroy signal, because a learner naming a frame is itself information the
     loop should be able to press."""
     from ..content_loader import load_denylist
-    from ..generator import GateError, validate_scene
-    from ..types import Scene
+    from ..generator import label_leak
 
-    try:
-        validate_scene(
-            Scene(prompt=push, situation=""),
-            rubric,
-            framework_denylist=load_denylist("framework_denylist"),
-            scaffold_denylist=load_denylist("scaffold_denylist"),
-        )
-    except GateError as e:
-        return str(e)
-    return None
+    return label_leak(push, rubric, load_denylist("framework_denylist"))
 
 
 _LOWER = {
