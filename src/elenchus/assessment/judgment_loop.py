@@ -17,7 +17,12 @@ from .sharper_grader import audit_sharper
 
 MAX_PUSHES = 8  # >= the 8-angle depth floor; budget-only (loop still pushes frames/traps — Step 5 probes dims)
 
-_POSITION_CAP = 1200  # characters per position; worst case 8 x 1200 = 9600 of learner text
+_POSITION_CAP = 1200  # characters per position, measured BEFORE render. This bounds what _cap
+# hands to _bulleted, not what reaches the prompt: _bulleted indents every continuation line
+# past the bullet, and a newline-heavy position can render up to ~5x larger than its capped
+# length (measured against a pathological 1200-char, all-newline position: 5999 rendered chars,
+# not 1200). 8 such positions render to roughly 48,000 characters of learner text, not the
+# naive 8 x 1200 = 9600 this comment used to claim.
 
 PUSH_LABEL_WITH_POSITIONS = "push_label_with_positions"  # a cost THIS change introduced
 PUSH_LABEL_BLIND = "push_label_blind"  # the PRE-EXISTING unscreened-push condition

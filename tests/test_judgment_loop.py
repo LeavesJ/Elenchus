@@ -782,9 +782,10 @@ def test_push_label_leak_clears_ordinary_pushes_on_real_content():
     Under the OLD (validate_scene) implementation this test is expected to fail: 5 of these 12
     pushes trip the scaffold or wrapper bar (items 6-10, the ones carrying 'at several points',
     'this is a', 'points', 'timer', 'reward') and come back with a GateError message instead of
-    None. The docstring on `_push_label_leak` cites the controller's separately measured 9-of-12
-    figure on its own corpus; this test's 5-of-12 is this corpus's own measured count, not a
-    repeat of that number."""
+    None. The docstring on `_push_label_leak` used to cite a separately measured figure from the
+    controller's own corpus, distinct from this test's 5-of-12. Commit fc63938 replaced that
+    unreproducible figure with this test's own count, so the source now cites this test
+    directly: its 5-of-12 IS this test's number, not a second, independent one."""
     from elenchus import content_loader
     from elenchus.assessment.judgment_loop import _push_label_leak
 
