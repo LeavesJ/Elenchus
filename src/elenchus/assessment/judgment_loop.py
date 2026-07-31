@@ -65,9 +65,11 @@ def _push_label_leak(push: str, rubric) -> str | None:
     gamification. A push is a different distribution: ordinary instructor prose, where "at several
     points" or "this is a real account" are unremarkable English. Per Invariant 7 (a safety
     property is a property of gate times distribution), that calibration does not transfer. Measured
-    by the controller against a real rubric: the full bar rejects 9 of 12 ordinary instructor
-    pushes; the label bar alone rejects 0 of 12 and still catches a named framework, a snake frame
-    code, and a spaced frame code.
+    against the twelve-push corpus in
+    tests/test_judgment_loop.py::test_push_label_leak_clears_ordinary_pushes_on_real_content, run
+    against the real rubric content/rubrics/license_continuity.yaml: the full bar rejects 5 of 12
+    ordinary instructor pushes; the label bar alone rejects 0 of 12 and still catches a named
+    framework, a snake frame code, and a spaced frame code.
 
     Screens the OUTPUT rather than sanitising the input: stripping labels from the learner's
     positions would destroy signal, because a learner naming a frame is itself information the

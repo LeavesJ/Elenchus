@@ -65,8 +65,12 @@ def label_leak(text: str, rubric: Rubric, framework_denylist: list[str]) -> str 
     This exists because three callers need exactly this half: validate_scene, which adds the
     scaffold and wrapper bars on top for authored scenes; anti_label_gate, which maps it to
     GateCode.pre_named_framework; and judgment_loop._push_label_leak, which screens a PUSH, where
-    scaffold and wrapper vocabulary is ordinary English. Measured on 12 ordinary instructor pushes:
-    the full bar rejects 9, this bar rejects 0, and this bar still catches all three real cases."""
+    scaffold and wrapper vocabulary is ordinary English. Measured against the twelve-push corpus
+    in tests/test_judgment_loop.py::test_push_label_leak_clears_ordinary_pushes_on_real_content,
+    run against the real rubric content/rubrics/license_continuity.yaml: the full bar (this check
+    plus the scaffold and wrapper bars) rejects 5 of 12, this bar alone rejects 0 of 12, and this
+    bar still catches all three real cases (a named framework, a snake frame code, a spaced frame
+    code)."""
     text_lc = _strip_emphasis(text).lower()
     for phrase in [t.lower() for t in framework_denylist] + _frame_trap_phrases(rubric):
         if _contains_phrase(text_lc, phrase):
