@@ -5,7 +5,7 @@ from typing import Literal, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from .content_loader import load_prompt, load_spike_prompt
-from .prompt_text import LEARNER_INDENT, _indent_after_first
+from .prompt_text import LEARNER_INDENT, indent_after_first
 from .types import (
     CandidateFrame,
     CheckableGrade,
@@ -348,7 +348,7 @@ def _render_rubric(rubric) -> str:
     return "\n".join(lines)
 
 
-_TURN_RENDER_CAP = 2000  # characters, measured on the RENDERED turn (after _indent_after_first),
+_TURN_RENDER_CAP = 2000  # characters, measured on the RENDERED turn (after indent_after_first),
 # not the raw text handed in. judgment_loop._POSITION_CAP's own comment records that a cap
 # measured before render does not bound what comes out: a newline-heavy raw text can render to
 # several times its own length once every continuation line gets its own LEARNER_INDENT prefix.
@@ -363,7 +363,7 @@ _TURN_RENDER_CAP = 2000  # characters, measured on the RENDERED turn (after _ind
 def _cap_rendered_turn(rendered: str, cap: int = _TURN_RENDER_CAP) -> str:
     """Truncate an already-rendered turn at `cap` characters, marking the elision.
 
-    Applied AFTER `_indent_after_first`, never before -- the fix for the mistake
+    Applied AFTER `indent_after_first`, never before -- the fix for the mistake
     `judgment_loop._POSITION_CAP` documents in its own comment, where the cap bounded the text
     handed TO the renderer rather than the string that came OUT of it. Slicing the rendered
     string can only shorten an existing line or drop a trailing one; it can never introduce a new
@@ -394,7 +394,7 @@ def _render_turns(recent: list[tuple[str, str]], limit: int = 6) -> str:
     if not recent:
         return ""
     lines = [
-        _cap_rendered_turn(_indent_after_first(text, f"{role}: ", LEARNER_INDENT))
+        _cap_rendered_turn(indent_after_first(text, f"{role}: ", LEARNER_INDENT))
         for role, text in recent[-limit:]
     ]
     return "Recent exchange:\n" + "\n".join(lines) + "\n\n"

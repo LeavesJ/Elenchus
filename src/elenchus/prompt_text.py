@@ -21,10 +21,16 @@ joined on plain `"\\n"`, so the wire format is exactly what downstream code expe
 LEARNER_INDENT = "    "
 
 
-def _indent_after_first(text: str, first: str, rest: str) -> str:
+def indent_after_first(text: str, first: str, rest: str) -> str:
     """Split `text` on every line break `str.splitlines()` recognises, prefix the first
     resulting line with `first`, and every later line with `rest`. Total: `text` may be empty,
-    whitespace-only, or made entirely of separators, and this never raises."""
+    whitespace-only, or made entirely of separators, and this never raises.
+
+    Public: it has three callers, `bulleted` and `labelled` below plus `model._render_turns`,
+    which needed this exact primitive for a dialogue turn's `"{role}: "` prefix -- a shape
+    neither `bulleted` nor `labelled` fits. A third caller in another module reaching for a
+    leading-underscore name is the smell this project extracts on; this rename is that
+    extraction, not a new layer."""
     lines = text.splitlines() or [""]
     out = [f"{first}{lines[0]}"]
     out.extend(f"{rest}{line}" for line in lines[1:])
@@ -38,7 +44,7 @@ def bulleted(items: tuple[str, ...] | list[str]) -> str:
     newline in a learner's reply cannot place text at column 0 where a composed prompt's own
     headings live. A single-line item renders byte-identically to `f"  - {item}"`, which is what
     makes this safe to apply to an already-tuned prompt."""
-    return "\n".join(_indent_after_first(item, "  - ", LEARNER_INDENT) for item in items)
+    return "\n".join(indent_after_first(item, "  - ", LEARNER_INDENT) for item in items)
 
 
 def labelled(label: str, text: str) -> str:
@@ -47,4 +53,4 @@ def labelled(label: str, text: str) -> str:
     Unlike `bulleted`, the first line here would otherwise sit at column 0, indistinguishable
     from a heading the engine composed. Indenting it is therefore not optional, and it means a
     single-line input renders differently from the bare `f"{label}\\n{text}"` it replaces."""
-    return f"{label}\n{_indent_after_first(text, LEARNER_INDENT, LEARNER_INDENT)}"
+    return f"{label}\n{indent_after_first(text, LEARNER_INDENT, LEARNER_INDENT)}"

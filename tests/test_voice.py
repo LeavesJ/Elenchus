@@ -674,7 +674,7 @@ def test_render_turns_empty_is_blank():
 # LEARNER_INDENT), so any payload character surviving as a line's leading non-blank character is
 # unambiguous proof of a leak, not a coincidence of overlapping alphabets. The separator matrix
 # itself (the full width of str.splitlines()) is already exhaustively parametrized against
-# _indent_after_first in test_prompt_text.py; these only prove _render_turns' own wiring -- the
+# indent_after_first in test_prompt_text.py; these only prove _render_turns' own wiring -- the
 # role prefix, the per-turn cap -- doesn't reopen the hole that discipline closes.
 _TURN_PAYLOAD_FIRST = chr(0xE000)
 _TURN_PAYLOAD_SECOND = chr(0xE001)
