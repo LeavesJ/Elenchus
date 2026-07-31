@@ -513,7 +513,7 @@ def test_generate_push_steer_and_positions_compose_together():
 def test_a_forged_heading_in_a_position_lands_indented_not_at_column_0():
     """The controller reproduced a composed prompt with TWO 'Angle to push on:' headings, the
     learner's forged one arriving before the engine's real one, because only the first line of
-    each position was indented. Assert on the count and on the indentation, against literals —
+    each position was indented. Assert on the count and on the indentation, against literals,
     not by calling the function under test, and not on something identical in both cases."""
     from elenchus.types import Positions
 
@@ -547,7 +547,7 @@ def test_a_single_line_position_renders_unchanged():
 
 
 def test_a_position_with_trailing_newlines_indents_the_blank_continuation():
-    """A position ending in blank lines used to render a bare "" at column 0 — structurally the
+    """A position ending in blank lines used to render a bare "" at column 0, structurally the
     same as the composed prompt's own blank separator lines. The continuation must be indented
     ("    "), never bare."""
     from elenchus.types import Positions
