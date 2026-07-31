@@ -41,12 +41,20 @@ def angle_count(rubric: Rubric) -> int:
 def _strip_emphasis(text: str) -> str:
     """Drop markdown emphasis (* and `) so legible bolding cannot split a banned phrase past the
     anti-label checks (e.g. `**Lead** with what you refuse to do`). `_` is kept — snake_case frame
-    codes legitimately use it. Both prompt gates run text through this before matching."""
+    codes legitimately use it, and the underscore-italic case (`_protect the core lane_`) is
+    handled by `_contains_phrase`'s boundary instead. Both prompt gates run text through this
+    before matching."""
     return text.replace("*", "").replace("`", "")
 
 
 def _contains_phrase(text_lc: str, phrase: str) -> bool:
-    return re.search(r"\b" + re.escape(phrase.lower()) + r"\b", text_lc) is not None
+    # Not \b: `_` is a regex word character, so a leading underscore would destroy the boundary and
+    # let markdown underscore-italics past the bar that already catches **asterisk** italics.
+    # Rejecting only alphanumerics keeps snake_case codes matching, since their underscores are interior.
+    return (
+        re.search(r"(?<![0-9a-z])" + re.escape(phrase.lower()) + r"(?![0-9a-z])", text_lc)
+        is not None
+    )
 
 
 def frame_trap_phrases(rubric: Rubric) -> list[str]:

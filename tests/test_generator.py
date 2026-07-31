@@ -335,6 +335,66 @@ def test_label_leak_returns_the_matched_phrase_or_none():
     assert label_leak("A same-day call forces a real trade-off.", rubric, fw) is None
 
 
+def test_contains_phrase_boundary_excludes_only_alphanumerics():
+    """The fix: rejecting only alphanumerics (not `\\b`, which treats `_` as a word char) still
+    matches the snake form (interior underscores untouched), the plain spaced form, and the
+    post-`_strip_emphasis` bold form -- and still correctly rejects a word-internal near-miss and
+    an occurrence immediately adjacent to a digit, since the lookarounds exclude digits too, not
+    just letters."""
+    from elenchus.generator import _contains_phrase
+
+    phrase = "protect the core lane"
+
+    # regression: snake form, spaced form, and the (already emphasis-stripped) bold form match
+    assert _contains_phrase("protect_the_core_lane", "protect_the_core_lane") is True
+    assert _contains_phrase("you must protect the core lane always", phrase) is True
+    assert _contains_phrase("protect the core lane", phrase) is True  # ** stripped upstream
+
+    # still correctly rejected: word-internal near-misses
+    assert _contains_phrase("protecting the core lanes", phrase) is False
+    assert _contains_phrase("xprotect the core lanex", phrase) is False
+    # still correctly rejected: adjacent to a digit on either side
+    assert _contains_phrase("protect the core lane2", phrase) is False
+    assert _contains_phrase("3protect the core lane", phrase) is False
+
+
+def test_contains_phrase_catches_underscore_italics():
+    """Mutation-discriminating: of every case in this file, only these two differ between the
+    fixed alphanumeric-exclusion boundary and the old `\\b` boundary it replaces -- `\\b` treats
+    `_` as a word character, so a leading/trailing `_` (markdown's other italic marker,
+    deliberately left alone by `_strip_emphasis` because snake_case codes need it) destroyed the
+    boundary and let the phrase through uncaught. See
+    test_label_leak_catches_underscore_italic_frame_code for the same case through the real
+    label_leak entry point, not just this private helper."""
+    from elenchus.generator import _contains_phrase
+
+    phrase = "protect the core lane"
+    assert _contains_phrase("_protect the core lane_", phrase) is True
+    assert _contains_phrase("__protect the core lane__", phrase) is True
+
+
+def test_label_leak_catches_underscore_italic_frame_code():
+    """The other markdown italic marker: `_protect the core lane_` must be caught the same as
+    `**protect the core lane**` is (see test_validate_scene_sees_through_markdown_emphasis).
+    `_strip_emphasis` deliberately leaves `_` alone since snake_case frame codes need their
+    interior underscores, so the boundary in `_contains_phrase` must treat a leading or trailing
+    `_` as a boundary on its own -- confirmed here through the real label_leak path a model output
+    would actually go through, single and double underscore, asserted against the literal matched
+    phrase."""
+    from elenchus.generator import label_leak
+
+    rubric = _exp().rubric  # frames lead_with_what_you_refuse_to_do, protect_the_core_lane
+    fw = ["swot", "five forces"]
+
+    assert (
+        label_leak("_protect the core lane_ is the answer.", rubric, fw) == "protect the core lane"
+    )
+    assert (
+        label_leak("__protect the core lane__ is the answer.", rubric, fw)
+        == "protect the core lane"
+    )
+
+
 def test_phrase_leak_returns_the_first_match_in_LIST_order_not_text_order():
     """W1. `phrase_leak` is the extracted strip-lower-scan `label_leak` now delegates to, and
     `_push_label_leak` also scans the push category denylist through it. Both phrases below are
