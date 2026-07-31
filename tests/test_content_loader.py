@@ -1,3 +1,6 @@
+import pytest
+import yaml
+
 from elenchus import content_loader
 from elenchus.types import Mode
 
@@ -30,6 +33,68 @@ def test_load_min_angle_count_and_denylists():
     assert "swot" in fw and all(isinstance(t, str) for t in fw)
     sc = load_denylist("scaffold_denylist")
     assert "this is a" in sc
+
+
+def test_validate_phrase_shape_rejects_empty_leading_and_trailing_non_alphanumeric():
+    """Direct unit coverage on the shared validator: `_contains_phrase` (generator.py) only ever
+    rejects MORE than the old `\\b` boundary if every phrase is non-empty and begins and ends with
+    an alphanumeric -- see that function's comment. Each negative case names both the offending
+    phrase and its source in the raised message, and a real denylist phrase (hyphen INTERIOR, not
+    at a boundary) is paired alongside as the positive case so this isn't three raises with nothing
+    to contrast them against."""
+    from elenchus.content_loader import validate_phrase_shape
+
+    with pytest.raises(ValueError, match="empty.yaml") as exc:
+        validate_phrase_shape("", source="empty.yaml")
+    assert "''" in str(exc.value)  # names the offending (empty) entry, not just the source
+
+    with pytest.raises(ValueError, match="bad.yaml") as exc:
+        validate_phrase_shape("-based", source="bad.yaml")
+    assert "-based" in str(exc.value)
+
+    with pytest.raises(ValueError, match="bad.yaml") as exc:
+        validate_phrase_shape("based-", source="bad.yaml")
+    assert "based-" in str(exc.value)
+
+    # positive case: a real denylist phrase with an interior, non-boundary hyphen is untouched
+    assert validate_phrase_shape("cost-benefit analysis", source="fine.yaml") is None
+
+
+def test_load_denylist_rejects_a_bad_entry_shape(tmp_path):
+    """Wiring test: `load_denylist` must run every loaded entry through the shared validator, not
+    just check the YAML is a list. Three variants -- empty, leading punctuation, trailing
+    punctuation -- each raise ValueError naming the offending entry and the file it came from."""
+    gate_dir = tmp_path / "gate"
+    gate_dir.mkdir()
+
+    def _write_and_check(entries, needle):
+        (gate_dir / "bad.yaml").write_text(yaml.dump(entries))
+        with pytest.raises(ValueError) as exc:
+            content_loader.load_denylist("bad", root=tmp_path)
+        msg = str(exc.value)
+        assert needle in msg
+        assert "bad.yaml" in msg
+
+    _write_and_check(["fine entry", ""], "''")
+    _write_and_check(["fine entry", "-based"], "-based")
+    _write_and_check(["fine entry", "based-"], "based-")
+
+
+def test_load_denylist_accepts_every_real_gate_denylist():
+    """Loading every denylist actually shipped under content/gate/ must not raise, and the
+    combined entry count is the reproducible figure any report citing 'how many real phrases
+    validate clean' should point at -- computed here, not assumed from a prior run."""
+    from pathlib import Path
+
+    names = sorted(p.stem for p in Path("content/gate").glob("*_denylist.yaml"))
+    assert names  # the glob itself found real denylist files, not an empty directory
+    total = 0
+    for name in names:
+        entries = content_loader.load_denylist(name)
+        assert entries  # no denylist file is empty
+        total += len(entries)
+    assert total > 0
+    print(f"content/gate/*.yaml real denylist entries, validated clean: {total}")
 
 
 def test_load_experience_and_library_build_full_experiences():

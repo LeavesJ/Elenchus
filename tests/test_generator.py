@@ -313,6 +313,62 @@ def test_seed_frame_subsets_differ_so_the_selector_discriminates():
     assert len(subsets) >= 2
 
 
+def test_frame_trap_phrases_rejects_a_leading_underscore_frame_code():
+    """Mutation-discriminating regression pinning the actual hazard the T2 review found: a
+    frame_code with a leading underscore mechanically derives a spaced form with a LEADING SPACE
+    (`_protect_the_core_lane`.replace('_', ' ') == ' protect_the_core_lane', lowercased). A phrase
+    that doesn't begin with an alphanumeric is exactly the shape that makes _contains_phrase's
+    lookaround-based boundary stricter than the old \\b it replaced, so the spaced-form check can
+    silently go dark on real leaked text while the snake form keeps matching -- invisible because
+    half the check still works. frame_trap_phrases must now reject this at derivation instead of
+    returning a live phrase list containing it."""
+    from elenchus.generator import frame_trap_phrases
+
+    rubric = Rubric(
+        frames=[Frame(frame_code="_protect_the_core_lane", frame_detail="d")],
+        traps=[],
+        mode=Mode.genuinely_open,
+    )
+    with pytest.raises(ValueError) as exc:
+        frame_trap_phrases(rubric)
+    assert "_protect_the_core_lane" in str(exc.value)
+
+
+def test_frame_trap_phrases_rejects_a_trailing_underscore_trap_code():
+    """Same hazard, trailing form and the trap_code path (not just frame_code)."""
+    from elenchus.generator import frame_trap_phrases
+
+    rubric = Rubric(
+        frames=[],
+        traps=[Trap(trap_code="erode_core_for_one_customer_", trap_detail="d")],
+        mode=Mode.genuinely_open,
+    )
+    with pytest.raises(ValueError) as exc:
+        frame_trap_phrases(rubric)
+    assert "erode_core_for_one_customer_" in str(exc.value)
+
+
+def test_frame_trap_phrases_accepts_every_real_rubric_in_content():
+    """Loading every curated rubric under content/rubrics/ and deriving its frame/trap phrases
+    must not raise, and the combined phrase count across the real library is the reproducible
+    figure any report citing 'how many real phrases validate clean' should point at -- computed
+    here, not assumed."""
+    from pathlib import Path
+
+    from elenchus.content_loader import load_rubric
+    from elenchus.generator import frame_trap_phrases
+
+    names = sorted(p.stem for p in Path("content/rubrics").glob("*.yaml"))
+    assert names  # the glob itself found real files, not an empty directory
+    total = 0
+    for name in names:
+        phrases = frame_trap_phrases(load_rubric(name))
+        assert phrases  # every curated rubric carries at least one frame or trap
+        total += len(phrases)
+    assert total > 0
+    print(f"content/rubrics/*.yaml real frame/trap phrases, validated clean: {total}")
+
+
 def test_label_leak_returns_the_matched_phrase_or_none():
     from elenchus.generator import label_leak
 

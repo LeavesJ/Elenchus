@@ -8,6 +8,7 @@ from .content_loader import (
     load_experience,
     load_library,
     load_min_angle_count,
+    validate_phrase_shape,
 )
 from .types import CorpusEntry, Experience, GateCode, GateResult, Mode, Regime, Rubric, Scene
 
@@ -50,7 +51,13 @@ def _strip_emphasis(text: str) -> str:
 def _contains_phrase(text_lc: str, phrase: str) -> bool:
     # Not \b: `_` is a regex word character, so a leading underscore would destroy the boundary and
     # let markdown underscore-italics past the bar that already catches **asterisk** italics.
-    # Rejecting only alphanumerics keeps snake_case codes matching, since their underscores are interior.
+    # Rejecting only alphanumerics keeps snake_case codes matching, since their underscores are
+    # interior -- PROVIDED `phrase` itself is non-empty and begins and ends with an alphanumeric.
+    # A phrase that starts or ends on punctuation makes this boundary stricter than \b at that end
+    # and can silently drop a match \b would have caught (e.g. a frame code's derived spaced form
+    # with a leading space). Enforced at both points a phrase originates, before it ever reaches
+    # here: content_loader.load_denylist and frame_trap_phrases below, both via
+    # content_loader.validate_phrase_shape.
     return (
         re.search(r"(?<![0-9a-z])" + re.escape(phrase.lower()) + r"(?![0-9a-z])", text_lc)
         is not None
@@ -63,11 +70,22 @@ def frame_trap_phrases(rubric: Rubric) -> list[str]:
     Public because two callers now need it: `label_leak` below, and
     `judgment_loop._label_steer`, which tests a leak's matched phrase against exactly this list to
     decide whether it is a code for THIS rubric (never name it) or something else -- a framework
-    or a category cue (safe to name)."""
+    or a category cue (safe to name).
+
+    A code comes straight from a rubric YAML, never through `load_denylist`, so both derived forms
+    are run through `content_loader.validate_phrase_shape` here: a code with a leading or trailing
+    `_` derives a spaced form with a leading or trailing space, which is exactly the shape that
+    makes `_contains_phrase`'s boundary silently miss a match (see that function's comment)."""
     phrases: list[str] = []
-    for code in [f.frame_code for f in rubric.frames] + [t.trap_code for t in rubric.traps]:
-        phrases.append(code.lower())
-        phrases.append(code.replace("_", " ").lower())
+    for kind, code in [("frame_code", f.frame_code) for f in rubric.frames] + [
+        ("trap_code", t.trap_code) for t in rubric.traps
+    ]:
+        snake = code.lower()
+        spaced = code.replace("_", " ").lower()
+        validate_phrase_shape(snake, source=f"{kind} {code!r} (snake form)")
+        validate_phrase_shape(spaced, source=f"{kind} {code!r} (spaced form)")
+        phrases.append(snake)
+        phrases.append(spaced)
     return phrases
 
 

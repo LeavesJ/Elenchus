@@ -78,11 +78,35 @@ def load_min_angle_count(root: Path | None = None) -> int:
     return int(data["min_angle_count"])
 
 
+def validate_phrase_shape(phrase: str, *, source: str) -> None:
+    """Enforce the precondition `generator._contains_phrase`'s boundary depends on: every phrase it
+    scans must be non-empty and begin and end with an alphanumeric character. `_contains_phrase`
+    rejects `[0-9a-z]` as a boundary char instead of `\\w` (so a leading/trailing `_` can't destroy
+    the boundary the way it used to); that only ever matches MORE than the old boundary if the
+    phrase itself doesn't start or end on a non-alphanumeric character. A phrase that does (e.g. a
+    frame code with a leading `_`, which turns into a leading space in its derived spaced form) can
+    make the new boundary stricter than the old one at that end and silently drop a match the old
+    one would have caught.
+
+    Two callers, both places a phrase enters the anti-label gate: `load_denylist` below (denylist
+    entries authored in content/gate/*.yaml) and `generator.frame_trap_phrases` (frame/trap codes
+    authored in content/rubrics/*.yaml, which never pass through a denylist load)."""
+    if not phrase or not phrase[0].isalnum() or not phrase[-1].isalnum():
+        raise ValueError(
+            f"phrase {phrase!r} from {source} must be non-empty and begin and end with an "
+            "alphanumeric character (generator._contains_phrase's boundary treats only "
+            "alphanumerics as a match boundary)"
+        )
+
+
 def load_denylist(name: str, root: Path | None = None) -> list[str]:
     data = yaml.safe_load((_root(root) / "gate" / f"{name}.yaml").read_text())
     if not isinstance(data, list):
         raise ValueError(f"denylist {name} must be a YAML list")
-    return [str(x).lower() for x in data]
+    entries = [str(x).lower() for x in data]
+    for entry in entries:
+        validate_phrase_shape(entry, source=f"{name}.yaml")
+    return entries
 
 
 def load_experience(name: str, root: Path | None = None) -> Experience:
