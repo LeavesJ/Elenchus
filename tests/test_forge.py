@@ -565,13 +565,15 @@ def test_build_brief_bounded_on_a_pathological_position():
 
 
 def test_build_brief_bounded_on_a_pathological_situation():
-    pathological = "\n" * 50_000
+    # Non-whitespace at both ends so `.strip()` (applied to situation/focus before render, unlike
+    # positions) cannot collapse the pathological middle to nothing before the cap ever sees it.
+    pathological = "x" + "\n" * 50_000 + "y"
     brief = forge.build_brief("T", pathological, [], None, "base")
     assert len(brief) < forge._BRIEF_BLOB_CAP + 1000
 
 
 def test_build_brief_bounded_on_a_pathological_focus():
-    pathological = "\n" * 50_000
+    pathological = "x" + "\n" * 50_000 + "y"
     brief = forge.build_brief("T", "S", [], None, "base", focus=pathological)
     assert len(brief) < forge._BRIEF_BLOB_CAP + 1000
 
