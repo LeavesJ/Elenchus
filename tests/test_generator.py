@@ -313,6 +313,28 @@ def test_seed_frame_subsets_differ_so_the_selector_discriminates():
     assert len(subsets) >= 2
 
 
+def test_label_leak_returns_the_matched_phrase_or_none():
+    from elenchus.generator import label_leak
+
+    rubric = _exp().rubric  # frames lead_with_what_you_refuse_to_do, protect_the_core_lane
+    fw = ["swot", "five forces"]
+
+    # named framework hit
+    assert label_leak("Run a SWOT and decide.", rubric, fw) == "swot"
+    # leaked frame code, snake form
+    assert (
+        label_leak("lead_with_what_you_refuse_to_do is the frame", rubric, fw)
+        == "lead_with_what_you_refuse_to_do"
+    )
+    # leaked frame code, spaced form
+    assert (
+        label_leak("Lead with what you refuse to do, then decide.", rubric, fw)
+        == "lead with what you refuse to do"
+    )
+    # clean text: no match
+    assert label_leak("A same-day call forces a real trade-off.", rubric, fw) is None
+
+
 def test_validate_scene_passes_clean_and_rejects_leaks():
     from elenchus.generator import GateError, validate_scene
     from elenchus.types import Scene

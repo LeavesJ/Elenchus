@@ -57,6 +57,23 @@ def _frame_trap_phrases(rubric: Rubric) -> list[str]:
     return phrases
 
 
+def label_leak(text: str, rubric: Rubric, framework_denylist: list[str]) -> str | None:
+    """The label bar alone: a named framework, or a frame/trap code in snake or spaced form.
+
+    Returns the MATCHED PHRASE so a caller can put it in the ledger, or None.
+
+    This exists because three callers need exactly this half: validate_scene, which adds the
+    scaffold and wrapper bars on top for authored scenes; anti_label_gate, which maps it to
+    GateCode.pre_named_framework; and judgment_loop._push_label_leak, which screens a PUSH, where
+    scaffold and wrapper vocabulary is ordinary English. Measured on 12 ordinary instructor pushes:
+    the full bar rejects 9, this bar rejects 0, and this bar still catches all three real cases."""
+    text_lc = _strip_emphasis(text).lower()
+    for phrase in [t.lower() for t in framework_denylist] + _frame_trap_phrases(rubric):
+        if _contains_phrase(text_lc, phrase):
+            return phrase
+    return None
+
+
 def validate_scene(
     scene: Scene,
     rubric: Rubric,
@@ -71,10 +88,10 @@ def validate_scene(
     Scenes are authored as legible markdown (bold key terms), so emphasis markers are stripped
     (via `_strip_emphasis`) before the checks — otherwise `**Lead** with what you refuse to do`
     would split a banned phrase and slip past."""
-    text_lc = _strip_emphasis(f"{scene.prompt}\n{scene.situation}").lower()
-    banned = [t.lower() for t in framework_denylist] + _frame_trap_phrases(rubric)
-    if any(_contains_phrase(text_lc, p) for p in banned):
+    text = f"{scene.prompt}\n{scene.situation}"
+    if label_leak(text, rubric, framework_denylist) is not None:
         raise GateError("scene names a framework or leaks a frame/trap code")
+    text_lc = _strip_emphasis(text).lower()
     if any(_contains_phrase(text_lc, p) for p in scaffold_denylist):
         raise GateError("scene contains a type-hint scaffold")
     if any(w in text_lc for w in WRAPPER_WORDS):
@@ -99,8 +116,7 @@ def anti_label_gate(
         rejects.append(GateCode.recoverable_label)
 
     # pre_named_framework: no named method, and no leaked frame/trap code (snake or spaced).
-    banned = [t.lower() for t in framework_denylist] + _frame_trap_phrases(rubric)
-    if any(_contains_phrase(prompt_lc, p) for p in banned):
+    if label_leak(exp.prompt, rubric, framework_denylist) is not None:
         rejects.append(GateCode.pre_named_framework)
 
     # type_hint_scaffold: no category-cueing scaffold phrase.
