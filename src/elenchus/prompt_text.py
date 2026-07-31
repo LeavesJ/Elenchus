@@ -42,8 +42,11 @@ def bulleted(items: tuple[str, ...] | list[str]) -> str:
 
     The first line of each item carries the bullet, every later line is indented past it, so a
     newline in a learner's reply cannot place text at column 0 where a composed prompt's own
-    headings live. A single-line item renders byte-identically to `f"  - {item}"`, which is what
-    makes this safe to apply to an already-tuned prompt."""
+    headings live. An item containing no line break renders byte-identically to `f"  - {item}"`,
+    which is what makes this safe to apply to an already-tuned prompt. That does NOT extend to an
+    item that merely LOOKS single-line under `splitlines()` but carries a trailing line break
+    (e.g. `"hello\n"`): `splitlines()` drops the terminator, so that item renders one byte shorter
+    than the bare form."""
     return "\n".join(indent_after_first(item, "  - ", LEARNER_INDENT) for item in items)
 
 

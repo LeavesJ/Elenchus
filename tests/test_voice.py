@@ -450,7 +450,9 @@ def test_classify_entry_is_frame_blind_and_parses():
     parsed = EntryClassification(entry_class=EntryClass.greeting, reply="Welcome.")
     stub = _StubClient(parsed=parsed)
     m = AnthropicModel(client=stub)
-    out = m.classify_entry("The pricing problem text.", "hi", [("student", "hi")])
+    out = m.classify_entry(
+        "The pricing problem text.", "hi", [("student", "I already tried that and it failed.")]
+    )
     assert out.entry_class is EntryClass.greeting
     # frame-blind: neither rubric codes nor details may appear anywhere in the request
     blob = str(stub.last)
@@ -458,6 +460,8 @@ def test_classify_entry_is_frame_blind_and_parses():
     assert "frame_detail" not in blob and "Rubric" not in blob
     # the problem prompt IS available to the classifier
     assert "The pricing problem text." in blob
+    # the prior turn text reaches the composed request via _render_turns
+    assert "I already tried that and it failed." in blob
 
 
 def test_concierge_turn_is_frame_blind_and_returns_text():
@@ -482,6 +486,8 @@ def test_concierge_turn_is_frame_blind_and_returns_text():
         "Which mistake here can you actually walk back?" in blob
         and "The pricing problem text." in blob
     )
+    # the prior turn text reaches the composed request via _render_turns
+    assert "Verifiable audits and data are what's essential." in blob
 
 
 def test_concierge_turn_reinvite_mode_has_no_brief():
@@ -501,6 +507,8 @@ def test_concierge_close_is_frame_blind_and_returns_text():
     assert out.startswith("You committed to holding the line")
     blob = str(stub.last)
     assert "frame_detail" not in blob and "Rubric" not in blob
+    # the prior turn text reaches the composed request via _render_turns
+    assert "I'd hold and rely on audits." in blob
 
 
 def test_concierge_turn_refusal_returns_empty():
@@ -518,6 +526,8 @@ def test_concierge_land_is_frame_blind_and_carries_stop_reason():
     blob = str(stub.last)
     assert "frame_detail" not in blob and "Rubric" not in blob  # frame-blind
     assert "converged" in blob  # the stop reason IS available to the author
+    # the prior turn text reaches the composed request via _render_turns
+    assert "I'd hold and eat the churn." in blob
 
 
 def test_concierge_land_refusal_returns_empty():
@@ -530,11 +540,17 @@ def test_concierge_converse_is_frame_blind_and_carries_stop_reason():
         parsed=ConverseTurn(reply="We're done here — and that's a good place to be.")
     )
     m = AnthropicModel(client=stub)
-    out = m.concierge_converse("Problem P.", [("student", "ok")], stop_reason="plateau")
+    out = m.concierge_converse(
+        "Problem P.",
+        [("student", "I don't see a cleaner call than the one I already made.")],
+        stop_reason="plateau",
+    )
     assert out.reply.startswith("We're done")
     blob = str(stub.last)
     assert "frame_detail" not in blob and "Rubric" not in blob  # frame-blind
     assert "plateau" in blob  # the stop reason IS available to the wind-down author
+    # the prior turn text reaches the composed request via _render_turns
+    assert "I don't see a cleaner call than the one I already made." in blob
 
 
 def test_require_names_truncation_distinctly():
@@ -740,15 +756,20 @@ def test_render_turns_multiple_single_line_turns_are_byte_identical_to_the_old_f
 
 
 def test_render_turns_bounds_a_pathological_turn_on_the_rendered_output():
-    """Pinned on the RENDERED string, not the input. `judgment_loop._POSITION_CAP`'s own comment
-    records that a cap measured before render does not bound what comes out: a newline-heavy
-    input renders to several times its own length once every continuation line gets an indent.
-    50,000 raw characters (25x the render cap) must not reach the model as 50,000 characters."""
-    from elenchus.model import _TURN_RENDER_CAP, _render_turns
+    """Pinned on the RENDERED string, not the input, with an ABSOLUTE literal bound -- not
+    `_TURN_RENDER_CAP + N`, which would move in lockstep with the cap and stay green even if the
+    cap were raised to something that no longer bounds anything (e.g. 300000). `judgment_loop.
+    _POSITION_CAP`'s own comment records that a cap measured before render does not bound what
+    comes out: a newline-heavy input renders to several times its own length once every
+    continuation line gets an indent. 50,000 raw characters (over 8x the 6000-char render cap as
+    of this writing) must not reach the model as 50,000 characters."""
+    from elenchus.model import _render_turns
 
     pathological = "\n" * 50_000
     out = _render_turns([("student", pathological)])
-    assert len(out) < _TURN_RENDER_CAP + 100  # bounded far under the raw input's size
+    # 6100 = _TURN_RENDER_CAP (6000) + slack for the "…[trimmed]" suffix and the fixed
+    # "Recent exchange:\n" / "\n\n" wrapper (measured: 6029 chars for this single-turn case).
+    assert len(out) < 6100
 
 
 def test_concierge_converse_prompt_defers_a_fresh_pressure_to_the_next_chapter():

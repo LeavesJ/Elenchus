@@ -348,29 +348,52 @@ def _render_rubric(rubric) -> str:
     return "\n".join(lines)
 
 
-_TURN_RENDER_CAP = 2000  # characters, measured on the RENDERED turn (after indent_after_first),
+_TURN_RENDER_CAP = 6000  # characters, measured on the RENDERED turn (after indent_after_first),
 # not the raw text handed in. judgment_loop._POSITION_CAP's own comment records that a cap
 # measured before render does not bound what comes out: a newline-heavy raw text can render to
 # several times its own length once every continuation line gets its own LEARNER_INDENT prefix.
 # Capping the rendered string directly sidesteps that arithmetic: the bound holds regardless of
 # how the raw turn is shaped -- one enormous line, thousands of empty ones, anything between.
-# 2000 is generous against real content: _ECHO_MAX_TOKENS tunes Vera's own turns for "a sentence
-# or two" (a few hundred characters), and a single student turn is one reply, not the multi-push
-# aggregate judgment_loop._POSITION_CAP (1200 raw characters) bounds. No ordinary turn is expected
-# to hit this; it exists for the turn that tries to be 50,000 characters of newlines.
+#
+# Raised from 2000 (review, 2026-07-31): 2000 sat BELOW the model's own output ceiling, so it
+# could trim a turn the engine itself produced -- not just pathological learner input -- because
+# Vera's own turns are fed back into `recent` and re-rendered on every later call
+# (web/session_runner.py:1225 appends a probe/re-invite turn; :2302 appends a concierge_converse
+# reply). `_ECHO_MAX_TOKENS = 1024` (model.py:282, `grep -n "_ECHO_MAX_TOKENS = " model.py`) bounds
+# concierge_turn/close/land, the routine per-turn Vera author. Assuming ~4 characters per output
+# token -- a standard order-of-magnitude approximation for English text; this repo has no offline
+# tokenizer to measure it exactly, and calling the live count_tokens endpoint is out of scope for
+# a code comment, so this ratio is ASSUMED, falsified by any real rendered turn this repo observes
+# exceeding the cap -- 1024 * 4 = 4096 characters (`python3 -c "print(1024*4)"`). 6000 sits above
+# that with headroom.
+#
+# concierge_converse's reply is a second, larger source, also fed back into `recent`
+# (session_runner.py:2302) and re-rendered later: it runs under `_CLASSIFY_MAX_TOKENS = 4096`
+# (model.py:290), doubled to 8192 on one retry (_parse_required, model.py:474-475). That budget
+# buys adaptive-thinking headroom, not proportionally longer visible text -- the same relationship
+# this file's own comments on `_CLASSIFY_MAX_TOKENS` and `_SCREEN_MAX_TOKENS` already document
+# (lines 284-297): a larger cap only buys thinking room, and cost does not rise unless the call
+# genuinely thinks or writes more. Doctrine, not this constant, is what keeps a converse reply
+# short, the same as every other Vera-authored turn -- 6000 is not a hard guarantee against that
+# call's full token ceiling, but no cap short of tens of thousands of characters would be, and the
+# old 2000 was not one either.
+#
+# Worst-case block size for the wind-down callers (limit=20: concierge_land, concierge_converse):
+# 6000 * 20 = 120,000 characters (`python3 -c "print(6000*20)"`), plus the fixed "Recent
+# exchange:" header and the role-prefix overhead.
 
 
-def _cap_rendered_turn(rendered: str, cap: int = _TURN_RENDER_CAP) -> str:
-    """Truncate an already-rendered turn at `cap` characters, marking the elision.
+def _cap_rendered_turn(rendered: str) -> str:
+    """Truncate an already-rendered turn at `_TURN_RENDER_CAP` characters, marking the elision.
 
     Applied AFTER `indent_after_first`, never before -- the fix for the mistake
     `judgment_loop._POSITION_CAP` documents in its own comment, where the cap bounded the text
     handed TO the renderer rather than the string that came OUT of it. Slicing the rendered
     string can only shorten an existing line or drop a trailing one; it can never introduce a new
     line, so it cannot undo the indent discipline that keeps a learner byte off column 0."""
-    if len(rendered) <= cap:
+    if len(rendered) <= _TURN_RENDER_CAP:
         return rendered
-    return rendered[:cap] + "…[trimmed]"
+    return rendered[:_TURN_RENDER_CAP] + "…[trimmed]"
 
 
 def _render_turns(recent: list[tuple[str, str]], limit: int = 6) -> str:
@@ -379,9 +402,13 @@ def _render_turns(recent: list[tuple[str, str]], limit: int = 6) -> str:
     Every continuation line of a turn is indented past its `"{role}: "` prefix -- the same
     discipline `prompt_text.bulleted` applies to a position: the first line carries the prefix,
     every later line gets `prompt_text.LEARNER_INDENT`, so a newline in a learner's reply can
-    never open a line at column 0, where the composed prompt's own headings live. A single-line
-    turn -- the ordinary case, almost all real input -- renders byte-identically to the old bare
-    `f"{role}: {text}"`: the indent machinery is a no-op when a turn has no second line to indent.
+    never open a line at column 0, where the composed prompt's own headings live. A turn
+    containing no line break -- the ordinary case, almost all real input -- renders byte-identically
+    to the old bare `f"{role}: {text}"`: the indent machinery is a no-op when a turn has no second
+    line to indent. This does NOT extend to a turn that merely LOOKS single-line under `splitlines()`
+    but carries a trailing line break (e.g. `"hello\n"`): `splitlines()` drops the terminator, so
+    that turn renders one byte shorter than the bare form -- inherited from `indent_after_first`,
+    not introduced here (see `prompt_text.bulleted`'s docstring for the same caveat).
 
     Each turn is then capped at `_TURN_RENDER_CAP` characters, measured on its RENDERED text, not
     the raw text handed in (see `_cap_rendered_turn`). The cap is applied per turn, not once

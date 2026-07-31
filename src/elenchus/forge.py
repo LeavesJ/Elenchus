@@ -88,12 +88,16 @@ class ForgeResult:
 # reason `model._render_turns` caps each turn before its fixed "Recent exchange:" header is
 # prepended, never the joined block after.
 #
-# 2000 reuses `model._TURN_RENDER_CAP`'s own number and reasoning: her situation and her focus
-# are each one typed message, the same shape as a single dialogue turn (a sentence or two in the
-# ordinary case; generous headroom for a real one). The positions block gets the same cap rather
-# than a smaller one: it is the sum of one committed position per converged segment over a whole
-# sitting, strictly larger than a single message, so the shared cap already bounds it at least as
-# tightly as a per-position cap would, without a second number to justify separately.
+# 2000 no longer matches `model._TURN_RENDER_CAP` (raised to 6000 -- see model.py: a cap on a
+# Vera-authored reply fed back through `recent` on every later call needs headroom for the model's
+# own output ceiling; that concern does not apply here). Every blob this caps -- her situation, her
+# focus, her committed positions -- is HER typed text, never something the model wrote back, so
+# there is no output-ceiling floor this number has to clear; 2000 stays generous against a real
+# typed message on its own terms (a sentence or two in the ordinary case). The positions block
+# gets the same cap rather than a smaller one: it is the sum of one committed position per
+# converged segment over a whole sitting, strictly larger than a single message, so the shared cap
+# already bounds it at least as tightly as a per-position cap would, without a second number to
+# justify separately.
 _BRIEF_BLOB_CAP = 2000
 
 
