@@ -448,7 +448,17 @@ class AnthropicModel:
     ) -> str:
         detail = _target_detail(exp.rubric, kind, code)
         prefix = f"Situation:\n{exp.scene.situation}\n\n" if getattr(exp, "scene", None) else ""
-        user = f"{prefix}Experience:\n{exp.prompt}\n\nAngle to push on:\n{detail}"
+        # The learner's own words (spec 2026-07-30). Each group is omitted when empty, so a
+        # default Positions() composes a byte-identical prompt to before this existed. The
+        # target CODE is never emitted — only the grouping derived from it.
+        blocks = ""
+        if positions.on_angle:
+            said = "\n".join(f"  - {t}" for t in positions.on_angle)
+            blocks += f"What the student has already argued on THIS angle:\n{said}\n\n"
+        if positions.elsewhere:
+            said = "\n".join(f"  - {t}" for t in positions.elsewhere)
+            blocks += f"Positions taken elsewhere in this sitting:\n{said}\n\n"
+        user = f"{prefix}Experience:\n{exp.prompt}\n\n{blocks}Angle to push on:\n{detail}"
         system = load_prompt("push")
         if stress:
             system += "\n\n" + load_prompt("push_stress")

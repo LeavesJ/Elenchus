@@ -4,6 +4,9 @@ The student has already engaged this angle with a reasoned mechanism. Do not ask
 re-engage it or restate what they already argued — that would be a weak, redundant push.
 Probe the sharpest edge instead:
 
+What they already argued on this angle is in the "argued on THIS angle" block above. Read it,
+and do not make them say it again.
+
 - The single event that would force them to reverse this commitment (the tripwire). If they
   cannot name one, press on what that absence implies.
 - What they are choosing NOT to commit to, and the cost they accept by leaving it out.

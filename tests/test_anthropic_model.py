@@ -410,3 +410,47 @@ def test_generate_push_with_empty_positions_is_byte_identical_to_no_positions():
     call2 = c2.messages.create_calls[0]
     assert call1["messages"] == call2["messages"]
     assert call1["system"] == call2["system"]
+
+
+def test_generate_push_composes_both_position_groups():
+    """Spec §4.3. Each group is labelled and omitted independently when empty."""
+    from elenchus.types import Positions
+
+    client = _Client(create_result=_Resp(content=[_TextBlock("[push]")]))
+    AnthropicModel(client=client).generate_push(
+        _exp(),
+        "frame",
+        "protect_the_core_lane",
+        positions=Positions(on_angle=("ARGUED HERE",), elsewhere=("ARGUED THERE",)),
+    )
+    user = _user_text(client.messages.create_calls[0])
+    assert "ARGUED HERE" in user and "ARGUED THERE" in user
+    assert user.index("ARGUED HERE") < user.index("ARGUED THERE")
+    assert user.index("ARGUED THERE") < user.index("Angle to push on:")
+
+
+def test_each_position_group_is_omitted_independently():
+    from elenchus.types import Positions
+
+    client = _Client(create_result=_Resp(content=[_TextBlock("[push]")]))
+    AnthropicModel(client=client).generate_push(
+        _exp(), "frame", "protect_the_core_lane", positions=Positions(on_angle=("ONLY HERE",))
+    )
+    user = _user_text(client.messages.create_calls[0])
+    assert "ONLY HERE" in user
+    assert "Positions taken elsewhere" not in user
+
+
+def test_the_target_code_never_reaches_the_prompt():
+    """Spec §4.2: only the GROUPING derived from the code, never the code. _frame_trap_phrases
+    includes snake and spaced forms, so a code in the prompt raises the leak rate and a leak
+    costs the whole positions block."""
+    from elenchus.types import Positions
+
+    client = _Client(create_result=_Resp(content=[_TextBlock("[push]")]))
+    AnthropicModel(client=client).generate_push(
+        _exp(), "frame", "protect_the_core_lane", positions=Positions(on_angle=("x",))
+    )
+    user = _user_text(client.messages.create_calls[0])
+    assert "protect_the_core_lane" not in user
+    assert "protect the core lane" not in user.lower()
