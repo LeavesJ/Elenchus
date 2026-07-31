@@ -826,16 +826,18 @@ def test_the_two_codes_are_stable_strings():
 
 
 # ---------------------------------------------------------------------------
-# R2: _push_label_leak narrows to the label bar, on the real content distribution
+# R2: _push_label_leak screens the label bar, on the real content distribution
 # ---------------------------------------------------------------------------
 
 
 def test_push_label_leak_clears_ordinary_pushes_on_real_content():
-    """R2. `_push_label_leak` must screen the label bar ALONE (named framework, frame/trap code
-    snake or spaced) -- not `validate_scene`'s full bar, which also carries the scaffold and
-    wrapper-word bars calibrated on AUTHORED SCENES. On push prose those two extra bars fire on
-    ordinary English: 'this is a', 'points', 'timer', 'reward', 'at several points' are all
-    unremarkable in an instructor's push.
+    """R2. `_push_label_leak` must screen the label bar (named framework, frame/trap code snake or
+    spaced) plus, per W1 below, the seven category-cueing phrases in
+    content/gate/push_category_denylist.yaml -- but NOT `validate_scene`'s full bar, which also
+    carries the scaffold entries 'this is a' and 'apply the' and the wrapper-word bar, calibrated
+    on AUTHORED SCENES. On push prose those scaffold and wrapper entries fire on ordinary English:
+    'this is a', 'points', 'timer', 'reward', 'at several points' are all unremarkable in an
+    instructor's push.
 
     Pinned against a REAL rubric loaded via content_loader, not a hand-built one, because the
     claim under test is about behavior on the distribution the push author actually writes for.
@@ -919,9 +921,13 @@ def test_push_label_leak_catches_each_category_phrase():
 
 
 def test_push_label_leak_still_clears_the_two_phrases_left_on_the_scene_path():
-    """W1. 'this is a' and 'apply the' were measured over-broad on push prose (ordinary English in
-    an instructor's push) and were deliberately excluded from push_category_denylist.yaml. They
-    stay on generator.validate_scene's authored-scene path only."""
+    """W1. 'this is a' and 'apply the' were deliberately excluded from push_category_denylist.yaml.
+    'this is a' was measured over-broad on push prose: corpus item 7 in
+    test_push_label_leak_clears_ordinary_pushes_on_real_content contains it and is one of the five
+    old-bar rejections. 'apply the' was excluded on judgment, not measurement -- no corpus push
+    contains it, so the five-of-twelve figure attributes no rejection to it -- because it reads as
+    ordinary instructor English ("apply the same logic to the second customer"). They stay on
+    generator.validate_scene's authored-scene path only."""
     from elenchus.assessment.judgment_loop import _push_label_leak
 
     rubric = _exp().rubric
@@ -1000,7 +1006,10 @@ def test_label_steer_frame_and_trap_hits_are_generic():
     literal string, not to a value the function itself produced, so this test cannot pass by
     construction alongside the function under test. Also checked against every code the fixture
     rubric carries, snake and spaced, so the pin does not depend on which single code happened to
-    be exercised."""
+    be exercised. (The complementary check -- that no code appears IN the returned steer -- lives
+    in test_code_hit_steer_never_contains_the_code_in_either_form, which calls `_label_steer`
+    inside its loop; a bare `code not in generic` against the fixed literal here would pass whether
+    or not `_label_steer` is correct, so that check is not duplicated in this test.)"""
     from elenchus.assessment.judgment_loop import _label_steer
 
     rubric = _exp().rubric
@@ -1008,11 +1017,6 @@ def test_label_steer_frame_and_trap_hits_are_generic():
     assert _label_steer("lead_with_what_you_refuse_to_do", rubric) == generic  # frame, snake
     assert _label_steer("scope_creep_to_please", rubric) == generic  # trap, snake
     assert _label_steer("scope creep to please", rubric) == generic  # trap, spaced
-
-    codes = [f.frame_code for f in rubric.frames] + [t.trap_code for t in rubric.traps]
-    for code in codes:
-        assert code not in generic, code
-        assert code.replace("_", " ") not in generic, code
 
 
 def test_label_steer_generic_when_a_framework_entry_collides_with_a_rubric_codes_spaced_form():
@@ -1057,8 +1061,6 @@ def test_label_steer_generic_when_a_framework_entry_collides_with_a_rubric_codes
     assert steer == (
         "Your previous attempt echoed an internal label. Press the reasoning, never the name."
     )
-    assert frame_code not in steer
-    assert candidate not in steer
 
 
 def test_code_hit_steer_never_contains_the_code_in_either_form():

@@ -82,15 +82,24 @@ def label_leak(text: str, rubric: Rubric, framework_denylist: list[str]) -> str 
 
     Returns the MATCHED PHRASE so a caller can put it in the ledger, or None.
 
-    This exists because three callers need exactly this half: validate_scene, which adds the
-    scaffold and wrapper bars on top for authored scenes; anti_label_gate, which maps it to
-    GateCode.pre_named_framework; and judgment_loop._push_label_leak, which screens a PUSH, where
-    scaffold and wrapper vocabulary is ordinary English. Measured against the twelve-push corpus
-    in tests/test_judgment_loop.py::test_push_label_leak_clears_ordinary_pushes_on_real_content,
-    run against the real rubric content/rubrics/license_continuity.yaml: the full bar (this check
-    plus the scaffold and wrapper bars) rejects 5 of 12, this bar alone rejects 0 of 12, and this
-    bar still catches all three real cases (a named framework, a snake frame code, a spaced frame
-    code)."""
+    This exists because three callers need this half: validate_scene, which adds the scaffold and
+    wrapper bars on top for authored scenes; anti_label_gate, which maps it to
+    GateCode.pre_named_framework; and judgment_loop._push_label_leak, which screens a PUSH with
+    this half PLUS a second scan, content/gate/push_category_denylist.yaml's seven category-cueing
+    phrases. 08dfd0a added that second scan because most scaffold vocabulary turned out NOT to be
+    ordinary English on push prose: the category denylist carries seven of scaffold_denylist's nine
+    entries. Only two scaffold entries ('this is a', 'apply the') and the WRAPPER_WORDS bar stay
+    off the push path as ordinary instructor English.
+
+    Measured against the twelve-push corpus in
+    tests/test_judgment_loop.py::test_push_label_leak_clears_ordinary_pushes_on_real_content, run
+    against the real rubric content/rubrics/license_continuity.yaml: that test calls
+    judgment_loop._push_label_leak, this function's result OR'd with the category scan, and finds 0
+    of 12 rejected -- which, because `_push_label_leak` checks this half first and returns on a
+    hit, entails this bar alone also rejects 0 of 12 on the same corpus. This bar alone still
+    catches all three real cases the same test pins (a named framework, a snake frame code, a
+    spaced frame code): none of the seven category phrases can produce those matches, so those
+    hits are this function's, not the category scan's."""
     phrases = [t.lower() for t in framework_denylist] + frame_trap_phrases(rubric)
     return phrase_leak(text, phrases)
 

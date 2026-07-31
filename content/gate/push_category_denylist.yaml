@@ -1,7 +1,11 @@
 # Category-cueing phrases that name the angle's TYPE rather than pressing it. push.md's first hard
 # rule forbids naming the frame or its category, and Invariant 6 makes the unlabeled problem the moat.
-# Deliberately EXCLUDES scaffold_denylist's 'this is a' and 'apply the': both are ordinary English in
-# instructor prose and were measured over-broad on push text. They remain on the authored-scene path.
+# Deliberately EXCLUDES scaffold_denylist's 'this is a' and 'apply the'. 'this is a' was measured
+# over-broad on push text (item 7 of the twelve-push corpus in
+# tests/test_judgment_loop.py::test_push_label_leak_clears_ordinary_pushes_on_real_content contains
+# it and is one of the five old-bar rejections). 'apply the' was excluded on judgment, not
+# measurement: no corpus push contains it, and it reads as ordinary instructor English ("apply the
+# same logic to the second customer"). Both remain on the authored-scene path via validate_scene.
 - classic case of
 - use the framework
 - the right framework
