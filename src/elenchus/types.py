@@ -245,6 +245,9 @@ class Assessment(BaseModel):
     stop_reason: StopReason
     sharper_audit: list[SharperAuditItem] = Field(default_factory=list)
     reasoned_unprompted: list[str] = Field(default_factory=list)
+    # (attempt, code, detail) per push rejected by the anti-label screen. The CALLER persists
+    # these: assess() holds no store -- same seam as ForgeResult.rejections.
+    push_rejections: tuple[tuple[int, str, str], ...] = ()
 
 
 class FrameStrength(BaseModel):

@@ -2553,6 +2553,45 @@ def test_a_forge_rejection_writes_real_gate_rejection_rows(tmp_path, make_fake):
     assert rows == [(sit, 1, "jargon", "83(b)"), (sit, 2, "jargon", "83(b)")]
 
 
+def test_a_leaked_push_writes_a_real_gate_rejection_row(tmp_path, make_fake):
+    """The forge tests stop at Assessment; the store tests use hand-built literals. Nothing joins
+    them, and the persist loop only runs when push_rejections is non-empty.
+
+    `_open_world` drives the front door only through the forged opening say -- judgment_loop's
+    push loop (and so the leak) doesn't run until the opening reply is fed and the segment is
+    drained to done, so this reaches for `_drive` (the file's own helper for exactly that) rather
+    than checking the DB right after `_open_world` alone."""
+    import sqlite3
+
+    from elenchus.assessment.judgment_loop import PUSH_LABEL_WITH_POSITIONS
+
+    def factory():
+        m = _world_factory(make_fake)()
+        first = [True]
+
+        def push(exp, kind, code, *, stress=False, positions=None):
+            if first:
+                first.pop()
+                return f"you are ignoring {code} here"  # leaks a literal frame code
+            return "[clean push]"
+
+        m.generate_push = push
+        return m
+
+    db = str(tmp_path / "push-leak.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    _open_world(reg)  # same helper the sibling gate-rejection test uses
+    tag, _ = _drive(reg, "s1", opening="here is my reasoning")
+    assert tag == "done"
+
+    c = sqlite3.connect(db)
+    rows = c.execute(
+        "select code from web_gate_rejection where code = ?", (PUSH_LABEL_WITH_POSITIONS,)
+    ).fetchall()
+    c.close()
+    assert rows, "a leaked push must persist a countable rejection, not just a log line"
+
+
 def test_level_steps_one_per_move_and_snaps_back(tmp_path, make_fake):
     """§2e: the brief's Level line walks base → firm → tight one step per converged move and
     snaps back one step on any non-converged stop; never a prose delta."""

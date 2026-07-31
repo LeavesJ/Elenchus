@@ -19,6 +19,9 @@ MAX_PUSHES = 8  # >= the 8-angle depth floor; budget-only (loop still pushes fra
 
 _POSITION_CAP = 1200  # characters per position; worst case 8 x 1200 = 9600 of learner text
 
+PUSH_LABEL_WITH_POSITIONS = "push_label_with_positions"  # a cost THIS change introduced
+PUSH_LABEL_BLIND = "push_label_blind"  # the PRE-EXISTING unscreened-push condition
+
 
 def _cap(text: str) -> str:
     """Truncate at the last sentence boundary under the cap, marking the elision.
@@ -49,6 +52,29 @@ def _group_positions(trajectory: list[Push], kind: str, code: str) -> Positions:
             continue
         (here if (p.kind, p.target_code) == (kind, code) else there).append(_cap(p.response))
     return Positions(on_angle=tuple(here), elsewhere=tuple(there))
+
+
+def _push_label_leak(push: str, rubric) -> str | None:
+    """The anti-label bar, reused verbatim from the scenario path (generator.validate_scene):
+    framework denylist, scaffold denylist, frame/trap codes snake and spaced, emphasis stripped.
+
+    Screens the OUTPUT rather than sanitising the input: stripping labels from the learner's
+    positions would destroy signal, because a learner naming a frame is itself information the
+    loop should be able to press."""
+    from ..content_loader import load_denylist
+    from ..generator import GateError, validate_scene
+    from ..types import Scene
+
+    try:
+        validate_scene(
+            Scene(prompt=push, situation=""),
+            rubric,
+            framework_denylist=load_denylist("framework_denylist"),
+            scaffold_denylist=load_denylist("scaffold_denylist"),
+        )
+    except GateError as e:
+        return str(e)
+    return None
 
 
 _LOWER = {
@@ -109,6 +135,7 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
     deltas: list[FrameDelta] = []
     closed: list[str] = []
     hard_wrong: list[str] = []
+    push_rejections: list[tuple[int, str, str]] = []
     exhausted: set[str] = set()
     probed: set[str] = set()
     recent: list[tuple[str, bool]] = []  # (code, moved) for the last pushes
@@ -138,6 +165,7 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
 
         stress = kind == "frame" and frame_states.get(code) is FrameState.present_reasoned
         probed.add(code)
+        rejections_here: list[tuple[int, str, str]] = []
         push_text = model.generate_push(
             exp,
             kind,
@@ -145,6 +173,16 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
             stress=stress,
             positions=_group_positions(trajectory, kind, code),
         )
+        leak = _push_label_leak(push_text, exp.rubric)
+        if leak is not None:
+            rejections_here.append((1, PUSH_LABEL_WITH_POSITIONS, leak))
+            push_text = model.generate_push(exp, kind, code, stress=stress)  # blind fallback
+            leak = _push_label_leak(push_text, exp.rubric)
+            if leak is not None:
+                # Pre-existing: today's blind push is unscreened too. Serve it (no regression)
+                # and count it, so the two causes never collapse into one number.
+                rejections_here.append((2, PUSH_LABEL_BLIND, leak))
+        push_rejections.extend(rejections_here)
         response = work.respond(push_text)
         rc = model.classify_response(exp, kind, code, push_text, response, stress=stress)
 
@@ -222,5 +260,6 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
         hard_wrong_flags=hard_wrong,
         stop_reason=stop_reason or StopReason.budget,
         reasoned_unprompted=reasoned_unprompted,
+        push_rejections=tuple(push_rejections),
     )
     return audit_sharper(exp, assessment, model)

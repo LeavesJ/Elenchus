@@ -1237,6 +1237,12 @@ class SessionRegistry:
                     decide=decide,
                     decide_core=lambda c: [],
                 )
+                # The anti-label screen's counters (spec §4.5): assess() holds no store, so
+                # push_rejections ride out on the Assessment and land here -- same seam as
+                # forge_selection's res.rejections above.
+                if sit is not None:
+                    for attempt, rcode, detail in assessment.push_rejections:
+                        self._store.add_gate_rejection(sit, attempt, rcode, detail, now)
                 landing = ""
                 if captured:
                     # Author the felt landing STRICTLY downstream of the frozen assessment — the

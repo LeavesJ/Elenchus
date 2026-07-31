@@ -627,3 +627,94 @@ def test_group_positions_on_an_empty_trajectory():
     from elenchus.assessment.judgment_loop import _group_positions
 
     assert _group_positions([], "frame", "any_code") == Positions()
+
+
+# ---------------------------------------------------------------------------
+# Task 4: the anti-label screen, the two-branch fallback, and the counters
+# ---------------------------------------------------------------------------
+
+
+class _ScriptedPushModel(_RecordingPushModel):
+    """`_RecordingPushModel` whose generate_push pops scripted text instead of relaying
+    `FakeModel`'s constant, so a leak can be provoked. `_RecordingPushModel.generate_push`
+    delegates to `FakeModel.generate_push`, which always returns a constant and so can never
+    leak -- this overrides that return path while keeping the same positions-recording as its
+    parent. `seen` aliases `recorded_positions`: the same list, the brief's name for it."""
+
+    def __init__(self, intake, responses, pushes):
+        super().__init__(intake, responses)
+        self._pushes = list(pushes)
+        self.seen = self.recorded_positions
+
+    def generate_push(self, exp, kind, code, *, stress=False, positions=Positions()):
+        self.recorded_positions.append(positions)
+        return self._pushes.pop(0) if self._pushes else "[clean push]"
+
+
+def _one_frame_intake():
+    """Both frames absent so the loop pushes; reuse of the module's own fixture vocabulary."""
+    return IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.absent,
+            "protect_the_core_lane": FrameState.absent,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.not_tripped,
+        },
+    )
+
+
+def test_a_leaked_push_re_authors_blind_and_counts_it():
+    """Spec §4.5. The fallback is the blind push, so the worst case of this change is exactly
+    today's behaviour."""
+    from elenchus.assessment.judgment_loop import PUSH_LABEL_WITH_POSITIONS
+
+    def closed():
+        return [ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)]
+
+    m = _ScriptedPushModel(
+        _one_frame_intake(),
+        {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()},
+        # first author leaks a literal frame code; the blind re-author is clean
+        pushes=["you are ignoring protect_the_core_lane here", "[clean push]"],
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+
+    assert len(m.seen) >= 2
+    assert m.seen[1] == Positions()  # the re-author is BLIND
+    assert a.trajectory[0].text == "[clean push]"  # the served push is the second one
+    codes = [c for _, c, _ in a.push_rejections]
+    assert codes[0] == PUSH_LABEL_WITH_POSITIONS
+    assert a.push_rejections[0][0] == 1  # attempt 1
+
+
+def test_a_second_leak_serves_anyway_with_a_DIFFERENT_code():
+    """Spec §4.5. 'leaked with positions' is a cost this change introduced; 'leaked blind' is
+    evidence of the pre-existing unscreened-push condition. One string for both makes them
+    permanently inseparable."""
+    from elenchus.assessment.judgment_loop import PUSH_LABEL_BLIND, PUSH_LABEL_WITH_POSITIONS
+
+    def closed():
+        return [ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)]
+
+    leaky = "protect_the_core_lane is the thing"
+    m = _ScriptedPushModel(
+        _one_frame_intake(),
+        {"lead_with_what_you_refuse_to_do": closed(), "protect_the_core_lane": closed()},
+        pushes=[leaky, leaky],  # BOTH attempts leak
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+
+    assert a.trajectory[0].text == leaky  # served anyway: no raise, no dead end
+    codes = [c for _, c, _ in a.push_rejections][:2]
+    assert codes == [PUSH_LABEL_WITH_POSITIONS, PUSH_LABEL_BLIND]
+    assert codes[0] != codes[1]
+
+
+def test_the_two_codes_are_stable_strings():
+    """String-stability: these are machine-facing and get counted across sittings."""
+    from elenchus.assessment.judgment_loop import PUSH_LABEL_BLIND, PUSH_LABEL_WITH_POSITIONS
+
+    assert PUSH_LABEL_WITH_POSITIONS == "push_label_with_positions"
+    assert PUSH_LABEL_BLIND == "push_label_blind"
