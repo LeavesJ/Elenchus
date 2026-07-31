@@ -354,6 +354,20 @@ def _render_turns(recent: list[tuple[str, str]], limit: int = 6) -> str:
     return "Recent exchange:\n" + "\n".join(lines) + "\n\n"
 
 
+def _bulleted(items: tuple[str, ...]) -> str:
+    """Render positions as a list no learner line can escape.
+
+    Exists because both position groups (on_angle and elsewhere) in generate_push need it.
+    Continuation lines are indented past the bullet, so a newline in a learner's reply cannot
+    place text at column 0 where the composed prompt's own headings live."""
+    out: list[str] = []
+    for item in items:
+        lines = item.splitlines() or [""]
+        out.append(f"  - {lines[0]}")
+        out.extend(f"    {line}" for line in lines[1:])
+    return "\n".join(out)
+
+
 def _target_detail(rubric, kind: str, code: str) -> str:
     if kind == "trap":
         for t in rubric.traps:
@@ -456,10 +470,10 @@ class AnthropicModel:
         # target CODE is never emitted — only the grouping derived from it.
         blocks = ""
         if positions.on_angle:
-            said = "\n".join(f"  - {t}" for t in positions.on_angle)
+            said = _bulleted(positions.on_angle)
             blocks += f"What the student has already argued on THIS angle:\n{said}\n\n"
         if positions.elsewhere:
-            said = "\n".join(f"  - {t}" for t in positions.elsewhere)
+            said = _bulleted(positions.elsewhere)
             blocks += f"Positions taken elsewhere in this sitting:\n{said}\n\n"
         user = f"{prefix}Experience:\n{exp.prompt}\n\n{blocks}Angle to push on:\n{detail}"
         # The steered retry (R3): composed exactly like forge_scenario's, so an empty steer is
