@@ -101,19 +101,36 @@ def _push_label_leak(push: str, rubric) -> str | None:
 def _label_steer(hit: str, rubric) -> str:
     """R3. The one-shot retry steer for a leak `_push_label_leak` just caught -- never the code
     itself (`test_the_target_code_never_reaches_the_prompt` exists because a code in the prompt
-    RAISES the leak rate). Two branches, decided by testing `hit` against the loaded framework
-    denylist `_push_label_leak` matched against:
+    RAISES the leak rate). Two branches, decided by testing `hit` against THIS RUBRIC's own frame
+    and trap phrases (`generator.frame_trap_phrases`, snake and spaced form) -- not against the
+    framework denylist `_push_label_leak` also draws from, which cannot tell a rubric code apart
+    from a framework name or a category cue:
 
-    - a framework hit names the term: there is nothing secret about a named method, and naming
+    - `hit` is one of this rubric's frame/trap phrases: a FIXED generic string that names no
+      code, because re-injecting the code that just leaked would raise the leak rate on the very
+      retry meant to fix it. This is also what closes a latent collision: if a framework denylist
+      entry ever equalled a rubric code's spaced form, `_push_label_leak` would surface that
+      spaced form as `hit`, and testing membership in the framework denylist alone would have
+      named it -- writing the target code straight into the retry prompt, the one thing this
+      function exists to prevent.
+    - anything else -- a named framework, or one of the seven category-cueing phrases in
+      content/gate/push_category_denylist.yaml -- names the term: neither is secret, and naming
       it tells the author exactly what to drop.
-    - a frame/trap code hit gets a FIXED generic string that names no code. `label_leak` lowers
-      both the denylist and the code phrases it matches against before comparing, so `hit` is
-      always already lowercase here."""
-    from ..content_loader import load_denylist
 
-    if hit in load_denylist("framework_denylist"):
-        return f'Do not use the term "{hit}" or name any framework.'
-    return "Your previous attempt echoed an internal label. Press the reasoning, never the name."
+    `generator.frame_trap_phrases` lowercases both the codes and their spaced form before
+    comparing, and `content_loader.load_denylist` lowercases every entry at load time, so `hit`
+    -- which always comes from one of those two sources via `_push_label_leak` -- is always
+    already lowercase here."""
+    from ..generator import frame_trap_phrases
+
+    if hit in frame_trap_phrases(rubric):
+        return (
+            "Your previous attempt echoed an internal label. Press the reasoning, never the name."
+        )
+    return (
+        f'Do not use the term "{hit}" -- it names a framework or the category of this '
+        "angle, not the reasoning."
+    )
 
 
 _LOWER = {

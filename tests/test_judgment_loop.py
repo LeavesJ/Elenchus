@@ -956,7 +956,29 @@ def test_label_steer_names_the_term_for_a_framework_hit():
     from elenchus.assessment.judgment_loop import _label_steer
 
     rubric = _exp().rubric
-    assert _label_steer("swot", rubric) == 'Do not use the term "swot" or name any framework.'
+    assert _label_steer("swot", rubric) == (
+        'Do not use the term "swot" -- it names a framework or the category of this angle, '
+        "not the reasoning."
+    )
+
+
+def test_label_steer_names_the_term_for_a_category_hit():
+    """W2 fix. `_push_label_leak` also matches the seven category-cueing phrases in
+    content/gate/push_category_denylist.yaml ('classic case of', ...), and none of those seven is
+    in framework_denylist.yaml. The OLD predicate (`hit in load_denylist("framework_denylist")`)
+    therefore sent a category hit to the generic branch, which told the author it "echoed an
+    internal label" -- a description of what a CODE hit did, not what a category phrase did, and
+    one the author could not act on because it names nothing to drop.
+
+    Must fail before the fix: 'classic case of' is not a framework_denylist entry, so under the
+    old predicate this assertion sees the generic string, not this one."""
+    from elenchus.assessment.judgment_loop import _label_steer
+
+    rubric = _exp().rubric
+    assert _label_steer("classic case of", rubric) == (
+        'Do not use the term "classic case of" -- it names a framework or the category of '
+        "this angle, not the reasoning."
+    )
 
 
 def test_label_steer_is_generic_for_a_code_hit():
@@ -970,9 +992,75 @@ def test_label_steer_is_generic_for_a_code_hit():
         "Your previous attempt echoed an internal label. Press the reasoning, never the name."
     )
     # the spaced form of a code takes the same branch as the snake form
-    assert _label_steer("commit under the deadline", rubric) == (
+    assert _label_steer("protect the core lane", rubric) == (
         "Your previous attempt echoed an internal label. Press the reasoning, never the name."
     )
+
+
+def test_label_steer_frame_and_trap_hits_are_generic():
+    """W2 fix. Both a frame code hit and a trap code hit take the generic branch -- pinned to the
+    literal string, not to a value the function itself produced, so this test cannot pass by
+    construction alongside the function under test. Also checked against every code the fixture
+    rubric carries, snake and spaced, so the pin does not depend on which single code happened to
+    be exercised."""
+    from elenchus.assessment.judgment_loop import _label_steer
+
+    rubric = _exp().rubric
+    generic = "Your previous attempt echoed an internal label. Press the reasoning, never the name."
+    assert _label_steer("lead_with_what_you_refuse_to_do", rubric) == generic  # frame, snake
+    assert _label_steer("scope_creep_to_please", rubric) == generic  # trap, snake
+    assert _label_steer("scope creep to please", rubric) == generic  # trap, spaced
+
+    codes = [f.frame_code for f in rubric.frames] + [t.trap_code for t in rubric.traps]
+    for code in codes:
+        assert code not in generic, code
+        assert code.replace("_", " ") not in generic, code
+
+
+def test_label_steer_generic_when_a_framework_entry_collides_with_a_rubric_codes_spaced_form():
+    """The latent collision this fix closes. `_push_label_leak` (via `generator.label_leak`)
+    scans the framework denylist BEFORE the rubric's own frame/trap phrases and returns the first
+    match, so if a framework_denylist entry ever equalled a rubric code's spaced form, `hit` would
+    surface as that spaced form. Under the OLD predicate (`hit in load_denylist(...)`), `hit` IS a
+    framework_denylist entry by construction here, so the naming branch fired and would have
+    written the target code straight into the retry prompt -- precisely what
+    `test_the_target_code_never_reaches_the_prompt` exists to prevent. No such collision exists in
+    today's shipped content, so this test builds one.
+
+    Picks a REAL entry from the loaded framework_denylist and reverse-engineers a plausible
+    snake_case frame code from it (spaces -> underscores), so the pin is tied to actual shipped
+    content and cannot rot silently if the file's entries change. Falls back to an explicitly
+    constructed phrase, stated here, if no shipped entry qualifies: a plain, letters-only,
+    space-separated phrase (excludes 'porter's five forces' and 'cost-benefit analysis' for
+    punctuation, '5 whys' for a leading digit)."""
+    from elenchus import content_loader
+    from elenchus.assessment.judgment_loop import _label_steer
+    from elenchus.types import Frame, Mode, Rubric
+
+    denylist = content_loader.load_denylist("framework_denylist")
+    real_collision = next(
+        (e for e in denylist if " " in e and all(w.isalpha() for w in e.split(" "))),
+        None,
+    )
+    if real_collision is not None:
+        candidate = real_collision
+    else:
+        # No shipped framework_denylist entry qualifies today. Constructing one explicitly so the
+        # collision is still demonstrated; this phrase is NOT drawn from the real denylist file.
+        candidate = "converged priority audit"
+
+    frame_code = candidate.replace(" ", "_")
+    rubric = Rubric(
+        frames=[Frame(frame_code=frame_code, frame_detail="synthetic collision fixture")],
+        traps=[],
+        mode=Mode.genuinely_open,
+    )
+    steer = _label_steer(candidate, rubric)
+    assert steer == (
+        "Your previous attempt echoed an internal label. Press the reasoning, never the name."
+    )
+    assert frame_code not in steer
+    assert candidate not in steer
 
 
 def test_code_hit_steer_never_contains_the_code_in_either_form():

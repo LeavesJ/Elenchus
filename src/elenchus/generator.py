@@ -49,7 +49,13 @@ def _contains_phrase(text_lc: str, phrase: str) -> bool:
     return re.search(r"\b" + re.escape(phrase.lower()) + r"\b", text_lc) is not None
 
 
-def _frame_trap_phrases(rubric: Rubric) -> list[str]:
+def frame_trap_phrases(rubric: Rubric) -> list[str]:
+    """Every frame and trap code this rubric carries, in both snake and spaced form, lowercased.
+
+    Public because two callers now need it: `label_leak` below, and
+    `judgment_loop._label_steer`, which tests a leak's matched phrase against exactly this list to
+    decide whether it is a code for THIS rubric (never name it) or something else -- a framework
+    or a category cue (safe to name)."""
     phrases: list[str] = []
     for code in [f.frame_code for f in rubric.frames] + [t.trap_code for t in rubric.traps]:
         phrases.append(code.lower())
@@ -85,7 +91,7 @@ def label_leak(text: str, rubric: Rubric, framework_denylist: list[str]) -> str 
     plus the scaffold and wrapper bars) rejects 5 of 12, this bar alone rejects 0 of 12, and this
     bar still catches all three real cases (a named framework, a snake frame code, a spaced frame
     code)."""
-    phrases = [t.lower() for t in framework_denylist] + _frame_trap_phrases(rubric)
+    phrases = [t.lower() for t in framework_denylist] + frame_trap_phrases(rubric)
     return phrase_leak(text, phrases)
 
 

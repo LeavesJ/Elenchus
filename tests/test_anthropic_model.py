@@ -462,7 +462,7 @@ def test_each_position_group_is_omitted_independently():
 
 
 def test_the_target_code_never_reaches_the_prompt():
-    """Spec §4.2: only the GROUPING derived from the code, never the code. _frame_trap_phrases
+    """Spec §4.2: only the GROUPING derived from the code, never the code. frame_trap_phrases
     includes snake and spaced forms, so a code in the prompt raises the leak rate and a leak
     costs the whole positions block."""
     from elenchus.types import Positions
