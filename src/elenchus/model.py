@@ -877,14 +877,20 @@ class AnthropicModel:
         # scenario (forge.py:369), concierge_sitting_close's close -- content already governed by a
         # model max_tokens budget, the same shape `_render_turns`' re-fed dialogue turns are. One
         # caller, voice.land's baseline check, DOES pass real learner text: `_student_text(recent)`,
-        # every student turn in the session joined. Both need the render-side cap to clear the
-        # model's own output ceiling rather than clip content this L-13 backstop must still see in
-        # full, so this reuses `_TURN_RENDER_CAP` (the default), not the smaller `_LEARNER_TEXT_CAP`.
+        # every student turn in the session joined. Both need this L-13 backstop to see the text in
+        # FULL or refuse outright, so `_TURN_RENDER_CAP` (the default, not the smaller
+        # `_LEARNER_TEXT_CAP`) is a REFUSAL threshold here, never a trim point (boundary-4 Fix 1):
+        # a move performed in a silently clipped tail can never land in `performed`, so
+        # `egress_safe_reply` (`not _performed(...)`) returns True for text that leaks -- the exact
+        # failure the truncation guard ten lines below already refuses on the output side.
         numbered = "\n".join(f"{i + 1}. {m}" for i, m in enumerate(moves))
+        rendered = labelled("Text to screen:", text)
+        if len(rendered) > _TURN_RENDER_CAP:
+            raise ModelError(
+                "screen_moves input exceeds _TURN_RENDER_CAP — egress screen unreliable"
+            )
         system = load_prompt("egress")
-        user = f"Hidden moves:\n{numbered}\n\n" + _cap_rendered_turn(
-            labelled("Text to screen:", text)
-        )
+        user = f"Hidden moves:\n{numbered}\n\n{rendered}"
         resp = self._parse_required(
             max_tokens=_SCREEN_MAX_TOKENS,
             system=system,

@@ -766,17 +766,47 @@ def test_screen_moves_no_payload_byte_reaches_column_0():
     assert _LEAK_SECOND not in leaders
 
 
-def test_screen_moves_bounds_a_pathological_text_on_the_rendered_output():
+def test_screen_moves_raises_loud_when_the_rendered_text_exceeds_the_cap():
+    """boundary-4 Fix 1: a hidden move performed in a SILENTLY TRIMMED tail can never appear in
+    `performed`, so `egress_safe_reply` (`not _performed(...)`) returns True for text that leaks --
+    the identical failure the truncation guard ten lines below already refuses on the output side.
+    Fail loud here too: raise before composing, never trim. A one-line text is sized so the
+    RENDERED blob (label + indent, per `labelled`) lands exactly one character over
+    `_TURN_RENDER_CAP` -- pins the exact threshold, not an approximation."""
+    from elenchus.model import _TURN_RENDER_CAP
+    from elenchus.prompt_text import labelled
+
+    overhead = len(labelled("Text to screen:", ""))  # the fixed label+indent wrapper
+    text = "x" * (_TURN_RENDER_CAP - overhead + 1)
+    assert len(labelled("Text to screen:", text)) == _TURN_RENDER_CAP + 1  # pin the construction
+
+    client = _Client(parse_result=_Resp(parsed_output=None))
+    with pytest.raises(ModelError, match="screen_moves"):
+        AnthropicModel(client=client).screen_moves(["move one"], text)
+    assert client.messages.parse_calls == []  # raised before composing/sending -- never a call
+
+
+def test_screen_moves_composes_normally_one_character_under_the_cap():
+    """Same construction, one character under the cap: the call composes and reaches the client
+    exactly as before -- proves the guard is a threshold, not a blanket refusal on long text, and
+    pins the OTHER direction so swapping in a smaller cap (e.g. `_LEARNER_TEXT_CAP`) cannot pass
+    silently the way the old `len(user) < 6100` bound did."""
+    from elenchus.model import _TURN_RENDER_CAP
+    from elenchus.prompt_text import labelled
     from elenchus.types import EgressScreen
+
+    overhead = len(labelled("Text to screen:", ""))
+    text = "x" * (_TURN_RENDER_CAP - overhead)
+    assert len(labelled("Text to screen:", text)) == _TURN_RENDER_CAP  # pin the construction
 
     screen = EgressScreen(performed=[], evidence="e")
     client = _Client(parse_result=_Resp(parsed_output=screen))
-    pathological = "\n" * 50_000
-    AnthropicModel(client=client).screen_moves(["move one"], pathological)
+    AnthropicModel(client=client).screen_moves(["move one"], text)
+    assert len(client.messages.parse_calls) == 1  # composed and sent, not refused
     user = _user_text(client.messages.parse_calls[0])
-    # 6050 = _TURN_RENDER_CAP (6000) + slack for the "…[trimmed]" suffix and the fixed
-    # "Hidden moves:\n1. move one\n\nText to screen:\n" wrapper (measured: 6037 chars).
-    assert len(user) < 6100
+    # composed in FULL, not trimmed: the whole "Text to screen:\n    " + text tail survives
+    assert user == "Hidden moves:\n1. move one\n\nText to screen:\n    " + text
+    assert len(user) == len("Hidden moves:\n1. move one\n\n") + _TURN_RENDER_CAP
 
 
 # --- map_territories: `situation` is her words at the front-door call; curated territories are not
