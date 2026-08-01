@@ -439,9 +439,17 @@ def test_strip_noise_alone_preserves_the_exact_unindented_multiline_reviewer_exa
     the fix targeted at `_strip_noise` is itself complete: it does not blank this f-string. The
     end-to-end `_bare_interpolation` call over the same source still misses it, because
     `_extract_function` truncates the body before this line ever reaches `_strip_noise` (see the
-    docstring bullet above); this test isolates which of the two functions the miss belongs to."""
+    docstring bullet above); this test isolates which of the two functions the miss belongs to.
+
+    Asserts full byte-equality, not a substring of `"response"` — the parameter name and the
+    function name (`classify_response`) both already contain that substring in the untouched
+    signature line, so a weaker `"response" in ...` check would pass even if `_strip_noise` still
+    blanked the f-string body: identical in the passing and failing case, so it would prove
+    nothing."""
     body = 'def classify_response(self, response):\n    user = f"""Student reply:\n{response}"""\n'
-    assert "response" in _strip_noise(body)
+    # Nothing to blank: no comments, and the one triple-quoted span is f-prefixed, so it must
+    # come back byte-for-byte untouched.
+    assert _strip_noise(body) == body
 
 
 def test_strip_noise_still_blanks_a_plain_triple_quoted_docstring():
