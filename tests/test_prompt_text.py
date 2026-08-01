@@ -200,7 +200,11 @@ def test_labelled_never_raises(text):
 # variable as a plain ARGUMENT to one of those calls and only ever interpolates the RESULT (bound
 # to a different name — `said`, `blocks`, the return of `labelled(...)`), so this one pattern is
 # enough to catch the careless mistake: pasting `{response}` straight into a prompt string instead
-# of routing it through the seam.
+# of routing it through the seam. This holds whether the f-string is single/double-quoted OR
+# TRIPLE-quoted (`f"""...{response}..."""`): `_strip_noise` only blanks a `"""..."""` span when it
+# carries no `f`/`rf`/`fr` prefix, so an f-prefixed triple-quoted string is never mistaken for a
+# docstring and stays visible to the brace-scanning regex below — PROVIDED `_extract_function`
+# actually delivers that line to it in the first place (see the next section's bullet on this).
 #
 # WHAT IT CANNOT CATCH, ALSO HONESTLY:
 #
@@ -220,6 +224,25 @@ def test_labelled_never_raises(text):
 #   allowlist.
 # - Text built by STRING CONCATENATION instead of an f-string: `"Reply:\n" + response` never puts
 #   `response` inside `{}`, so the brace-scanning regex never sees it.
+# - Text built with `str.format()` — `"Reply:\n{}".format(response)` — or %-STYLE formatting —
+#   `"Reply:\n%s" % response` — never puts `response` inside `{...}` either (a `.format()` template
+#   commonly has EMPTY or positional `{}`/`{0}` slots, no variable name at all), so the same
+#   brace-scanning regex misses both exactly as it misses concatenation.
+# - A multi-line string (triple-quoted or otherwise) whose UNINDENTED continuation line —
+#   starting at column 0, the common style for a triple-quoted block, e.g.
+#   `f"""Student reply:\n{response}"""` written across two real physical lines — lands at or
+#   below `_extract_function`'s own indentation. That function slices a body by breaking on the
+#   first non-blank line whose indentation is `<= base` (the `def` line's own column), with no
+#   awareness that a column-0 line might be the INSIDE of an still-open string literal rather
+#   than code after the function; the body is truncated before that line is even handed to
+#   `_strip_noise` or the brace scan, so anything on or after it — this interpolation included —
+#   is invisible. Verified directly: `_strip_noise` itself, given the untruncated body, correctly
+#   leaves an `f"""..."""` interpolation intact; the miss is `_extract_function`'s, not
+#   `_strip_noise`'s. A single-physical-line triple-quoted f-string, or one whose continuation
+#   stays indented past `base` (both realistic styles), is unaffected and IS caught — see the
+#   tests below. Fixing this for real requires `_extract_function` to track open-quote state
+#   line-by-line, which this file's regex/indentation style was deliberately kept free of; not
+#   done here.
 # - A learner-text variable under a name NOT in `_KNOWN_LEARNER_SITES` at all. `screen_moves`'
 #   `text` is a documented case in point (model.py's own comment on `screen_moves`): most callers
 #   pass Vera-authored text, one caller passes real learner text, and the guard cannot tell which
@@ -307,15 +330,32 @@ def _extract_function(src: str, name: str) -> tuple[str, int]:
     return "".join(out), start_line
 
 
+_TRIPLE_QUOTED = re.compile(r'([A-Za-z]{0,2})(""".*?""")', re.S)
+
+
+def _blank_unless_f_prefixed(m: re.Match) -> str:
+    """`re.sub` replacement for `_TRIPLE_QUOTED`: blank a triple-quoted span to preserve line
+    count, UNLESS its prefix (the 0-2 letters immediately before the opening triple-quote — the
+    only characters valid Python syntax permits there) contains an `f`. An f- or rf-prefixed
+    triple-quoted string is a real interpolation site, not a docstring, and must stay visible to
+    the brace-scanning regex in `_bare_interpolation` below."""
+    prefix, quoted = m.group(1), m.group(2)
+    if "f" in prefix.lower():
+        return m.group(0)
+    return "\n" * quoted.count("\n")
+
+
 def _strip_noise(body: str) -> str:
     """Blank out `#` comments and triple-quoted docstrings without changing the line count, so a
-    line number computed against the result still matches the original file.
+    line number computed against the result still matches the original file. An f/rf-prefixed
+    triple-quoted string is left untouched (see `_blank_unless_f_prefixed`) — it is an
+    interpolation site the guard must still see, not prose to discard.
 
     Without this, `_render_turns`' own docstring — which quotes `f"{role}: {text}"` as prose,
     describing the OLD bare form it replaced — would trip the `text` check below on a sentence
     about the fix, not on code. `test_confirming_door.py._strip_comments` strips `#` comments only;
     this adds docstrings because that specific false positive lives in one."""
-    body = re.sub(r'""".*?"""', lambda m: "\n" * m.group(0).count("\n"), body, flags=re.S)
+    body = _TRIPLE_QUOTED.sub(_blank_unless_f_prefixed, body)
     return re.sub(r"#[^\n]*", "", body)
 
 
@@ -355,6 +395,65 @@ def test_bare_interpolation_detector_fires_on_a_direct_f_string_splice():
     line_no, snippet = hit
     assert line_no == 2
     assert "response" in snippet
+
+
+def test_bare_interpolation_detector_fires_on_a_triple_quoted_f_string_splice():
+    """The same violation as the test above, wrapped in a TRIPLE-quoted f-string instead of a
+    plain one — the exact shape `_strip_noise` used to blank unconditionally, as if it were a
+    docstring, making the violation invisible (the hole this test seals; see `_strip_noise`'s
+    docstring and `_blank_unless_f_prefixed`). Single physical line, matching the convention the
+    test above already uses, so `_extract_function`'s own separate column-0-continuation-line
+    truncation (see the docstring bullet on it above) never enters into this proof."""
+    src = 'def classify_response(self, response):\n    user = f"""Student reply: {response}"""\n'
+    hit = _bare_interpolation(src, "classify_response", "response")
+    assert hit is not None
+    assert "response" in hit[1]
+
+
+def test_bare_interpolation_detector_fires_on_an_rf_prefixed_triple_quoted_splice():
+    """The `rf`/`fr` combined-prefix variant of the triple-quoted shape above — still a real
+    interpolation site, so it must stay visible too, not just the bare `f` prefix."""
+    src = 'def classify_response(self, response):\n    user = rf"""Student reply: {response}"""\n'
+    hit = _bare_interpolation(src, "classify_response", "response")
+    assert hit is not None
+    assert "response" in hit[1]
+
+
+def test_bare_interpolation_detector_fires_on_a_multiline_triple_quoted_splice_when_indented():
+    """The genuinely multi-line case — a real physical line break inside the triple-quoted
+    f-string — with the continuation line indented past the `def` line's own column, the shape
+    `_extract_function` does not mistake for the end of the function. Proves the `_strip_noise`
+    fix reaches real multi-line f-strings, not just the single-physical-line case above."""
+    src = (
+        'def classify_response(self, response):\n    user = f"""Student reply:\n    {response}"""\n'
+    )
+    hit = _bare_interpolation(src, "classify_response", "response")
+    assert hit is not None
+    assert hit[0] == 3
+    assert "response" in hit[1]
+
+
+def test_strip_noise_alone_preserves_the_exact_unindented_multiline_reviewer_example():
+    """`_strip_noise`, fed the reviewer's exact reproduction directly (a real newline, the
+    continuation line unindented at column 0) — bypassing `_extract_function` entirely — proves
+    the fix targeted at `_strip_noise` is itself complete: it does not blank this f-string. The
+    end-to-end `_bare_interpolation` call over the same source still misses it, because
+    `_extract_function` truncates the body before this line ever reaches `_strip_noise` (see the
+    docstring bullet above); this test isolates which of the two functions the miss belongs to."""
+    body = 'def classify_response(self, response):\n    user = f"""Student reply:\n{response}"""\n'
+    assert "response" in _strip_noise(body)
+
+
+def test_strip_noise_still_blanks_a_plain_triple_quoted_docstring():
+    """Closing the f-string hole must not reopen the false positive `_strip_noise` exists to
+    prevent: an ordinary (non-f-prefixed) docstring that merely MENTIONS `{response}` in prose
+    must still be blanked, or this guard would fail on its own commentary, not on code."""
+    src = (
+        "def classify_response(self, response):\n"
+        '    """Docstring mentioning {response} in prose, not code."""\n'
+        '    user = _cap_rendered_turn(labelled("Student reply:", response))\n'
+    )
+    assert _bare_interpolation(src, "classify_response", "response") is None
 
 
 def test_bare_interpolation_detector_is_silent_when_the_seam_wraps_the_variable():

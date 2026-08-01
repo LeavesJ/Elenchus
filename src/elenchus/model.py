@@ -932,8 +932,10 @@ class AnthropicModel:
         )
         # Fail LOUD on truncation: a cut-off parse could drop performed indices -> silent
         # false-negative (a leak passes), the one direction the backstop must never fail quietly.
-        if getattr(resp, "stop_reason", None) == "max_tokens":
-            raise ModelError("screen_moves truncated at max_tokens — egress screen unreliable")
+        # The guarantee lives one layer up, not here: `_parse_required` returns `_require(resp)`,
+        # which already raises ModelError on `stop_reason == "max_tokens"` before this method ever
+        # sees a result. `resp` above is that parsed EgressScreen (only `performed`/`evidence`), not
+        # the raw API response, so it carries no `stop_reason` attribute to check.
         return resp
 
     def map_territories(self, situation: str, territories: list[tuple[str, str]]) -> TerritoryMap:

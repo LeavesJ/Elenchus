@@ -809,6 +809,28 @@ def test_screen_moves_composes_normally_one_character_under_the_cap():
     assert len(user) == len("Hidden moves:\n1. move one\n\n") + _TURN_RENDER_CAP
 
 
+def test_screen_moves_fails_loud_on_persistent_truncation():
+    """boundary-5 Fix 2: `screen_moves` used to carry its own local `getattr(resp, "stop_reason",
+    None) == "max_tokens"` check after `_parse_required` -- dead code, since `_parse_required`
+    returns `_require(resp)` (the parsed `EgressScreen`, which has no `stop_reason` attribute at
+    all), and `_require` already raises `ModelError` on `stop_reason == "max_tokens"` before
+    returning. Removing the local check must not weaken the guarantee it restated: a persistently
+    truncated parse must still fail loud, never surface as a usable (silently incomplete)
+    `EgressScreen` -- the one direction this backstop must never fail quietly on. Proved through
+    the REAL `screen_moves` call path, not by reading `_require`'s source."""
+    client = _Client(
+        parse_result=[
+            _Resp(parsed_output=None, stop_reason="max_tokens"),
+            _Resp(parsed_output=None, stop_reason="max_tokens"),
+        ]
+    )
+    with pytest.raises(ModelError, match="max_tokens"):
+        AnthropicModel(client=client).screen_moves(["move one"], "ARGUED HERE")
+    calls = client.messages.parse_calls
+    assert len(calls) == 2  # bounded: the single budget-doubled retry, then loud
+    assert calls[1]["max_tokens"] == calls[0]["max_tokens"] * 2
+
+
 # --- map_territories: `situation` is her words at the front-door call; curated territories are not
 
 
