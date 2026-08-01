@@ -226,15 +226,15 @@ def test_labelled_never_raises(text):
 #   call site produced a given string — it only checks that `screen_moves` itself never interpolates
 #   `text` bare, which is necessary but not sufficient for every caller's payload to be safe.
 #
-# A NOTE ON SCOPE, NOT A FIX: while building this guard, three more places in `model.py` were found
+# HOW THIS GUARD ALREADY PAID FOR ITSELF: building it surfaced three more places in `model.py`
 # interpolating a learner-text-named parameter directly and unwrapped — `grade_sharper`'s
 # `response`, `concierge_sitting_close`'s `situation` (and the per-turn `text` in its transcript
-# loop), and `grade_answer`'s `answer` (the `cs_technical` checkable regime). None of the three
-# were among the nine sites this branch's earlier tasks migrated, so none are in
-# `_KNOWN_LEARNER_SITES` — deliberately: this task's file scope is `tests/test_prompt_text.py`
-# only, and adding them to the allowlist without also fixing `model.py` would make the guard fail
-# on the current tree, which the brief for this task requires to pass. Sealing them is a follow-up,
-# not folded in here.
+# loop), and `grade_answer`'s `answer` (the `cs_technical` checkable regime). None were among the
+# nine sites this branch's earlier tasks migrated, so the guard could not have caught them; a human
+# reading the allowlist found them. Task 6 sealed all three and added their rows below, so they are
+# watched from here on. That is the honest shape of this guard's value: it does not DISCOVER sites,
+# it stops known ones from regressing — and the act of writing down what is known is what turns up
+# what is missing.
 
 MODEL_PATH = Path("src/elenchus/model.py")
 FORGE_PATH = Path("src/elenchus/forge.py")
@@ -253,6 +253,13 @@ _KNOWN_LEARNER_SITES = (
     (FORGE_PATH, "build_brief", "situation"),
     (FORGE_PATH, "build_brief", "focus"),
     (FORGE_PATH, "build_brief", "positions"),
+    # Task 6: the three sites the "A NOTE ON SCOPE" paragraph above found and deferred. They are
+    # sealed now, so the guard can finally watch them; `concierge_sitting_close` gets two rows
+    # because it carries two learner surfaces, the situation blob and each segment's turn text.
+    (MODEL_PATH, "grade_sharper", "response"),
+    (MODEL_PATH, "grade_answer", "answer"),
+    (MODEL_PATH, "concierge_sitting_close", "situation"),
+    (MODEL_PATH, "concierge_sitting_close", "text"),
 )
 
 

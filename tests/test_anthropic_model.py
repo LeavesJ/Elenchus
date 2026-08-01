@@ -846,3 +846,226 @@ def test_map_territories_bounds_a_pathological_situation_on_the_rendered_output(
     # 2050 = _LEARNER_TEXT_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
     # "Her situation:\n\n\nTerritories:\n1. [e1] desc one" wrapper (measured: 2041 chars).
     assert len(user) < 2100
+
+
+# ---------------------------------------------------------------------------
+# Task 6: the three sites task 4 MISSED. Found while building tests/test_prompt_text.py's
+# source-reading guard (see its "A NOTE ON SCOPE" comment, which names all three and says sealing
+# them is a follow-up): `grade_sharper`'s `response`, `grade_answer`'s `answer`, and
+# `concierge_sitting_close`'s `situation` plus the per-turn `text` in its transcript loop. Each was
+# spliced bare into an f-string, so a learner newline could open a line at column 0 of the composed
+# prompt, indistinguishable from a heading the engine itself wrote, and none of the four bounded
+# the rendered size.
+#
+# Same three assertions per site as task 4 above, for the same reasons: (1) an indent-pin against a
+# literal (never built by calling the function under test) proving the exact single-line shape;
+# (2) a column-0 property test over the U+E000+ private-use alphabet, which this module's own
+# template text never contains, so a payload character surviving as a line's leading non-blank
+# character is unambiguous proof of a leak; (3) an ABSOLUTE literal bound on the rendered request
+# for a pathological all-newline input, never `cap + N` computed from the constant under test.
+#
+# `concierge_sitting_close` gets two extra cases because it carries TWO learner surfaces: the
+# situation blob (`_LEARNER_TEXT_CAP`, matching map_territories over literally the same string) and
+# the per-turn dialogue text (`_TURN_RENDER_CAP`, matching `_render_turns` over the same kind of
+# data — turns that include Vera's own re-fed output, which is why that cap is the larger one).
+# It also composes via `messages.create`, not `messages.parse`, so its calls land in
+# `create_calls`.
+# ---------------------------------------------------------------------------
+
+
+def _checkable_q():
+    from elenchus.types import CheckableQuestion, CheckType
+
+    return CheckableQuestion(
+        question_id="q1",
+        concept="at_least_once_vs_exactly_once",
+        prompt="Explain effectively-once.",
+        check_type=CheckType.model_graded,
+        answer_key=["idempotent handler makes a duplicate a no-op"],
+        criteria="must mention duplicates and idempotency",
+    )
+
+
+# --- grade_answer: the cs_technical/checkable regime; `answer` is the student's own submission ---
+
+
+def test_grade_answer_indents_a_single_line_answer_under_the_label():
+    from elenchus.types import CheckableGrade
+
+    client = _Client(parse_result=_Resp(parsed_output=CheckableGrade(correct=True)))
+    AnthropicModel(client=client).grade_answer(_exp(), _checkable_q(), "ARGUED HERE")
+    user = _user_text(client.messages.parse_calls[0])
+    assert user == "Student answer:\n    ARGUED HERE"
+
+
+def test_grade_answer_no_payload_byte_reaches_column_0():
+    from elenchus.types import CheckableGrade
+
+    answer = f"{_LEAK_FIRST}\n{_LEAK_SECOND}"
+    client = _Client(parse_result=_Resp(parsed_output=CheckableGrade(correct=True)))
+    AnthropicModel(client=client).grade_answer(_exp(), _checkable_q(), answer)
+    user = _user_text(client.messages.parse_calls[0])
+    leaders = _leading_nonspace_chars(user)
+    assert _LEAK_FIRST not in leaders  # labelled indents the FIRST line too, unlike bulleted
+    assert _LEAK_SECOND not in leaders
+
+
+def test_grade_answer_raises_loud_when_the_rendered_answer_exceeds_the_cap():
+    """T2 review Fix 1: `_cap_rendered_turn` cuts mid-word and SILENTLY, and
+    `assessment/checkable_scorer.py:33` returns `grade_answer(...).correct` straight through -- so
+    a trimmed tail that carried what `criteria` asks for turns a correct answer into
+    `correct=False`. That is a wrong grade with a checkmark on it, not a formatting nit. Refuse
+    instead, the same call `screen_moves` makes for the same reason: where the cut makes the
+    judgment unreliable, never trim quietly. A one-line answer is sized so the RENDERED blob
+    (label + indent, per `labelled`) lands exactly one character over `_LEARNER_TEXT_CAP` --
+    pins the exact threshold, not an approximation."""
+    from elenchus.model import _LEARNER_TEXT_CAP
+    from elenchus.prompt_text import labelled
+
+    overhead = len(labelled("Student answer:", ""))  # the fixed label+indent wrapper
+    answer = "x" * (_LEARNER_TEXT_CAP - overhead + 1)
+    assert len(labelled("Student answer:", answer)) == _LEARNER_TEXT_CAP + 1  # pin the shape
+
+    client = _Client(parse_result=_Resp(parsed_output=None))
+    with pytest.raises(ModelError, match="grade_answer"):
+        AnthropicModel(client=client).grade_answer(_exp(), _checkable_q(), answer)
+    assert client.messages.parse_calls == []  # raised before composing/sending -- never a call
+
+
+def test_grade_answer_composes_normally_one_character_under_the_cap():
+    """Same construction, one character under: the call composes and reaches the client in FULL.
+    Proves the guard is a threshold rather than a blanket refusal on long answers, and pins the
+    other direction so a smaller cap cannot pass silently the way a loose `len(user) < 2100`
+    bound did."""
+    from elenchus.model import _LEARNER_TEXT_CAP
+    from elenchus.prompt_text import labelled
+    from elenchus.types import CheckableGrade
+
+    overhead = len(labelled("Student answer:", ""))
+    answer = "x" * (_LEARNER_TEXT_CAP - overhead)
+    assert len(labelled("Student answer:", answer)) == _LEARNER_TEXT_CAP  # pin the shape
+
+    client = _Client(parse_result=_Resp(parsed_output=CheckableGrade(correct=True)))
+    AnthropicModel(client=client).grade_answer(_exp(), _checkable_q(), answer)
+    assert len(client.messages.parse_calls) == 1  # composed and sent, not refused
+    user = _user_text(client.messages.parse_calls[0])
+    # composed in FULL, not trimmed: the whole indented answer survives
+    assert user == "Student answer:\n    " + answer
+    assert len(user) == _LEARNER_TEXT_CAP
+
+
+# --- grade_sharper: the blind sharper audit; `response` is the learner's stress-probe reply ------
+
+
+def test_grade_sharper_indents_a_single_line_reply_under_the_label():
+    from elenchus.types import SharperVerdict
+
+    client = _Client(parse_result=_Resp(parsed_output=SharperVerdict(sharper=True, reason="r")))
+    AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", "ARGUED HERE"
+    )
+    user = _user_text(client.messages.parse_calls[0])
+    assert user == "Push:\npush text\n\nStudent reply:\n    ARGUED HERE"
+
+
+def test_grade_sharper_no_payload_byte_reaches_column_0():
+    from elenchus.types import SharperVerdict
+
+    response = f"{_LEAK_FIRST}\n{_LEAK_SECOND}"
+    client = _Client(parse_result=_Resp(parsed_output=SharperVerdict(sharper=True, reason="r")))
+    AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    user = _user_text(client.messages.parse_calls[0])
+    leaders = _leading_nonspace_chars(user)
+    assert _LEAK_FIRST not in leaders
+    assert _LEAK_SECOND not in leaders
+
+
+def test_grade_sharper_bounds_a_pathological_reply_on_the_rendered_output():
+    from elenchus.types import SharperVerdict
+
+    client = _Client(parse_result=_Resp(parsed_output=SharperVerdict(sharper=True, reason="r")))
+    pathological = "\n" * 50_000
+    AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", pathological
+    )
+    user = _user_text(client.messages.parse_calls[0])
+    # 2100 sits above _LEARNER_TEXT_CAP (2000) plus the "…[trimmed]" suffix and the fixed
+    # "Push:\npush text\n\nStudent reply:\n" wrapper (measured: 2027 chars for this case).
+    assert len(user) < 2100
+
+
+# --- concierge_sitting_close: TWO learner surfaces, the situation blob and each segment turn -----
+
+
+# The role literals below are "student"/"Vera", never "you": web/session_runner.py:2776 relabels
+# at the read boundary (`"student" if kind == "you" else "Vera"`), so those are the only two roles
+# any production path hands this function. A fixture role no real caller emits would be a green
+# test over a shape production cannot produce.
+
+
+def test_concierge_sitting_close_indents_the_situation_and_renders_a_segment_turn():
+    client = _Client(create_result=_Resp(content=[_TextBlock("[close]")]))
+    AnthropicModel(client=client).concierge_sitting_close(
+        "ARGUED HERE", [[("student", "turn one")]]
+    )
+    user = _user_text(client.messages.create_calls[0])
+    assert user == (
+        "Her situation:\n    ARGUED HERE\n\n"
+        "Segment 1:\nstudent: turn one\n\nTell the sitting's story."
+    )
+
+
+def test_concierge_sitting_close_no_payload_byte_from_the_situation_reaches_column_0():
+    situation = f"{_LEAK_FIRST}\n{_LEAK_SECOND}"
+    client = _Client(create_result=_Resp(content=[_TextBlock("[close]")]))
+    AnthropicModel(client=client).concierge_sitting_close(situation, [[("student", "turn one")]])
+    user = _user_text(client.messages.create_calls[0])
+    leaders = _leading_nonspace_chars(user)
+    assert _LEAK_FIRST not in leaders
+    assert _LEAK_SECOND not in leaders
+
+
+def test_concierge_sitting_close_no_payload_byte_from_a_segment_turn_reaches_column_0():
+    """The second surface: a learner turn INSIDE a segment. `_LEAK_FIRST` legitimately opens no
+    line here either — the role prefix carries the first line and `LEARNER_INDENT` carries the
+    rest, exactly as `_render_turns` does for the same shape."""
+    turn = f"{_LEAK_FIRST}\n{_LEAK_SECOND}"
+    client = _Client(create_result=_Resp(content=[_TextBlock("[close]")]))
+    AnthropicModel(client=client).concierge_sitting_close("her situation", [[("student", turn)]])
+    user = _user_text(client.messages.create_calls[0])
+    leaders = _leading_nonspace_chars(user)
+    assert _LEAK_FIRST not in leaders
+    assert _LEAK_SECOND not in leaders
+
+
+def test_concierge_sitting_close_bounds_a_pathological_situation_on_the_rendered_output():
+    client = _Client(create_result=_Resp(content=[_TextBlock("[close]")]))
+    pathological = "\n" * 50_000
+    AnthropicModel(client=client).concierge_sitting_close(pathological, [[("student", "turn one")]])
+    user = _user_text(client.messages.create_calls[0])
+    # 2100 sits above _LEARNER_TEXT_CAP (2000) plus the "…[trimmed]" suffix and the fixed
+    # "Her situation:\n" / "Segment 1:\nstudent: turn one" / closing-instruction wrapper
+    # (measured: 2067 chars for this exact fixture).
+    assert len(user) < 2100
+
+
+def test_concierge_sitting_close_bounds_a_pathological_segment_turn_on_the_rendered_output():
+    """The per-turn cap is `_TURN_RENDER_CAP` (6000), not the smaller `_LEARNER_TEXT_CAP`: a
+    segment turn can be one of Vera's OWN completions fed back in, the same reason `_render_turns`
+    uses the larger number for the identical kind of data.
+
+    This bounds ONE turn, which is all either cap does here. The number of turns is bounded by how
+    long the sitting ran (session_runner.py:2773 iterates every stored turn, with no `limit` of
+    `_render_turns`' kind), so the composed close grows with the sitting -- see the compose site's
+    own comment, which states that residual rather than hiding it."""
+    client = _Client(create_result=_Resp(content=[_TextBlock("[close]")]))
+    pathological = "\n" * 50_000
+    AnthropicModel(client=client).concierge_sitting_close(
+        "her situation", [[("student", pathological)]]
+    )
+    user = _user_text(client.messages.create_calls[0])
+    # 6100 sits above _TURN_RENDER_CAP (6000) plus the "…[trimmed]" suffix and the fixed
+    # situation/segment/closing-instruction wrapper (measured: 6082 chars for this exact fixture).
+    assert len(user) < 6100
