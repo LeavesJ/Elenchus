@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..model import Model
+from ..model import Model, ModelError
 from ..types import EntryClass, Experience, hidden_move_details
 
 SAFE_CONTRACT = (
@@ -44,8 +44,17 @@ def _performed(model: Model, exp: Experience, text: str) -> set[int]:
 def egress_safe_reply(model: Model, exp: Experience, text: str) -> bool:
     """For a Doorman authored reply (orientation only — NO push baseline): safe iff it performs
     NONE of the experience's hidden moves (frames and traps). A door turn legitimately performs
-    zero moves, so the flat check has no false-positive risk here. One model call."""
-    return not _performed(model, exp, text)
+    zero moves, so the flat check has no false-positive risk here. One model call.
+
+    boundary-6 Fix 1: a screen that CANNOT run (ModelError from screen_moves — the text was too
+    large to screen reliably) means "not safe", never "kill the segment". Returning False here
+    routes every caller — close/opening/converse, plus turn's re-invite branch, all of which
+    already gate on this return value — straight to the honest static fallback they already have,
+    the same fallback a leak would have produced. Fail closed, not fail dead."""
+    try:
+        return not _performed(model, exp, text)
+    except ModelError:
+        return False
 
 
 _STATIC_CLOSE = (
@@ -77,13 +86,21 @@ def turn(
     the student's words; egress = added-revelation vs the push baseline, fallback the verbatim push.
     push == "" -> RE-INVITE: acknowledge + invite a real position; egress = flat (perform no move),
     fallback SAFE_CONTRACT. A refused/empty author also takes the fallback. arc=(n, cap) is the
-    frame-blind position hint (probe turns only — the stance doctrine in concierge.md eases on it)."""
+    frame-blind position hint (probe turns only — the stance doctrine in concierge.md eases on it).
+
+    boundary-6 Fix 1: on the PROBE branch, a screen that CANNOT run (ModelError) is treated as
+    added revelation — fail closed to the documented fallback (the verbatim push), never let the
+    raise unwind past it."""
     v = resolve_presentation(posture, exp)["voice"]
     text = model.concierge_turn(exp.prompt, push, recent, arc=arc, voice=v)
     if not text:
         return push or SAFE_CONTRACT
     if push:
-        if _performed(model, exp, text) - _performed(model, exp, push):  # added revelation
+        try:
+            added_revelation = _performed(model, exp, text) - _performed(model, exp, push)
+        except ModelError:
+            added_revelation = True  # screen couldn't run -> not safe -> the verbatim push
+        if added_revelation:
             return push
         return text
     if not egress_safe_reply(model, exp, text):
@@ -114,7 +131,11 @@ def sitting_close(
     segment — retrospective, no verdicts (L-4; correctness is never supplied). Egress is ONE
     batched screen over the UNION of the sitting's territories' moves (D1/M13 — the caller
     passes the territory experiences; the scale is measured @live before it is trusted). Flat
-    check — a close performs no move — with the safe static close on refusal/empty/leak."""
+    check — a close performs no move — with the safe static close on refusal/empty/leak.
+
+    boundary-6 Fix 1: a screen that CANNOT run (ModelError) takes the same static fallback as a
+    screen that flags a leak — "not safe" either way, never an unhandled raise that kills the
+    close."""
     v = resolve_presentation(posture, None)["voice"]
     text = model.concierge_sitting_close(situation, segments, voice=v)
     if not text:
@@ -126,7 +147,11 @@ def sitting_close(
                 union.append(move)
     if union:
         valid = range(1, len(union) + 1)
-        if any(i in valid for i in model.screen_moves(union, text).performed):
+        try:
+            performed = model.screen_moves(union, text).performed
+        except ModelError:
+            return _STATIC_CLOSE
+        if any(i in valid for i in performed):
             return _STATIC_CLOSE
     return text
 
@@ -156,14 +181,26 @@ def land(
     perform only moves the STUDENT's own dialogue already performed (added-revelation vs THEIR words,
     the probe gate's logic — you cannot hand someone what they already hold). A flagged landing is
     re-authored ONCE with a no-mechanism steer; then the honest static. Screened in the worker before
-    the done payload."""
+    the done payload.
+
+    boundary-6 Fix 1: the student baseline join has no code-level cap (real, unbounded learner
+    text — see `_TURN_RENDER_CAP`'s comment) and can legitimately exceed the screen's threshold on
+    an ordinary long, rigorous session — the CRITICAL regression this fix closes. A ModelError
+    anywhere in this function (the baseline call or either landing attempt's screen) means the
+    screen could not run, which is "not safe", never "kill the segment" — the whole segment's state
+    is already banked by the time this runs (orchestration.run_session's store.save_state, BEFORE
+    the caller reaches voice.land), so unwinding past `_STATIC_LAND` would split the commit between
+    the engine state and the sitting record. Fail closed to the honest static instead."""
     v = resolve_presentation(posture, exp)["voice"]
     student = _student_text(recent)
-    baseline = _performed(model, exp, student) if student else set()
-    for steer in ("", _RETRY_STEER):
-        text = model.concierge_land(exp.prompt, recent, stop_reason, steer=steer, voice=v)
-        if text and not (_performed(model, exp, text) - baseline):
-            return text
+    try:
+        baseline = _performed(model, exp, student) if student else set()
+        for steer in ("", _RETRY_STEER):
+            text = model.concierge_land(exp.prompt, recent, stop_reason, steer=steer, voice=v)
+            if text and not (_performed(model, exp, text) - baseline):
+                return text
+    except ModelError:
+        pass
     return _STATIC_LAND
 
 

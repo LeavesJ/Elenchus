@@ -688,17 +688,61 @@ def test_classify_response_no_payload_byte_reaches_column_0():
     assert _LEAK_SECOND not in leaders
 
 
-def test_classify_response_bounds_a_pathological_reply_on_the_rendered_output():
+def test_classify_response_raises_on_a_pathological_reply_never_silently_trims_it():
+    """boundary-6 Fix 2: this used to silently trim via `_cap_rendered_turn` -- the same trade
+    `grade_answer`'s own comment (~230 lines below) calls "a wrong grade wearing a checkmark", for
+    the identical reason: `outcome`/`mechanism_supplied` set `FrameState.present_reasoned`, lower a
+    frame state, and stop the judgment loop (assessment/judgment_loop.py:262, 298-311) -- durable
+    learner state. Refuse instead, never trim quietly -- proved on the exact pathological input the
+    old trim test used, now asserting the opposite behavior."""
     rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
     client = _Client(parse_result=_Resp(parsed_output=rc))
     pathological = "\n" * 50_000
+    with pytest.raises(ModelError, match="classify_response"):
+        AnthropicModel(client=client).classify_response(
+            _exp(), "frame", "protect_the_core_lane", "push text", pathological
+        )
+    assert client.messages.parse_calls == []  # raised before composing/sending -- never trimmed
+
+
+def test_classify_response_raises_loud_when_the_rendered_reply_exceeds_the_cap():
+    """Same threshold-pinning shape as `grade_answer`'s own boundary test: a one-line reply sized
+    so the RENDERED blob (label + indent, per `labelled`) lands exactly one character over
+    `_LEARNER_TEXT_CAP` -- pins the exact threshold, not an approximation."""
+    from elenchus.model import _LEARNER_TEXT_CAP
+    from elenchus.prompt_text import labelled
+
+    overhead = len(labelled("Student reply:", ""))  # the fixed label+indent wrapper
+    response = "x" * (_LEARNER_TEXT_CAP - overhead + 1)
+    assert len(labelled("Student reply:", response)) == _LEARNER_TEXT_CAP + 1  # pin the shape
+
+    client = _Client(parse_result=_Resp(parsed_output=None))
+    with pytest.raises(ModelError, match="classify_response"):
+        AnthropicModel(client=client).classify_response(
+            _exp(), "frame", "protect_the_core_lane", "push text", response
+        )
+    assert client.messages.parse_calls == []  # raised before composing/sending -- never a call
+
+
+def test_classify_response_composes_normally_one_character_under_the_cap():
+    """Same construction, one character under the cap: the call composes and reaches the client
+    exactly as before -- proves the guard is a threshold, not a blanket refusal on long replies."""
+    from elenchus.model import _LEARNER_TEXT_CAP
+    from elenchus.prompt_text import labelled
+
+    overhead = len(labelled("Student reply:", ""))
+    response = "x" * (_LEARNER_TEXT_CAP - overhead)
+    assert len(labelled("Student reply:", response)) == _LEARNER_TEXT_CAP  # pin the shape
+
+    rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+    client = _Client(parse_result=_Resp(parsed_output=rc))
     AnthropicModel(client=client).classify_response(
-        _exp(), "frame", "protect_the_core_lane", "push text", pathological
+        _exp(), "frame", "protect_the_core_lane", "push text", response
     )
+    assert len(client.messages.parse_calls) == 1  # composed and sent, not refused
     user = _user_text(client.messages.parse_calls[0])
-    # 2050 = _LEARNER_TEXT_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
-    # "Push:\npush text\n\nStudent reply:\n" wrapper (measured: 2027 chars for this case).
-    assert len(user) < 2100
+    # composed in FULL, not trimmed: the whole "Student reply:\n    " + response tail survives
+    assert user == "Push:\npush text\n\nStudent reply:\n    " + response
 
 
 # --- classify_entry: the "Student's latest message:" compose; `opening` is the boundary ---------
@@ -807,6 +851,53 @@ def test_screen_moves_composes_normally_one_character_under_the_cap():
     # composed in FULL, not trimmed: the whole "Text to screen:\n    " + text tail survives
     assert user == "Hidden moves:\n1. move one\n\nText to screen:\n    " + text
     assert len(user) == len("Hidden moves:\n1. move one\n\n") + _TURN_RENDER_CAP
+
+
+def test_screen_moves_composes_the_realistic_worst_case_concierge_converse_reply():
+    """boundary-6: `_TURN_RENDER_CAP` was calibrated against `_ECHO_MAX_TOKENS` (1024), the wrong
+    producer -- `screen_moves`' actual widest legitimate producer is `concierge_converse`'s reply,
+    which rides `_parse_required`'s single truncation retry and can legitimately reach
+    `_CLASSIFY_MAX_TOKENS * 2 = 8192` tokens before that call itself fails loud. At the ~4
+    chars/token approximation this file's own comments use, that is 8192 * 4 = 32768 characters
+    (`python3 -c "print(8192*4)"`) -- a real, doctrine-compliant completion the engine itself
+    could produce. It must compose, not raise: the old 6000 cap would have refused this exact
+    input, which is the regression this threshold change fixes."""
+    from elenchus.types import EgressScreen
+
+    realistic_worst_case = "x" * (8192 * 4)
+    screen = EgressScreen(performed=[], evidence="e")
+    client = _Client(parse_result=_Resp(parsed_output=screen))
+    AnthropicModel(client=client).screen_moves(["move one"], realistic_worst_case)
+    assert len(client.messages.parse_calls) == 1  # composed and sent, not refused
+
+
+def test_screen_moves_still_raises_on_input_no_real_producer_can_emit():
+    """The raise is not removed by the threshold fix -- it moves to where it belongs. An input far
+    past every real producer's ceiling (`_TURN_RENDER_CAP` itself, comfortably above the 32768-char
+    realistic worst case above) still refuses rather than silently screening a truncated tail."""
+    from elenchus.model import _TURN_RENDER_CAP
+
+    pathological = "x" * (_TURN_RENDER_CAP * 2)
+    client = _Client(parse_result=_Resp(parsed_output=None))
+    with pytest.raises(ModelError, match="screen_moves"):
+        AnthropicModel(client=client).screen_moves(["move one"], pathological)
+    assert client.messages.parse_calls == []
+
+
+def test_screen_moves_clears_every_scenario_forge_can_legally_serve():
+    """boundary-6: a T2 review caught a band between `forge._MAX_LEN` (gates the RAW scenario) and
+    `_TURN_RENDER_CAP` (gates the RENDERED one, always at least 20 characters longer via
+    `labelled`) -- a scenario forge judged servable could still get refused by the screen. Proved
+    against forge's own constant, not by proximity: a raw scenario at forge's exact ceiling must
+    still compose through `screen_moves`."""
+    from elenchus.forge import _MAX_LEN
+    from elenchus.types import EgressScreen
+
+    scenario_at_forges_ceiling = "x" * _MAX_LEN
+    screen = EgressScreen(performed=[], evidence="e")
+    client = _Client(parse_result=_Resp(parsed_output=screen))
+    AnthropicModel(client=client).screen_moves(["move one"], scenario_at_forges_ceiling)
+    assert len(client.messages.parse_calls) == 1  # composed and sent, not refused -- band closed
 
 
 def test_screen_moves_fails_loud_on_persistent_truncation():
@@ -1074,7 +1165,8 @@ def test_concierge_sitting_close_bounds_a_pathological_situation_on_the_rendered
 
 
 def test_concierge_sitting_close_bounds_a_pathological_segment_turn_on_the_rendered_output():
-    """The per-turn cap is `_TURN_RENDER_CAP` (6000), not the smaller `_LEARNER_TEXT_CAP`: a
+    """The per-turn cap is `_TURN_RENDER_CAP` (40000, boundary-6 review — raised from 6000; see
+    model.py's own comment on `_TURN_RENDER_CAP` for why), not the smaller `_LEARNER_TEXT_CAP`: a
     segment turn can be one of Vera's OWN completions fed back in, the same reason `_render_turns`
     uses the larger number for the identical kind of data.
 
@@ -1083,11 +1175,11 @@ def test_concierge_sitting_close_bounds_a_pathological_segment_turn_on_the_rende
     `_render_turns`' kind), so the composed close grows with the sitting -- see the compose site's
     own comment, which states that residual rather than hiding it."""
     client = _Client(create_result=_Resp(content=[_TextBlock("[close]")]))
-    pathological = "\n" * 50_000
+    pathological = "\n" * 300_000
     AnthropicModel(client=client).concierge_sitting_close(
         "her situation", [[("student", pathological)]]
     )
     user = _user_text(client.messages.create_calls[0])
-    # 6100 sits above _TURN_RENDER_CAP (6000) plus the "…[trimmed]" suffix and the fixed
-    # situation/segment/closing-instruction wrapper (measured: 6082 chars for this exact fixture).
-    assert len(user) < 6100
+    # 40100 sits above _TURN_RENDER_CAP (40000) plus the "…[trimmed]" suffix and the fixed
+    # situation/segment/closing-instruction wrapper (measured: 40082 chars for this exact fixture).
+    assert len(user) < 40100

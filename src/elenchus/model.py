@@ -348,38 +348,61 @@ def _render_rubric(rubric) -> str:
     return "\n".join(lines)
 
 
-_TURN_RENDER_CAP = 6000  # characters, measured on the RENDERED turn (after indent_after_first),
+_TURN_RENDER_CAP = 40000  # characters, measured on the RENDERED turn (after indent_after_first),
 # not the raw text handed in. judgment_loop._POSITION_CAP's own comment records that a cap
 # measured before render does not bound what comes out: a newline-heavy raw text can render to
 # several times its own length once every continuation line gets its own LEARNER_INDENT prefix.
 # Capping the rendered string directly sidesteps that arithmetic: the bound holds regardless of
 # how the raw turn is shaped -- one enormous line, thousands of empty ones, anything between.
 #
-# Raised from 2000 (review, 2026-07-31): 2000 sat BELOW the model's own output ceiling, so it
-# could trim a turn the engine itself produced -- not just pathological learner input -- because
-# Vera's own turns are fed back into `recent` and re-rendered on every later call
-# (web/session_runner.py:1225 appends a probe/re-invite turn; :2302 appends a concierge_converse
-# reply). `_ECHO_MAX_TOKENS = 1024` (model.py:282, `grep -n "_ECHO_MAX_TOKENS = " model.py`) bounds
-# concierge_turn/close/land, the routine per-turn Vera author. Assuming ~4 characters per output
-# token -- a standard order-of-magnitude approximation for English text; this repo has no offline
-# tokenizer to measure it exactly, and calling the live count_tokens endpoint is out of scope for
-# a code comment, so this ratio is ASSUMED, falsified by any real rendered turn this repo observes
-# exceeding the cap -- 1024 * 4 = 4096 characters (`python3 -c "print(1024*4)"`). 6000 sits above
-# that with headroom.
+# Raised from 6000 to 40000 (boundary-6 review): `screen_moves` (~150 lines below) reuses this
+# same constant as a REFUSAL threshold, not a trim point -- it raises ModelError instead of
+# composing when the rendered text it is asked to screen exceeds the cap (boundary-4 Fix 1). 6000
+# was carried over from `_render_turns`' trim point, itself derived from `_ECHO_MAX_TOKENS = 1024`
+# -- the budget for concierge_turn/close/open/land, the routine per-turn Vera author. But that is
+# the WRONG producer for `screen_moves`: its widest callers are `voice.close`/`voice.sitting_close`
+# screening `concierge_sitting_close`'s close and `forge.forge_experience` screening
+# `forge_scenario`'s scenario, both under `_FORGE_MAX_TOKENS = 4096` (model.py:303), and
+# `voice.converse` screening `concierge_converse`'s reply, under `_CLASSIFY_MAX_TOKENS = 4096`
+# (model.py:290) -- but `concierge_converse` rides `_parse_required` (model.py:541-557), which
+# doubles the budget to 8192 on a single truncation retry before it fails loud, so a real
+# (non-raising) `reply` can legitimately reach that doubled ceiling. 8192 is therefore the largest
+# token budget any producer that legitimately reaches `screen_moves` can spend: by the same ~4
+# characters-per-output-token approximation this comment already uses (ASSUMED, falsified by any
+# real rendered turn this repo observes exceeding it) -- 8192 * 4 = 32768 characters
+# (`python3 -c "print(8192*4)"`). The old 6000 sat 26768 characters BELOW that ceiling, so it could
+# refuse a real, doctrine-compliant completion the engine itself produced. The OTHER caller that
+# reaches this same threshold carries real, unbounded learner text rather than a token-bounded
+# completion: `voice.land`'s `_student_text(recent)` baseline, every student turn in the session
+# joined -- see that function's own comment; an ordinary rigorous session can grow that join past
+# any fixed cap, which is why `voice.land` must degrade to its static fallback on a genuine
+# ModelError here rather than assume the cap alone is enough (boundary-6 Fix 1). 40000 sits above
+# the 32768 producer ceiling with 7232 characters of headroom
+# (`python3 -c "print(40000-32768)"`) for the render overhead (`labelled` adds a fixed 20
+# characters plus 4 per line the text contains --
+# `python3 -c "from elenchus.prompt_text import labelled; print(len(labelled('Text to screen:', '')))"`
+# prints 20) and for ordinary paragraph structure -- the same style of margin the old 6000 kept
+# over ITS OWN floor of 4096 (`_ECHO_MAX_TOKENS * 4`).
 #
-# concierge_converse's reply is a second, larger source, also fed back into `recent`
-# (session_runner.py:2302) and re-rendered later: it runs under `_CLASSIFY_MAX_TOKENS = 4096`
-# (model.py:290), doubled to 8192 on one retry (_parse_required, model.py:474-475). That budget
-# buys adaptive-thinking headroom, not proportionally longer visible text -- the same relationship
-# this file's own comments on `_CLASSIFY_MAX_TOKENS` and `_SCREEN_MAX_TOKENS` already document
-# (lines 284-297): a larger cap only buys thinking room, and cost does not rise unless the call
-# genuinely thinks or writes more. Doctrine, not this constant, is what keeps a converse reply
-# short, the same as every other Vera-authored turn -- 6000 is not a hard guarantee against that
-# call's full token ceiling, but no cap short of tens of thousands of characters would be, and the
-# old 2000 was not one either.
+# This also closes a second gap the same review caught: `forge._MAX_LEN = 6000` gates the RAW
+# scenario `forge_experience` will serve, but `screen_moves` measures the RENDERED one (always at
+# least 20 characters longer, +4 per line) -- at the old 6000 cap a scenario forge would happily
+# serve as servable could still get refused by the screen measuring a few characters more. A raw
+# scenario at forge's own ceiling now renders to at most 6000 + 20 + 4*(its own line count)
+# characters, nowhere near 40000, so every scenario forge can serve clears `screen_moves` with
+# room to spare -- tests/test_anthropic_model.py pins this against both constants directly, not by
+# proximity.
+#
+# `_ECHO_MAX_TOKENS = 1024` (model.py:282, `grep -n "_ECHO_MAX_TOKENS = " model.py`) still bounds
+# concierge_turn/close/open/land at 1024 * 4 = 4096 characters (`python3 -c "print(1024*4)"`),
+# comfortably inside the new cap too. Doctrine, not this constant, is what keeps every
+# Vera-authored turn short -- 40000 is not a hard guarantee against any call's full token ceiling,
+# but no cap short of the producers' own doubled ceiling would be, and the old 6000 was not one
+# either (the mistake this raise fixes, one function over from the raise that fixed it for
+# `_render_turns` the first time).
 #
 # Worst-case block size for the wind-down callers (limit=20: concierge_land, concierge_converse):
-# 6000 * 20 = 120,000 characters (`python3 -c "print(6000*20)"`), plus the fixed "Recent
+# 40000 * 20 = 800,000 characters (`python3 -c "print(40000*20)"`), plus the fixed "Recent
 # exchange:" header and the role-prefix overhead.
 
 # Task 4 (graded/routing sites: classify_response, classify_entry, map_territories; task 6 added
@@ -621,9 +644,33 @@ class AnthropicModel:
         # Task 4: `response` is the learner's own reply -- the boundary seam, `_LEARNER_TEXT_CAP`
         # (see its comment). `push` is the engine's own generated angle, never learner text, and
         # stays outside the seam.
-        user = f"Push:\n{push}\n\n" + _cap_rendered_turn(
-            labelled("Student reply:", response), cap=_LEARNER_TEXT_CAP
-        )
+        #
+        # boundary-6 Fix 2: the cap is a REFUSAL threshold here, never a trim point, matching
+        # `grade_answer` (~160 lines below) rather than the silent `_cap_rendered_turn` this used
+        # to call. `grade_answer`'s own comment argues the raise is required because a silently
+        # clipped tail that carried what `criteria` asks for turns a correct answer into
+        # `correct=False` -- a wrong grade wearing a checkmark. That argument applies verbatim
+        # here: `outcome`/`mechanism_supplied` are read in `assessment/judgment_loop.py` (line
+        # ~262) to set `FrameState.present_reasoned`, lower a frame state on regression, and decide
+        # whether the loop stops -- durable learner state, exactly like a grade. A reply silently
+        # clipped past the mechanism the target angle asks for could turn a real closure into a
+        # false "not closed" (or worse, a false "regressed"), corrupting `FrameState` the same way
+        # a clipped answer corrupts a checkable grade. Fail loud instead: raise before composing,
+        # never trim. The raise propagates out of `judgment_loop.assess` uncaught (nothing there is
+        # persisted mid-loop -- `orchestration.run_session`'s `store.save_state` runs only AFTER
+        # `assess` returns), so no state is banked for this experience; it surfaces at the same
+        # worker-level catch `web/session_runner.py`'s `except Exception:` already uses for every
+        # other critical-call failure (`classify_intake`, `generate_push`, and -- via
+        # `checkable_scorer.score_question` -- this exact `grade_answer` raise on the cs_technical
+        # side), which logs the traceback server-side and emits the honest, actionable
+        # `_DOOR_FAILED_NUDGE` ("refresh to pick up where you left off") rather than crashing or
+        # silently corrupting the ledger. Degrades, does not dead-end.
+        rendered = labelled("Student reply:", response)
+        if len(rendered) > _LEARNER_TEXT_CAP:
+            raise ModelError(
+                "classify_response input exceeds _LEARNER_TEXT_CAP — classification unreliable"
+            )
+        user = f"Push:\n{push}\n\n{rendered}"
         resp = self._parse_required(
             max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,

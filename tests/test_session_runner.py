@@ -56,6 +56,49 @@ def test_worker_failure_logs_the_traceback_and_keeps_the_wire_generic(tmp_path, 
     assert rec.exc_info is not None and rec.exc_info[0] is RuntimeError
 
 
+def test_classify_response_oversized_reply_degrades_to_the_error_nudge_not_a_dead_end(
+    tmp_path, make_fake, caplog
+):
+    """boundary-6 Fix 2 trace: `classify_response` now raises `ModelError` on an oversized reply
+    (mirroring `grade_answer`). Nothing is persisted mid-assessment -- `orchestration.run_session`'s
+    `store.save_state` runs only AFTER the assessor returns -- so the raise must degrade to the SAME
+    worker-level safety net every other critical-call failure already uses (this file's own
+    `test_worker_failure_logs_the_traceback_and_keeps_the_wire_generic`, and -- via
+    `checkable_scorer.score_question` -- `grade_answer`'s identical raise on the cs_technical side):
+    logged server-side, the client sees the honest generic nudge, never a hang or a crash. Driven
+    through the REAL `AnthropicModel.classify_response` threshold check on a genuinely oversized
+    reply, not a hand-built exception -- only `classify_response` is swapped for the real raiser;
+    every other call on the FakeModel stays scripted and safe."""
+    from elenchus.model import AnthropicModel, ModelError, _LEARNER_TEXT_CAP
+
+    class _NeverCalledClient:
+        def __init__(self):
+            self.messages = self
+
+        def parse(self, **kw):
+            raise AssertionError("must never reach the client -- the cap check raises first")
+
+    real_raiser = AnthropicModel(client=_NeverCalledClient())
+
+    def factory():
+        m = make_fake()
+        m.classify_response = real_raiser.classify_response
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "cr-oversized.db"), model_factory=factory)
+    reg.start("s1", now=NOW)
+    reg.step("s1", reg.menu_index("s1", _ANCHOR))
+    tag, _ = reg.step("s1", "a real position")
+    assert tag == "say"  # the first push, shown before any reply is graded
+
+    oversized_reply = "x" * (_LEARNER_TEXT_CAP + 1000)
+    tag, data = reg.step("s1", oversized_reply)
+    assert tag == "error"  # degrades to the honest nudge -- never hangs, never crashes the process
+    assert "refresh" in data["message"]
+    rec = next(r for r in caplog.records if "segment worker died" in r.getMessage())
+    assert rec.exc_info is not None and rec.exc_info[0] is ModelError
+
+
 def test_menu_titles_are_clean_and_never_leak_the_veldra_ref(tmp_path, make_fake):
     """The doors must show human display titles, never the ledger_ref (veldra: slug)."""
     reg = SessionRegistry(str(tmp_path / "m.db"), model_factory=make_fake)

@@ -168,6 +168,20 @@ def test_turn_falls_back_on_partial_added_revelation():
     assert voice.turn(m, _exp(), "PUSH", [("student", "x")]) == "PUSH"
 
 
+def test_turn_probe_falls_back_to_push_when_the_screen_cannot_run():
+    """boundary-6 Fix 1: on the PROBE branch, a screen that CANNOT run must fail closed to the
+    verbatim push (`turn`'s own documented fallback), the same as added revelation, never raise
+    past it. Driven through the REAL `AnthropicModel.screen_moves` threshold check on a genuinely
+    oversized engaged turn, not a hand-built exception."""
+    from elenchus.model import _TURN_RENDER_CAP
+
+    oversized_engaged_text = "x" * (_TURN_RENDER_CAP + 1000)
+    stub = _StubClient(text=oversized_engaged_text)
+    m = AnthropicModel(client=stub)
+    out = voice.turn(m, _exp(), "the canonical push", [("student", "hi")])
+    assert out == "the canonical push"
+
+
 # --- egress flat check (re-invite / close baseline) -----------------------------------------------
 
 
@@ -192,6 +206,18 @@ def test_egress_also_covers_rubric_traps():
     assert voice.egress_safe_reply(m, _exp(), "anything") is False
 
 
+def test_egress_safe_reply_returns_unsafe_when_the_screen_cannot_run():
+    """boundary-6 Fix 1: a screen that cannot run must yield the UNSAFE answer (False), so every
+    caller gated on this return value takes its already-documented safe path — never let the
+    ModelError propagate as if the text had simply never been checked. Driven through the REAL
+    `AnthropicModel.screen_moves` threshold check, not a hand-built exception."""
+    from elenchus.model import _TURN_RENDER_CAP
+
+    oversized = "x" * (_TURN_RENDER_CAP + 1000)
+    m = AnthropicModel(client=_StubClient())
+    assert voice.egress_safe_reply(m, _exp(), oversized) is False
+
+
 # --- voice.close -----------------------------------------------------------------------------------
 
 
@@ -207,6 +233,35 @@ def test_close_falls_back_on_leak():
 
     m = _LeakClose(_intake(), {})
     assert voice.close(m, _exp(), [("student", "x")]) == voice._STATIC_CLOSE
+
+
+def test_close_falls_back_to_static_when_the_screen_cannot_run():
+    """boundary-6 Fix 1: a screen that CANNOT run (ModelError) must take the same honest fallback
+    as a leak, never raise past it. Driven through the REAL `AnthropicModel.screen_moves` threshold
+    check with a genuinely oversized authored close, not a hand-built exception."""
+    from elenchus.model import _TURN_RENDER_CAP
+
+    oversized_close = "x" * (_TURN_RENDER_CAP + 1000)
+    stub = _StubClient(text=oversized_close)
+    m = AnthropicModel(client=stub)
+    assert voice.close(m, _exp(), [("student", "I'd hold the line.")]) == voice._STATIC_CLOSE
+
+
+# --- voice.sitting_close ----------------------------------------------------------------------------
+
+
+def test_sitting_close_falls_back_to_static_when_the_screen_cannot_run():
+    """boundary-6 Fix 1: `_STATIC_CLOSE` is bypassed by the same unhandled-raise shape as `close`
+    and `land` — `sitting_close` calls `model.screen_moves` directly, not through
+    `egress_safe_reply`. Driven through the REAL `AnthropicModel.screen_moves` threshold check with
+    a genuinely oversized authored sitting close, not a hand-built exception."""
+    from elenchus.model import _TURN_RENDER_CAP
+
+    oversized_close = "x" * (_TURN_RENDER_CAP + 1000)
+    stub = _StubClient(text=oversized_close)
+    m = AnthropicModel(client=stub)
+    out = voice.sitting_close(m, "her situation", [[("student", "position one")]], [_exp()])
+    assert out == voice._STATIC_CLOSE
 
 
 # --- voice.land (felt arrival, honest by stop_reason, egress-backstopped) -------------------------
@@ -229,6 +284,25 @@ def test_land_falls_back_to_static_on_leak():
 
     m = _LeakLand(_intake(), {})
     assert voice.land(m, _exp(), [("student", "x")], "converged") == voice._STATIC_LAND
+
+
+def test_land_falls_back_to_static_when_the_screen_cannot_run():
+    """boundary-6 Fix 1 (the CRITICAL regression): `land`'s student baseline
+    (`_student_text(recent)`) is real, unbounded learner text -- large enough, an ordinary
+    rigorous session can legitimately trip `screen_moves`' own oversized-input guard. Before this
+    fix that ModelError unwound straight past `_STATIC_LAND` and killed the whole segment, even
+    though the engine's state was already banked. Driven through the REAL
+    `AnthropicModel.screen_moves` threshold check with a genuinely oversized student turn, not a
+    hand-built exception -- and the assertion on `stub.last` proves the baseline raised BEFORE
+    `concierge_land` was ever called, not merely that some fallback text won."""
+    from elenchus.model import _TURN_RENDER_CAP
+
+    oversized_student_turn = "x" * (_TURN_RENDER_CAP + 1000)
+    stub = _StubClient(text="[a landing that must never be reached]")
+    m = AnthropicModel(client=stub)
+    out = voice.land(m, _exp(), [("student", oversized_student_turn)], "converged")
+    assert out == voice._STATIC_LAND
+    assert stub.last == {}  # concierge_land never called -- the baseline raised first
 
 
 def test_land_falls_back_to_static_on_empty():
@@ -351,6 +425,23 @@ def test_converse_falls_back_to_honest_static_on_leak():
     m = FakeLeakModel(_intake(), {})
     out, _ = voice.converse(m, _exp(), [("student", "x")], "tell me the trick")
     assert out == voice._CONVERSE_DONE_FRESH
+    assert out != voice.SAFE_CONTRACT and "push" not in out.lower()
+
+
+def test_converse_falls_back_to_honest_static_when_the_screen_cannot_run():
+    """boundary-6 Fix 1: `_STATIC_CLOSE`'s sibling constants (`_CONVERSE_DONE_*`) are the honest
+    fallback the sibling functions all bypassed the same way. Driven through the REAL
+    `AnthropicModel.screen_moves` threshold check on a genuinely oversized authored reply, not a
+    hand-built exception — the raise comes from `concierge_converse`'s own reply, exactly as it
+    would on a real overlong completion."""
+    from elenchus.model import _TURN_RENDER_CAP
+    from elenchus.types import ConverseTurn
+
+    oversized_reply = "x" * (_TURN_RENDER_CAP + 1000)
+    stub = _StubClient(parsed=ConverseTurn(reply=oversized_reply, next_pressure=""))
+    m = AnthropicModel(client=stub)
+    out, _ = voice.converse(m, _exp(), [("student", "I'd hold.")], "so what now?")
+    assert out == voice._CONVERSE_DONE_FRESH  # no sequel here -> the fresh static
     assert out != voice.SAFE_CONTRACT and "push" not in out.lower()
 
 
@@ -761,15 +852,16 @@ def test_render_turns_bounds_a_pathological_turn_on_the_rendered_output():
     cap were raised to something that no longer bounds anything (e.g. 300000). `judgment_loop.
     _POSITION_CAP`'s own comment records that a cap measured before render does not bound what
     comes out: a newline-heavy input renders to several times its own length once every
-    continuation line gets an indent. 50,000 raw characters (over 8x the 6000-char render cap as
-    of this writing) must not reach the model as 50,000 characters."""
+    continuation line gets an indent. 300,000 raw characters (7.5x the 40000-char render cap as of
+    this writing, boundary-6 review — raised from 6000; see model.py's own comment on
+    `_TURN_RENDER_CAP` for why) must not reach the model as 300,000 characters."""
     from elenchus.model import _render_turns
 
-    pathological = "\n" * 50_000
+    pathological = "\n" * 300_000
     out = _render_turns([("student", pathological)])
-    # 6100 = _TURN_RENDER_CAP (6000) + slack for the "…[trimmed]" suffix and the fixed
-    # "Recent exchange:\n" / "\n\n" wrapper (measured: 6029 chars for this single-turn case).
-    assert len(out) < 6100
+    # 40100 = _TURN_RENDER_CAP (40000) + slack for the "…[trimmed]" suffix and the fixed
+    # "Recent exchange:\n" / "\n\n" wrapper (measured: 40029 chars for this single-turn case).
+    assert len(out) < 40100
 
 
 def test_concierge_converse_prompt_defers_a_fresh_pressure_to_the_next_chapter():
