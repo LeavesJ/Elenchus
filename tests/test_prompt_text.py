@@ -195,10 +195,12 @@ def test_labelled_never_raises(text):
 #
 # A known learner-text variable, in a KNOWN function this guard has been told to watch, appearing
 # literally inside `{...}` braces in that function's body (an f-string interpolation slot) with no
-# call to `prompt_text.bulleted`/`labelled`/`indent_after_first` (or model.py's own `_bulleted`
-# wrapper) standing between the raw value and the brace. Every compliant site today passes the raw
-# variable as a plain ARGUMENT to one of those calls and only ever interpolates the RESULT (bound
-# to a different name — `said`, `blocks`, the return of `labelled(...)`), so this one pattern is
+# call to `prompt_text.bulleted`/`labelled`/`indent_after_first` standing between the raw value and
+# the brace (`generate_push` called through model.py's own `_bulleted` wrapper until boundary-7
+# Fix 2 deleted it as a redundant second copy of `prompt_text.bulleted`; it now calls straight
+# through, so every compliant site names the same three seam functions). Every compliant site today
+# passes the raw variable as a plain ARGUMENT to one of those calls and only ever interpolates the
+# RESULT (bound to a different name — `said`, `blocks`, the return of `labelled(...)`), so this one pattern is
 # enough to catch the careless mistake: pasting `{response}` straight into a prompt string instead
 # of routing it through the seam. This holds whether the f-string is single/double-quoted OR
 # TRIPLE-quoted (`f"""...{response}..."""`): `_strip_noise` only blanks a `"""..."""` span when it
@@ -365,8 +367,8 @@ def _bare_interpolation(src: str, func_name: str, varname: str) -> tuple[int, st
 
     Returns `(line_number, matched_text)` on a hit, `None` when clean. Every compliant call site in
     this codebase passes the raw learner variable as a plain ARGUMENT to `bulleted`/`labelled`/
-    `indent_after_first`/`_bulleted` and only interpolates the RESULT, bound to a different name —
-    so a bare `{varname...}` is not merely correlated with a violation here, it IS one."""
+    `indent_after_first` and only interpolates the RESULT, bound to a different name — so a bare
+    `{varname...}` is not merely correlated with a violation here, it IS one."""
     body, start_line = _extract_function(src, func_name)
     clean = _strip_noise(body)
     m = re.search(r"\{\s*" + re.escape(varname) + r"\b[^}]*\}", clean)

@@ -437,7 +437,7 @@ def test_generate_push_with_no_positions_omits_both_headings():
     both carry the same empty on_angle, so the mutation changes both sides identically and the
     comparison still holds. With an empty Positions(), the composed user message must contain
     NEITHER group's heading, checked against the literal heading strings, not by calling
-    _bulleted or reading Positions() defaults."""
+    prompt_text.bulleted or reading Positions() defaults."""
     from elenchus.types import Positions
 
     client = _Client(create_result=_Resp(content=[_TextBlock("[push]")]))
@@ -554,8 +554,9 @@ def test_generate_push_steer_and_positions_compose_together():
 # R4: every line of a position is indented, so no learner line reaches column 0
 # ---------------------------------------------------------------------------
 
-# `_bulleted` renders both position groups (model.py:357), but `on_angle` is unreachable on
-# every production path: no target is ever pushed twice, so `_group_positions` can never put
+# `prompt_text.bulleted` renders both position groups (boundary-7 Fix 2 deleted model.py's own
+# `_bulleted`, a byte-equivalent second copy, in favour of calling it directly), but `on_angle` is
+# unreachable on every production path: no target is ever pushed twice, so `_group_positions` can never put
 # anything in it. `elsewhere` is the reachable group that carries the learner's actual replies.
 # Every case below is parametrised across both groups, so the injection defense is pinned on the
 # live path, not certified exclusively on dead code.
@@ -829,6 +830,61 @@ def test_classify_entry_bounds_a_pathological_opening_on_the_rendered_output():
     # 2075 = _LEARNER_TEXT_TRIM_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
     # "Problem:\nProblem text\n\nStudent's latest message:\n" wrapper (measured: 2033 chars).
     assert len(user) < 2100
+
+
+# --- classify_intake: the "Student's opening:" compose; `opening` is the boundary (boundary-7
+# Fix 1). Unlike classify_entry/map_territories, the composed user message here IS the rendered,
+# capped blob with no outer wrapper text, so the pathological/oversized bounds below can be pinned
+# EXACTLY (`== 2010`), not merely bounded above by an absolute literal the way those two are. ------
+
+
+def test_classify_intake_indents_a_single_line_opening_under_the_label():
+    wire = _Wire(frames=[], traps=[])
+    client = _Client(parse_result=_Resp(parsed_output=wire))
+    AnthropicModel(client=client).classify_intake(_exp(), "ARGUED HERE")
+    user = _user_text(client.messages.parse_calls[0])
+    assert user == "Student's opening:\n    ARGUED HERE"
+
+
+def test_classify_intake_no_payload_byte_reaches_column_0():
+    wire = _Wire(frames=[], traps=[])
+    client = _Client(parse_result=_Resp(parsed_output=wire))
+    opening = f"{_LEAK_FIRST}\n{_LEAK_SECOND}"
+    AnthropicModel(client=client).classify_intake(_exp(), opening)
+    user = _user_text(client.messages.parse_calls[0])
+    leaders = _leading_nonspace_chars(user)
+    assert _LEAK_FIRST not in leaders
+    assert _LEAK_SECOND not in leaders
+
+
+def test_classify_intake_bounds_a_pathological_opening_on_the_rendered_output():
+    """`classify_intake`'s composed user message has no outer wrapper (unlike classify_entry's
+    "Problem:\\n...\\n\\n" prefix or map_territories' trailing "Territories:" block), so the
+    rendered length after truncation is exactly the cap plus the elision marker, not merely bounded
+    -- 2000 (`_LEARNER_TEXT_TRIM_CAP`) + 10 (`len("…[trimmed]")`) = 2010, verified directly rather
+    than approximated."""
+    wire = _Wire(frames=[], traps=[])
+    client = _Client(parse_result=_Resp(parsed_output=wire))
+    pathological = "\n" * 50_000
+    AnthropicModel(client=client).classify_intake(_exp(), pathological)
+    user = _user_text(client.messages.parse_calls[0])
+    assert len(user) == 2010
+    assert user.endswith("…[trimmed]")
+
+
+def test_classify_intake_never_sends_a_hundred_thousand_character_opening_at_full_length():
+    """Direct reproduction of the reviewer's boundary-7 finding: a 100,000-character opening used
+    to reach `messages.parse` byte-identical to the raw input, unindented and unbounded, while the
+    same string through `classify_entry` arrived indented and capped. It must now compose no larger
+    than the trim cap allows and never verbatim."""
+    wire = _Wire(frames=[], traps=[])
+    client = _Client(parse_result=_Resp(parsed_output=wire))
+    opening = "x" * 100_000
+    AnthropicModel(client=client).classify_intake(_exp(), opening)
+    user = _user_text(client.messages.parse_calls[0])
+    assert len(user) == 2010
+    assert user != opening
+    assert user.startswith("Student's opening:\n    ")
 
 
 # --- screen_moves: `text` is a MIX (mostly Vera-authored, one caller passes real learner text) ---

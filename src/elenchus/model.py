@@ -5,7 +5,7 @@ from typing import Literal, Protocol, runtime_checkable
 from pydantic import BaseModel
 
 from .content_loader import load_prompt, load_spike_prompt
-from .prompt_text import LEARNER_INDENT, indent_after_first, labelled
+from .prompt_text import LEARNER_INDENT, bulleted, indent_after_first, labelled
 from .types import (
     CandidateFrame,
     CheckableGrade,
@@ -531,20 +531,6 @@ def _render_turns(recent: list[tuple[str, str]], limit: int = 6) -> str:
     return "Recent exchange:\n" + "\n".join(lines) + "\n\n"
 
 
-def _bulleted(items: tuple[str, ...]) -> str:
-    """Render positions as a list no learner line can escape.
-
-    Exists because both position groups (on_angle and elsewhere) in generate_push need it.
-    Continuation lines are indented past the bullet, so a newline in a learner's reply cannot
-    place text at column 0 where the composed prompt's own headings live."""
-    out: list[str] = []
-    for item in items:
-        lines = item.splitlines() or [""]
-        out.append(f"  - {lines[0]}")
-        out.extend(f"    {line}" for line in lines[1:])
-    return "\n".join(out)
-
-
 def _target_detail(rubric, kind: str, code: str) -> str:
     if kind == "trap":
         for t in rubric.traps:
@@ -610,10 +596,37 @@ class AnthropicModel:
 
     def classify_intake(self, exp: Experience, opening: str) -> IntakeClassification:
         system = load_prompt("intake") + _situation_block(exp) + "\n\n" + _render_rubric(exp.rubric)
+        # boundary-7 Fix 1: `opening` is the learner's own text -- the boundary seam -- and used to
+        # reach here byte-identical, unindented, and unbounded (a 100,000-character opening reached
+        # the wire at full length). Routed through `labelled`/`_cap_rendered_turn` like every other
+        # sealed site, taking `_LEARNER_TEXT_TRIM_CAP` rather than `_LEARNER_TEXT_REFUSAL_CAP`.
+        #
+        # This result seeds `frame_states`/`trap_states` for the WHOLE judgment loop
+        # (assessment/judgment_loop.py:186-188) -- durable-looking output, the same class as
+        # `classify_response`'s `ResponseClassification`, which argues for the REFUSAL cap. But the
+        # two are not equivalent, and the difference is structural, not just timing: `assess`
+        # initialises both dicts to the FLOOR (`FrameState.absent`/`TrapState.not_tripped`,
+        # judgment_loop.py:187-188) BEFORE this call ever runs, so a trimmed opening can only
+        # UNDER-report a frame the learner did engage -- evidence trimmed off the tail never reaches
+        # the model, so at worst a present frame reads as absent. It can never REGRESS an
+        # already-`present_reasoned` state the way a trimmed `classify_response` reply can
+        # (classify_response's own comment, ~90 lines below), because at this point in the loop
+        # there is nothing yet to regress. An under-reported frame is not a lost verdict either:
+        # `_select_target`/`_converged` (judgment_loop.py:147-182) simply probe it again during the
+        # loop's ordinary operation, spending a push, not corrupting a grade -- the same self-healing
+        # `classify_entry`'s own trim on its "opening" field already relies on. A REFUSAL cap here
+        # would instead kill the segment on the learner's very FIRST message, before a single push
+        # has been generated and before any value has been delivered to them -- the worst point in
+        # the loop to spend a cap `_LEARNER_TEXT_REFUSAL_CAP`'s own comment sizes for exactly one
+        # cost: "the cost of being wrong is a dead segment." Degrading context here costs a redundant
+        # probe, not a session.
+        rendered = _cap_rendered_turn(
+            labelled("Student's opening:", opening), cap=_LEARNER_TEXT_TRIM_CAP
+        )
         resp = self._parse_required(
             max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,
-            messages=[{"role": "user", "content": opening}],
+            messages=[{"role": "user", "content": rendered}],
             output_format=_IntakeWire,
             **_PARAMS,
         )
@@ -647,10 +660,10 @@ class AnthropicModel:
         # target CODE is never emitted — only the grouping derived from it.
         blocks = ""
         if positions.on_angle:
-            said = _bulleted(positions.on_angle)
+            said = bulleted(positions.on_angle)
             blocks += f"What the student has already argued on THIS angle:\n{said}\n\n"
         if positions.elsewhere:
-            said = _bulleted(positions.elsewhere)
+            said = bulleted(positions.elsewhere)
             blocks += f"Positions taken elsewhere in this sitting:\n{said}\n\n"
         user = f"{prefix}Experience:\n{exp.prompt}\n\n{blocks}Angle to push on:\n{detail}"
         # The steered retry (R3): composed exactly like forge_scenario's, so an empty steer is
