@@ -45,6 +45,23 @@ def _exp():
     )
 
 
+# boundary-6 Fix 3: real prose, not a synthetic "x" * n filler string -- a thorough but ordinary
+# learner reply reasoning through the same licensing decision `_exp()` poses, the kind an engaged
+# person actually types. 422 words, 2476 characters (`len(_ORDINARY_REPLY)`,
+# `len(_ORDINARY_REPLY.split())`) -- the exact figures `model.py`'s `_LEARNER_TEXT_REFUSAL_CAP`
+# comment cites and derives its threshold from. This is the fixture that comment's own reproduction
+# command imports directly:
+# `PYTHONPATH=src .venv/bin/python3 -c "import sys; sys.path.insert(0, 'tests');
+# from test_anthropic_model import _ORDINARY_REPLY as t; print(len(t), len(t.split()))"`
+_ORDINARY_REPLY = """I'm going to hold the licensing boundary rather than carve out a special case for this one account, even though the short-term relationship cost is real. The core promise the product makes to every customer is that the terms in the contract are the terms that apply, not the terms a big enough account can negotiate after the fact by threatening to walk. If I bend that promise once, quietly, for the account that shouts loudest this quarter, I haven't solved a pricing problem, I've told every other customer's legal team that the contract is a starting offer rather than a binding one. That is a much larger liability than the revenue at stake in this single renewal.
+
+I also don't think the ambiguity in the contract language is actually ambiguous in the way the account's counsel is framing it. Their reading requires ignoring the renewal clause's plain reference to the fee schedule in effect at signing, not the fee schedule in effect at renewal. A court would likely side with our reading, and even if a court didn't, our internal legal team has already flagged that litigating this would cost more than the disputed amount. But cost of litigation isn't the same as merit of position, and giving in because a fight is expensive is exactly the incentive structure that invites the next account to manufacture the same ambiguity.
+
+What I'd actually do is separate the two questions the account is bundling together. One is the contractual question: does the fee schedule at signing govern, or the one at renewal? I'd hold firm there, in writing, citing the clause. The other is a genuine relationship question: is there a legitimate reason, unrelated to the contract dispute, to offer this account better terms going forward, the same way we'd evaluate any account's expansion pricing? If there is, that's a forward-looking commercial conversation, decided on its own merits, not a concession extracted by threatening to walk over a signed term. Collapsing those two questions into one negotiation is what lets an account use dispute pressure to buy pricing leverage it hasn't earned, and it's the trap I'd be most careful not to fall into here, because in the moment it feels like one reasonable compromise rather than two decisions that should never have touched.
+
+If the account walks anyway, that is a real cost, and I'd rather absorb it honestly and learn from why the ambiguity existed in our own drafting than fix it by making an exception nobody else gets to see."""
+
+
 # --- fake Anthropic client (duck-typed; no SDK, no network) ---
 
 
@@ -708,13 +725,15 @@ def test_classify_response_raises_on_a_pathological_reply_never_silently_trims_i
 def test_classify_response_raises_loud_when_the_rendered_reply_exceeds_the_cap():
     """Same threshold-pinning shape as `grade_answer`'s own boundary test: a one-line reply sized
     so the RENDERED blob (label + indent, per `labelled`) lands exactly one character over
-    `_LEARNER_TEXT_CAP` -- pins the exact threshold, not an approximation."""
-    from elenchus.model import _LEARNER_TEXT_CAP
+    `_LEARNER_TEXT_REFUSAL_CAP` -- pins the exact threshold, not an approximation."""
+    from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
     from elenchus.prompt_text import labelled
 
     overhead = len(labelled("Student reply:", ""))  # the fixed label+indent wrapper
-    response = "x" * (_LEARNER_TEXT_CAP - overhead + 1)
-    assert len(labelled("Student reply:", response)) == _LEARNER_TEXT_CAP + 1  # pin the shape
+    response = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead + 1)
+    assert (
+        len(labelled("Student reply:", response)) == _LEARNER_TEXT_REFUSAL_CAP + 1
+    )  # pin the shape
 
     client = _Client(parse_result=_Resp(parsed_output=None))
     with pytest.raises(ModelError, match="classify_response"):
@@ -727,12 +746,12 @@ def test_classify_response_raises_loud_when_the_rendered_reply_exceeds_the_cap()
 def test_classify_response_composes_normally_one_character_under_the_cap():
     """Same construction, one character under the cap: the call composes and reaches the client
     exactly as before -- proves the guard is a threshold, not a blanket refusal on long replies."""
-    from elenchus.model import _LEARNER_TEXT_CAP
+    from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
     from elenchus.prompt_text import labelled
 
     overhead = len(labelled("Student reply:", ""))
-    response = "x" * (_LEARNER_TEXT_CAP - overhead)
-    assert len(labelled("Student reply:", response)) == _LEARNER_TEXT_CAP  # pin the shape
+    response = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead)
+    assert len(labelled("Student reply:", response)) == _LEARNER_TEXT_REFUSAL_CAP  # pin the shape
 
     rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
     client = _Client(parse_result=_Resp(parsed_output=rc))
@@ -743,6 +762,34 @@ def test_classify_response_composes_normally_one_character_under_the_cap():
     user = _user_text(client.messages.parse_calls[0])
     # composed in FULL, not trimmed: the whole "Student reply:\n    " + response tail survives
     assert user == "Push:\npush text\n\nStudent reply:\n    " + response
+
+
+def test_classify_response_composes_a_realistic_thorough_reply_instead_of_raising():
+    """boundary-6 Fix 3: `_LEARNER_TEXT_CAP` (the single constant this used to share with
+    `grade_answer` and every trim site) raised at 2000 characters -- well inside the range of a
+    real, engaged, thorough reply, not merely a pathological one. `_ORDINARY_REPLY` (defined near
+    the top of this file) is 422 words of real reasoning prose reasoning through the same
+    licensing decision `_exp()` poses, not a synthetic filler string, and it alone renders past the
+    old 2000-character cap. A threshold that refuses this input is refusing the ordinary case, not
+    the pathological one, which is exactly the bug this fix closes: it must compose in FULL."""
+    from elenchus.prompt_text import labelled
+
+    assert len(_ORDINARY_REPLY.split()) == 422  # "several hundred words" -- pin the fixture's claim
+
+    rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", _ORDINARY_REPLY
+    )
+    assert len(client.messages.parse_calls) == 1  # composed and sent, never refused
+    user = _user_text(client.messages.parse_calls[0])
+    # equality against the real render (not a substring check): `_ORDINARY_REPLY` has internal
+    # paragraph breaks, and `labelled` indents every continuation line, so the raw fixture text
+    # never appears verbatim inside a composed multi-paragraph prompt -- only its INDENTED form
+    # does. Byte-for-byte equality against that indented form is still proof of "composed in full,
+    # not trimmed": `_cap_rendered_turn` would have appended "…[trimmed]" and cut the tail instead.
+    assert user == "Push:\npush text\n\n" + labelled("Student reply:", _ORDINARY_REPLY)
+    assert "…[trimmed]" not in user
 
 
 # --- classify_entry: the "Student's latest message:" compose; `opening` is the boundary ---------
@@ -779,7 +826,7 @@ def test_classify_entry_bounds_a_pathological_opening_on_the_rendered_output():
     pathological = "\n" * 50_000
     AnthropicModel(client=client).classify_entry("Problem text", pathological, [])
     user = _user_text(client.messages.parse_calls[0])
-    # 2075 = _LEARNER_TEXT_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
+    # 2075 = _LEARNER_TEXT_TRIM_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
     # "Problem:\nProblem text\n\nStudent's latest message:\n" wrapper (measured: 2033 chars).
     assert len(user) < 2100
 
@@ -833,8 +880,8 @@ def test_screen_moves_raises_loud_when_the_rendered_text_exceeds_the_cap():
 def test_screen_moves_composes_normally_one_character_under_the_cap():
     """Same construction, one character under the cap: the call composes and reaches the client
     exactly as before -- proves the guard is a threshold, not a blanket refusal on long text, and
-    pins the OTHER direction so swapping in a smaller cap (e.g. `_LEARNER_TEXT_CAP`) cannot pass
-    silently the way the old `len(user) < 6100` bound did."""
+    pins the OTHER direction so swapping in a smaller cap (e.g. `_LEARNER_TEXT_TRIM_CAP`) cannot
+    pass silently the way the old `len(user) < 6100` bound did."""
     from elenchus.model import _TURN_RENDER_CAP
     from elenchus.prompt_text import labelled
     from elenchus.types import EgressScreen
@@ -956,7 +1003,7 @@ def test_map_territories_bounds_a_pathological_situation_on_the_rendered_output(
     pathological = "\n" * 50_000
     AnthropicModel(client=client).map_territories(pathological, [("e1", "desc one")])
     user = _user_text(client.messages.parse_calls[0])
-    # 2050 = _LEARNER_TEXT_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
+    # 2050 = _LEARNER_TEXT_TRIM_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
     # "Her situation:\n\n\nTerritories:\n1. [e1] desc one" wrapper (measured: 2041 chars).
     assert len(user) < 2100
 
@@ -978,11 +1025,17 @@ def test_map_territories_bounds_a_pathological_situation_on_the_rendered_output(
 # for a pathological all-newline input, never `cap + N` computed from the constant under test.
 #
 # `concierge_sitting_close` gets two extra cases because it carries TWO learner surfaces: the
-# situation blob (`_LEARNER_TEXT_CAP`, matching map_territories over literally the same string) and
-# the per-turn dialogue text (`_TURN_RENDER_CAP`, matching `_render_turns` over the same kind of
-# data — turns that include Vera's own re-fed output, which is why that cap is the larger one).
-# It also composes via `messages.create`, not `messages.parse`, so its calls land in
+# situation blob (`_LEARNER_TEXT_TRIM_CAP`, matching map_territories over literally the same
+# string) and the per-turn dialogue text (`_TURN_RENDER_CAP`, matching `_render_turns` over the
+# same kind of data — turns that include Vera's own re-fed output, which is why that cap is the
+# larger one). It also composes via `messages.create`, not `messages.parse`, so its calls land in
 # `create_calls`.
+#
+# `grade_sharper`'s `response` is the exception in this list: boundary-6 Fix 3 split
+# `_LEARNER_TEXT_CAP` into `_LEARNER_TEXT_REFUSAL_CAP` (raise sites) and `_LEARNER_TEXT_TRIM_CAP`
+# (the low-cost trim sites above), and `grade_sharper` takes the FORMER even though it only trims
+# -- see `_LEARNER_TEXT_REFUSAL_CAP`'s own comment in model.py for why its cap must track
+# `classify_response`'s, not the smaller trim group.
 # ---------------------------------------------------------------------------
 
 
@@ -1030,14 +1083,16 @@ def test_grade_answer_raises_loud_when_the_rendered_answer_exceeds_the_cap():
     `correct=False`. That is a wrong grade with a checkmark on it, not a formatting nit. Refuse
     instead, the same call `screen_moves` makes for the same reason: where the cut makes the
     judgment unreliable, never trim quietly. A one-line answer is sized so the RENDERED blob
-    (label + indent, per `labelled`) lands exactly one character over `_LEARNER_TEXT_CAP` --
-    pins the exact threshold, not an approximation."""
-    from elenchus.model import _LEARNER_TEXT_CAP
+    (label + indent, per `labelled`) lands exactly one character over `_LEARNER_TEXT_REFUSAL_CAP`
+    -- pins the exact threshold, not an approximation."""
+    from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
     from elenchus.prompt_text import labelled
 
     overhead = len(labelled("Student answer:", ""))  # the fixed label+indent wrapper
-    answer = "x" * (_LEARNER_TEXT_CAP - overhead + 1)
-    assert len(labelled("Student answer:", answer)) == _LEARNER_TEXT_CAP + 1  # pin the shape
+    answer = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead + 1)
+    assert (
+        len(labelled("Student answer:", answer)) == _LEARNER_TEXT_REFUSAL_CAP + 1
+    )  # pin the shape
 
     client = _Client(parse_result=_Resp(parsed_output=None))
     with pytest.raises(ModelError, match="grade_answer"):
@@ -1050,13 +1105,13 @@ def test_grade_answer_composes_normally_one_character_under_the_cap():
     Proves the guard is a threshold rather than a blanket refusal on long answers, and pins the
     other direction so a smaller cap cannot pass silently the way a loose `len(user) < 2100`
     bound did."""
-    from elenchus.model import _LEARNER_TEXT_CAP
+    from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
     from elenchus.prompt_text import labelled
     from elenchus.types import CheckableGrade
 
     overhead = len(labelled("Student answer:", ""))
-    answer = "x" * (_LEARNER_TEXT_CAP - overhead)
-    assert len(labelled("Student answer:", answer)) == _LEARNER_TEXT_CAP  # pin the shape
+    answer = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead)
+    assert len(labelled("Student answer:", answer)) == _LEARNER_TEXT_REFUSAL_CAP  # pin the shape
 
     client = _Client(parse_result=_Resp(parsed_output=CheckableGrade(correct=True)))
     AnthropicModel(client=client).grade_answer(_exp(), _checkable_q(), answer)
@@ -1064,7 +1119,40 @@ def test_grade_answer_composes_normally_one_character_under_the_cap():
     user = _user_text(client.messages.parse_calls[0])
     # composed in FULL, not trimmed: the whole indented answer survives
     assert user == "Student answer:\n    " + answer
-    assert len(user) == _LEARNER_TEXT_CAP
+    assert len(user) == _LEARNER_TEXT_REFUSAL_CAP
+
+
+def test_grade_answer_composes_a_realistic_thorough_reply_instead_of_raising():
+    """Same fix, same fixture, the other raise site: `_ORDINARY_REPLY` (422 words of real
+    reasoning prose, defined near the top of this file) must compose in FULL rather than refuse --
+    it alone renders past the old shared `_LEARNER_TEXT_CAP` (2000)."""
+    from elenchus.prompt_text import labelled
+    from elenchus.types import CheckableGrade
+
+    assert len(_ORDINARY_REPLY.split()) == 422  # "several hundred words" -- pin the fixture's claim
+
+    client = _Client(parse_result=_Resp(parsed_output=CheckableGrade(correct=True)))
+    AnthropicModel(client=client).grade_answer(_exp(), _checkable_q(), _ORDINARY_REPLY)
+    assert len(client.messages.parse_calls) == 1  # composed and sent, never refused
+    user = _user_text(client.messages.parse_calls[0])
+    # equality against the real render, not a substring check -- see the identical note on
+    # `test_classify_response_composes_a_realistic_thorough_reply_instead_of_raising` above.
+    assert user == labelled("Student answer:", _ORDINARY_REPLY)
+    assert "…[trimmed]" not in user
+
+
+def test_grade_answer_raises_on_a_pathological_answer_never_silently_trims_it():
+    """Symmetric to `classify_response`'s identical test above, on the cs_technical raise site:
+    `grade_answer`'s own comment argues the raise exists because a silently clipped tail flips
+    `correct` to False -- a wrong grade wearing a checkmark. The threshold change that let
+    `_ORDINARY_REPLY` through above must not have removed the refusal itself; a genuinely
+    pathological answer -- the same fixture size used throughout this file for input no real
+    person typed -- still raises rather than composing a truncated grade request."""
+    pathological = "\n" * 50_000
+    client = _Client(parse_result=_Resp(parsed_output=None))
+    with pytest.raises(ModelError, match="grade_answer"):
+        AnthropicModel(client=client).grade_answer(_exp(), _checkable_q(), pathological)
+    assert client.messages.parse_calls == []  # raised before composing/sending -- never a call
 
 
 # --- grade_sharper: the blind sharper audit; `response` is the learner's stress-probe reply ------
@@ -1096,6 +1184,10 @@ def test_grade_sharper_no_payload_byte_reaches_column_0():
 
 
 def test_grade_sharper_bounds_a_pathological_reply_on_the_rendered_output():
+    """boundary-6 Fix 3: `grade_sharper`'s trim cap is now `_LEARNER_TEXT_REFUSAL_CAP` (20000, not
+    the smaller `_LEARNER_TEXT_TRIM_CAP`) -- see model.py's comment on why it must track
+    `classify_response`'s raise threshold. Still bounded, just at the larger number: a genuinely
+    pathological reply still gets trimmed, not composed in full."""
     from elenchus.types import SharperVerdict
 
     client = _Client(parse_result=_Resp(parsed_output=SharperVerdict(sharper=True, reason="r")))
@@ -1104,9 +1196,36 @@ def test_grade_sharper_bounds_a_pathological_reply_on_the_rendered_output():
         _exp(), "frame", "protect_the_core_lane", "push text", pathological
     )
     user = _user_text(client.messages.parse_calls[0])
-    # 2100 sits above _LEARNER_TEXT_CAP (2000) plus the "…[trimmed]" suffix and the fixed
-    # "Push:\npush text\n\nStudent reply:\n" wrapper (measured: 2027 chars for this case).
-    assert len(user) < 2100
+    # 20100 sits above _LEARNER_TEXT_REFUSAL_CAP (20000) plus the "…[trimmed]" suffix and the
+    # fixed "Push:\npush text\n\nStudent reply:\n" wrapper (measured: 20027 chars for this case).
+    assert len(user) < 20100
+
+
+def test_grade_sharper_composes_in_full_a_reply_classify_response_already_admitted():
+    """The coupling `_LEARNER_TEXT_REFUSAL_CAP`'s own comment argues for: `grade_sharper` re-grades
+    the exact same string `classify_response` already let through its raise gate
+    (assessment/sharper_grader.py:24 passes the trajectory point's own `response`), so its trim cap
+    must equal `classify_response`'s raise cap, or the blind auditor would silently read fewer
+    bytes than the instructor call that produced the trajectory point in the first place -- the
+    audit property `grade_answer`'s own comment names explicitly. Pin the boundary: a reply exactly
+    at the largest size `classify_response` can ever compose without refusing (one character under
+    `_LEARNER_TEXT_REFUSAL_CAP`, the same construction
+    `test_classify_response_composes_normally_one_character_under_the_cap` uses) must still reach
+    `grade_sharper` byte-identical, never trimmed."""
+    from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
+    from elenchus.prompt_text import labelled
+    from elenchus.types import SharperVerdict
+
+    overhead = len(labelled("Student reply:", ""))
+    response = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead)  # classify_response's own ceiling
+
+    client = _Client(parse_result=_Resp(parsed_output=SharperVerdict(sharper=True, reason="r")))
+    AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    user = _user_text(client.messages.parse_calls[0])
+    assert "…[trimmed]" not in user  # a no-op trim: byte-identical to classify_response's own view
+    assert user == "Push:\npush text\n\nStudent reply:\n    " + response
 
 
 # --- concierge_sitting_close: TWO learner surfaces, the situation blob and each segment turn -----
@@ -1158,7 +1277,7 @@ def test_concierge_sitting_close_bounds_a_pathological_situation_on_the_rendered
     pathological = "\n" * 50_000
     AnthropicModel(client=client).concierge_sitting_close(pathological, [[("student", "turn one")]])
     user = _user_text(client.messages.create_calls[0])
-    # 2100 sits above _LEARNER_TEXT_CAP (2000) plus the "…[trimmed]" suffix and the fixed
+    # 2100 sits above _LEARNER_TEXT_TRIM_CAP (2000) plus the "…[trimmed]" suffix and the fixed
     # "Her situation:\n" / "Segment 1:\nstudent: turn one" / closing-instruction wrapper
     # (measured: 2067 chars for this exact fixture).
     assert len(user) < 2100
@@ -1166,9 +1285,9 @@ def test_concierge_sitting_close_bounds_a_pathological_situation_on_the_rendered
 
 def test_concierge_sitting_close_bounds_a_pathological_segment_turn_on_the_rendered_output():
     """The per-turn cap is `_TURN_RENDER_CAP` (40000, boundary-6 review — raised from 6000; see
-    model.py's own comment on `_TURN_RENDER_CAP` for why), not the smaller `_LEARNER_TEXT_CAP`: a
-    segment turn can be one of Vera's OWN completions fed back in, the same reason `_render_turns`
-    uses the larger number for the identical kind of data.
+    model.py's own comment on `_TURN_RENDER_CAP` for why), not the smaller `_LEARNER_TEXT_TRIM_CAP`:
+    a segment turn can be one of Vera's OWN completions fed back in, the same reason
+    `_render_turns` uses the larger number for the identical kind of data.
 
     This bounds ONE turn, which is all either cap does here. The number of turns is bounded by how
     long the sitting ran (session_runner.py:2773 iterates every stored turn, with no `limit` of

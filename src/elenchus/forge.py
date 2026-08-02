@@ -98,6 +98,14 @@ class ForgeResult:
 # position per converged segment over a whole sitting, strictly larger than a single message, so
 # the shared cap already bounds it at least as tightly as a per-position cap would, without a
 # second number to justify separately.
+#
+# This is a TRIM-only site (`_cap_blob` below never raises): the cost of being wrong here is
+# degraded context, not a dead segment, so it can sit at the ordinary distribution rather than
+# clearing it with headroom. If this ever grows a REFUSAL path instead, read
+# `model._LEARNER_TEXT_REFUSAL_CAP`'s comment first -- a threshold that fails loud must clear the
+# ordinary distribution of the text it gates, not merely the pathological one, the general rule
+# `_TURN_RENDER_CAP` and `_LEARNER_TEXT_CAP` (renamed `_LEARNER_TEXT_REFUSAL_CAP`/
+# `_LEARNER_TEXT_TRIM_CAP`) both paid to learn on this branch.
 _BRIEF_BLOB_CAP = 2000
 
 

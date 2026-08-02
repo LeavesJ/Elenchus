@@ -403,30 +403,82 @@ _TURN_RENDER_CAP = 40000  # characters, measured on the RENDERED turn (after ind
 #
 # Worst-case block size for the wind-down callers (limit=20: concierge_land, concierge_converse):
 # 40000 * 20 = 800,000 characters (`python3 -c "print(40000*20)"`), plus the fixed "Recent
-# exchange:" header and the role-prefix overhead.
+# exchange:" header and the role-prefix overhead. (See the GENERAL RULE below, at the site where
+# `_LEARNER_TEXT_CAP` used to be defined -- this cap paid for the same lesson twice, 2000 -> 6000
+# -> 40000, before that constant repeated the mistake a third time, one function over.)
 
 # Task 4 (graded/routing sites: classify_response, classify_entry, map_territories; task 6 added
 # grade_sharper and concierge_sitting_close's situation blob -- NOT its per-turn text, which takes
-# `_TURN_RENDER_CAP` like every other dialogue turn): a SMALLER cap for text that
-# is typed directly by a person, never something the model wrote back. `grade_answer` uses this
-# number too but as a REFUSAL threshold rather than a trim point, because its result IS a grade --
-# see its own comment. Unlike
-# `_TURN_RENDER_CAP`, this number has no model max_tokens ceiling it has to clear -- the concern
-# that forced `_TURN_RENDER_CAP` up from 2000 to 6000 was Vera's OWN turns being re-fed through
-# `recent` and re-rendered (session_runner.py appends a probe/re-invite/converse reply, then
-# passes it back through `_render_turns` on the next call); nothing re-feeds a model
-# completion back through any of these sites. This mirrors `forge.build_brief`'s `_BRIEF_BLOB_CAP`
-# (forge.py:101) exactly, restated here for a sibling site over the identical KIND of text -- and
-# for `map_territories` and `concierge_sitting_close`, over the identical DATA: both are handed
-# the same `situation` string session_runner.py already threads into `build_brief`, so capping it
-# at the same number here is matching an existing precedent for this data, not inventing a new
-# one. (map_territories' other caller, `_capture_steer`, passes `next_pressure` instead -- a
+# `_TURN_RENDER_CAP` like every other dialogue turn): text typed directly by a person, never
+# something the model wrote back. Unlike `_TURN_RENDER_CAP`, none of this has a model max_tokens
+# ceiling it has to clear -- the concern that forced `_TURN_RENDER_CAP` up from 2000 to 6000 was
+# Vera's OWN turns being re-fed through `recent` and re-rendered (session_runner.py appends a
+# probe/re-invite/converse reply, then passes it back through `_render_turns` on the next call);
+# nothing re-feeds a model completion back through any of these sites.
+#
+# GENERAL RULE (boundary-6 Fix 3, the third time this exact shape has bitten on this branch --
+# `_TURN_RENDER_CAP` above paid for it twice, 2000 -> 6000 -> 40000, before the single
+# `_LEARNER_TEXT_CAP` this comment used to define repeated the mistake one function over, at a
+# threshold roughly 350 words wide): a threshold that FAILS LOUD must clear the ORDINARY
+# distribution of the text it gates, not merely the pathological one. A refusal is not a speed
+# bump -- it is a dead segment for whoever typed the median-to-thorough input that tripped it, so
+# size a raise against the realistic maximum a real producer emits, WITH headroom, and only THEN
+# confirm it still refuses the pathological case. Sizing it against the pathological case first
+# and calling the gap "margin" is the mistake, because the ordinary case was never checked against
+# it at all. A threshold that only TRIMS is a different problem: trimming degrades the prompt's
+# context, it does not end the session, so it may sit closer to the ordinary distribution than a
+# raise ever safely can. When one constant is asked to do both jobs, as `_LEARNER_TEXT_CAP` used
+# to, split it and size each half against what it actually costs to be wrong -- do not average the
+# two costs into one number that is too small for the raise and unnecessarily tight for the trim.
+#
+# `_LEARNER_TEXT_REFUSAL_CAP` gates `classify_response` and `grade_answer`, which RAISE rather
+# than trim (see each function's own comment: a silently clipped tail can turn a real
+# closure/correct answer into a false negative, corrupting durable `FrameState`/`correct` --
+# worse than a formatting nit). Measured, not guessed: `tests/test_anthropic_model.py`'s
+# `_ORDINARY_REPLY` fixture is real prose reasoning through a licensing decision, not a synthetic
+# filler string -- `PYTHONPATH=src .venv/bin/python3 -c "import sys; sys.path.insert(0, 'tests');
+# from test_anthropic_model import _ORDINARY_REPLY as t; print(len(t), len(t.split()))"` prints
+# `2476 422`: 422 words of ordinary, thorough reasoning render to 2476 characters, ~5.87
+# characters per word (`python3 -c "print(2476/422)"`). ASSUMED (falsified by any real reply this
+# repo observes exceeding it): a genuinely maximal single typed reply -- the kind of exhaustive,
+# multi-paragraph answer an unusually thorough but real learner might compose in one sitting --
+# runs to roughly 1500 words, which at the same measured ratio is ~8801 characters
+# (`python3 -c "print(1500*2476/422)"`). `_LEARNER_TEXT_REFUSAL_CAP = 20000` sits 11199 characters
+# above that assumed ceiling (`python3 -c "print(20000-1500*2476/422)"`) -- more than double it
+# (`python3 -c "print(20000/(1500*2476/422))"` prints ~2.27) -- and tolerates a reply of ~3409
+# words before refusing (`python3 -c "print(20000*422/2476)"`), eight times the length of the
+# measured thorough fixture. The pathological fixtures this suite already exercises against these
+# sites (`"\n" * 50_000`, `"x" * (cap * 2)`) sit far on the other side of that gap and still raise.
+_LEARNER_TEXT_REFUSAL_CAP = 20000
+
+# `_LEARNER_TEXT_TRIM_CAP` gates the sites where a clipped tail costs only degraded context, never
+# a dead segment, so it may sit closer to the ordinary distribution than a raise safely could:
+# `classify_entry`'s door opening, and `map_territories`/`concierge_sitting_close`'s `situation`
+# blob, which mirrors `forge.build_brief`'s `_BRIEF_BLOB_CAP` (forge.py:101) over the identical
+# KIND of text -- and for `map_territories`/`concierge_sitting_close`, the identical DATA: both
+# are handed the same `situation` string session_runner.py already threads into `build_brief`, so
+# capping it at the same number here matches an existing precedent for this data, not inventing a
+# new one. (map_territories' other caller, `_capture_steer`, passes `next_pressure` instead -- a
 # model-DISTILLED value, per its own field doc in types.ConverseTurn "a distilled fresh decision"
 # whose "label echoes her raw words" -- i.e. a short phrase, not a full authored reply, so it
 # carries none of the re-fed-turn concern either; ASSUMED short based on that doc, not measured,
-# since no offline path produces one.) 2000 stays generous against a real typed message on its
-# own terms.
-_LEARNER_TEXT_CAP = 2000
+# since no offline path produces one.) 2000 stays generous against a real typed message on its own
+# terms and is UNCHANGED by this split -- the problem the split above fixes was never these sites;
+# a trimmed opening or situation blob degrades context, it does not corrupt a grade or kill a
+# sitting.
+#
+# `grade_sharper` is the one exception that looks like a trim site but is NOT governed by this
+# constant: it re-grades the SAME string `classify_response` already routed through the raise gate
+# above (assessment/sharper_grader.py:24 passes `p.response`, the trajectory point
+# `classify_response` produced), so it takes `_LEARNER_TEXT_REFUSAL_CAP` instead, even though it
+# only trims (see its own comment). If it used this smaller trim cap, a reply between 2000 and
+# 20000 characters -- one `classify_response` composed in FULL because it cleared the raise gate --
+# would arrive at the blind sharper audit silently shortened, so the instructor and the auditor
+# would grade different bytes of the same reply, breaking the audit property `grade_answer`'s own
+# comment (~230 lines below) names explicitly. Matching the cap makes the trim a no-op for every
+# reply `classify_response` ever admits: identical compose over identical data needs an identical
+# bound, not merely an identical-looking one.
+_LEARNER_TEXT_TRIM_CAP = 2000
 
 
 def _cap_rendered_turn(rendered: str, cap: int = _TURN_RENDER_CAP) -> str:
@@ -440,9 +492,9 @@ def _cap_rendered_turn(rendered: str, cap: int = _TURN_RENDER_CAP) -> str:
     line, so it cannot undo the indent discipline that keeps a learner byte off column 0.
 
     Originally turn-specific (`_render_turns`' per-turn cap, the only caller until task 4); the
-    `cap` parameter generalises it for the four graded/routing sites, some of which pass
-    `_LEARNER_TEXT_CAP` instead of the default -- see that constant's comment for which site uses
-    which and why."""
+    `cap` parameter generalises it for the graded/routing sites, some of which pass
+    `_LEARNER_TEXT_TRIM_CAP` or `_LEARNER_TEXT_REFUSAL_CAP` instead of the default -- see each
+    constant's own comment for which site uses which and why."""
     if len(rendered) <= cap:
         return rendered
     return rendered[:cap] + "…[trimmed]"
@@ -641,9 +693,9 @@ class AnthropicModel:
             + f"\nBinding constraint: {exp.rubric.binding_constraint}"
             + f"\nTarget angle: {detail}"
         )
-        # Task 4: `response` is the learner's own reply -- the boundary seam, `_LEARNER_TEXT_CAP`
-        # (see its comment). `push` is the engine's own generated angle, never learner text, and
-        # stays outside the seam.
+        # Task 4: `response` is the learner's own reply -- the boundary seam,
+        # `_LEARNER_TEXT_REFUSAL_CAP` (see its comment). `push` is the engine's own generated
+        # angle, never learner text, and stays outside the seam.
         #
         # boundary-6 Fix 2: the cap is a REFUSAL threshold here, never a trim point, matching
         # `grade_answer` (~160 lines below) rather than the silent `_cap_rendered_turn` this used
@@ -666,9 +718,10 @@ class AnthropicModel:
         # `_DOOR_FAILED_NUDGE` ("refresh to pick up where you left off") rather than crashing or
         # silently corrupting the ledger. Degrades, does not dead-end.
         rendered = labelled("Student reply:", response)
-        if len(rendered) > _LEARNER_TEXT_CAP:
+        if len(rendered) > _LEARNER_TEXT_REFUSAL_CAP:
             raise ModelError(
-                "classify_response input exceeds _LEARNER_TEXT_CAP — classification unreliable"
+                "classify_response input exceeds _LEARNER_TEXT_REFUSAL_CAP — classification "
+                "unreliable"
             )
         user = f"Push:\n{push}\n\n{rendered}"
         resp = self._parse_required(
@@ -685,10 +738,10 @@ class AnthropicModel:
     ) -> EntryClassification:
         system = load_prompt("entry")  # frame-blind: doctrine only, never the rubric
         # Task 4: `opening` is the learner's own latest message -- the boundary seam,
-        # `_LEARNER_TEXT_CAP` (see its comment). `_render_turns(recent)` already caps its own
+        # `_LEARNER_TEXT_TRIM_CAP` (see its comment). `_render_turns(recent)` already caps its own
         # dialogue turns at `_TURN_RENDER_CAP` (untouched here).
         user = f"Problem:\n{prompt}\n\n{_render_turns(recent)}" + _cap_rendered_turn(
-            labelled("Student's latest message:", opening), cap=_LEARNER_TEXT_CAP
+            labelled("Student's latest message:", opening), cap=_LEARNER_TEXT_TRIM_CAP
         )
         resp = self._parse_required(
             max_tokens=2048,
@@ -847,11 +900,12 @@ class AnthropicModel:
             + f"\nCriteria: {question.criteria}"
         )
         # Task 6: `answer` is the student's own submission -- the boundary seam,
-        # `_LEARNER_TEXT_CAP` (see its comment). Both `Work.respond` implementations return text a
-        # person typed, never a model completion (orchestration.py:34 `input("> ")`;
-        # web/session_runner.py:1226 the raw student reply off the worker channel), so this carries
-        # none of the re-fed-turn concern that forced `_TURN_RENDER_CAP` higher. The question, key,
-        # and criteria are curated content and stay in `system`, outside the seam.
+        # `_LEARNER_TEXT_REFUSAL_CAP` (see its comment). Both `Work.respond` implementations
+        # return text a person typed, never a model completion (orchestration.py:34
+        # `input("> ")`; web/session_runner.py:1226 the raw student reply off the worker channel),
+        # so this carries none of the re-fed-turn concern that forced `_TURN_RENDER_CAP` higher.
+        # The question, key, and criteria are curated content and stay in `system`, outside the
+        # seam.
         #
         # The cap is a REFUSAL threshold here, never a trim point, and unlike its three sibling
         # sites this one does not call `_cap_rendered_turn` at all (T2 review Fix 1). Reason:
@@ -861,11 +915,15 @@ class AnthropicModel:
         # exactly the trade `screen_moves` refuses ~90 lines below, for the same reason: where the
         # cut makes the judgment unreliable, fail loud instead of trimming quietly. `grade_sharper`
         # keeps the silent trim deliberately: it re-grades the SAME string `classify_response`
-        # already capped identically, so trimming there keeps instructor and blind auditor reading
-        # byte-identical text, which is the property that audit depends on.
+        # already routed through this exact raise gate, so it takes `_LEARNER_TEXT_REFUSAL_CAP` as
+        # its trim cap too -- not the smaller `_LEARNER_TEXT_TRIM_CAP` its shape would otherwise
+        # suggest -- which keeps instructor and blind auditor reading byte-identical text, the
+        # property audit depends on (see `_LEARNER_TEXT_REFUSAL_CAP`'s own comment for why).
         rendered = labelled("Student answer:", answer)
-        if len(rendered) > _LEARNER_TEXT_CAP:
-            raise ModelError("grade_answer input exceeds _LEARNER_TEXT_CAP — grade unreliable")
+        if len(rendered) > _LEARNER_TEXT_REFUSAL_CAP:
+            raise ModelError(
+                "grade_answer input exceeds _LEARNER_TEXT_REFUSAL_CAP — grade unreliable"
+            )
         resp = self._parse_required(
             max_tokens=1024,
             system=system,
@@ -883,10 +941,12 @@ class AnthropicModel:
         # Task 6: `response` is the learner's own stress-probe reply -- literally the string
         # `classify_response` already routes through the seam, re-graded blind
         # (assessment/sharper_grader.py:24 passes `p.response`, the trajectory point
-        # classify_response produced). Identical compose over identical data, so identical cap.
-        # `push` is the engine's own generated angle, never learner text, and stays outside.
+        # classify_response produced). Identical compose over identical data, so identical cap:
+        # `_LEARNER_TEXT_REFUSAL_CAP`, not `_LEARNER_TEXT_TRIM_CAP` -- see that constant's own
+        # comment for why this trim site is the one exception. `push` is the engine's own
+        # generated angle, never learner text, and stays outside.
         user = f"Push:\n{push}\n\n" + _cap_rendered_turn(
-            labelled("Student reply:", response), cap=_LEARNER_TEXT_CAP
+            labelled("Student reply:", response), cap=_LEARNER_TEXT_REFUSAL_CAP
         )
         resp = self._parse_required(
             max_tokens=1024,
@@ -958,7 +1018,8 @@ class AnthropicModel:
         # caller, voice.land's baseline check, DOES pass real learner text: `_student_text(recent)`,
         # every student turn in the session joined. Both need this L-13 backstop to see the text in
         # FULL or refuse outright, so `_TURN_RENDER_CAP` (the default, not the smaller
-        # `_LEARNER_TEXT_CAP`) is a REFUSAL threshold here, never a trim point (boundary-4 Fix 1):
+        # `_LEARNER_TEXT_REFUSAL_CAP`/`_LEARNER_TEXT_TRIM_CAP`) is a REFUSAL threshold here, never
+        # a trim point (boundary-4 Fix 1):
         # a move performed in a silently clipped tail can never land in `performed`, so
         # `egress_safe_reply` (`not _performed(...)`) returns True for text that leaks -- the exact
         # failure the truncation guard ten lines below already refuses on the output side.
@@ -1017,11 +1078,12 @@ class AnthropicModel:
             'question. It reads naturally after "the sharpest pressure I can put on it: ".'
         )
         # Task 4: `situation` is her own words at this call's primary site (session_runner.py's
-        # front door, the same string threaded into forge.build_brief -- see `_LEARNER_TEXT_CAP`'s
-        # comment for why this reuses that cap). The second caller (`_capture_steer`) passes a
-        # model-distilled `next_pressure` instead; the territories are curated content, never hers.
+        # front door, the same string threaded into forge.build_brief -- see
+        # `_LEARNER_TEXT_TRIM_CAP`'s comment for why this reuses that cap). The second caller
+        # (`_capture_steer`) passes a model-distilled `next_pressure` instead; the territories are
+        # curated content, never hers.
         user = (
-            _cap_rendered_turn(labelled("Her situation:", situation), cap=_LEARNER_TEXT_CAP)
+            _cap_rendered_turn(labelled("Her situation:", situation), cap=_LEARNER_TEXT_TRIM_CAP)
             + f"\n\nTerritories:\n{numbered}"
         )
         resp = self._parse_required(
@@ -1147,13 +1209,13 @@ class AnthropicModel:
             blocks.append(f"Segment {i + 1}:\n{lines}")
         # `situation` is her own words: the same string `map_territories` caps, arriving by the same
         # route (web/voice.py:119 is handed the sitting's situation, which session_runner also
-        # threads into forge.build_brief), so it takes the same `_LEARNER_TEXT_CAP`. The per-turn
-        # cap above is the larger `_TURN_RENDER_CAP` for `_render_turns`' reason: a segment turn can
-        # be one of Vera's own completions fed back in. Neither cap bounds the NUMBER of turns --
-        # no code constant limits it here, unlike `_render_turns`' `limit`; it is bounded by how
-        # long the sitting ran, which no single learner message can inflate.
+        # threads into forge.build_brief), so it takes the same `_LEARNER_TEXT_TRIM_CAP`. The
+        # per-turn cap above is the larger `_TURN_RENDER_CAP` for `_render_turns`' reason: a
+        # segment turn can be one of Vera's own completions fed back in. Neither cap bounds the
+        # NUMBER of turns -- no code constant limits it here, unlike `_render_turns`' `limit`; it
+        # is bounded by how long the sitting ran, which no single learner message can inflate.
         user = (
-            _cap_rendered_turn(labelled("Her situation:", situation), cap=_LEARNER_TEXT_CAP)
+            _cap_rendered_turn(labelled("Her situation:", situation), cap=_LEARNER_TEXT_TRIM_CAP)
             + "\n\n"
             + "\n\n".join(blocks)
             + "\n\nTell the sitting's story."
