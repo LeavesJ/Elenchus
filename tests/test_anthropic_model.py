@@ -45,6 +45,47 @@ def _exp():
     )
 
 
+def _labelled_overhead(label: str) -> int:
+    """The `labelled(label, "")` overhead, derived independently of `labelled` itself: the label
+    line, its newline, and `LEARNER_INDENT` once for the (empty) first line.
+
+    boundary-8 review: three cap-boundary tests each used to compute this same overhead by
+    calling `labelled(label, "")` a second time and comparing THAT result to a THIRD call on the
+    constructed input -- an algebraic identity, since `len(labelled(label, response))` always
+    equals `overhead + len(response)` by construction, whatever `labelled` actually does. Even
+    the bare `f"{label}\\n{text}"` form the seam exists to replace would satisfy that self-
+    referential check, so it pinned nothing. Comparing the real `labelled(label, "")` call
+    against THIS function's independent arithmetic is the discriminating version: the bare form
+    is short by exactly `len(LEARNER_INDENT)`, so the comparison fails if `labelled` regresses to
+    it."""
+    from elenchus.prompt_text import LEARNER_INDENT
+
+    return len(label) + 1 + len(LEARNER_INDENT)
+
+
+def test_cap_rendered_turn_marks_the_elision_when_it_trims():
+    """A4 (boundary-8 review): `_cap_rendered_turn`'s own docstring promises truncation "marking
+    the elision" -- the "…[trimmed]" suffix that tells the model the text was CUT, not that the
+    learner stopped there. None of this file's end-to-end bound tests pin this directly: each
+    only bounds the composed `user`'s TOTAL length with enough slack (the "+ 100" style margins)
+    to stay green even if the marker were silently dropped and the cap simply cut the tail bare.
+    Pinned here, at the helper the docstring's claim actually belongs to."""
+    from elenchus.model import _cap_rendered_turn
+
+    over = "x" * 50
+    assert _cap_rendered_turn(over, cap=10) == "x" * 10 + "…[trimmed]"
+
+
+def test_cap_rendered_turn_leaves_text_at_or_under_the_cap_untouched():
+    """The other half of the same contract: no marker, no truncation, when nothing needs cutting
+    -- the boundary the marker test above would miss if `_cap_rendered_turn` always appended the
+    suffix regardless of length."""
+    from elenchus.model import _cap_rendered_turn
+
+    at_cap = "x" * 10
+    assert _cap_rendered_turn(at_cap, cap=10) == at_cap
+
+
 # boundary-6 Fix 3: real prose, not a synthetic "x" * n filler string -- a thorough but ordinary
 # learner reply reasoning through the same licensing decision `_exp()` poses, the kind an engaged
 # person actually types. 422 words, 2476 characters (`len(_ORDINARY_REPLY)`,
@@ -730,11 +771,10 @@ def test_classify_response_raises_loud_when_the_rendered_reply_exceeds_the_cap()
     from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
     from elenchus.prompt_text import labelled
 
-    overhead = len(labelled("Student reply:", ""))  # the fixed label+indent wrapper
+    label = "Student reply:"
+    overhead = len(labelled(label, ""))
+    assert overhead == _labelled_overhead(label)  # discriminates `labelled` from the bare form
     response = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead + 1)
-    assert (
-        len(labelled("Student reply:", response)) == _LEARNER_TEXT_REFUSAL_CAP + 1
-    )  # pin the shape
 
     client = _Client(parse_result=_Resp(parsed_output=None))
     with pytest.raises(ModelError, match="classify_response"):
@@ -750,9 +790,10 @@ def test_classify_response_composes_normally_one_character_under_the_cap():
     from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
     from elenchus.prompt_text import labelled
 
-    overhead = len(labelled("Student reply:", ""))
+    label = "Student reply:"
+    overhead = len(labelled(label, ""))
+    assert overhead == _labelled_overhead(label)  # discriminates `labelled` from the bare form
     response = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead)
-    assert len(labelled("Student reply:", response)) == _LEARNER_TEXT_REFUSAL_CAP  # pin the shape
 
     rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
     client = _Client(parse_result=_Resp(parsed_output=rc))
@@ -923,9 +964,10 @@ def test_screen_moves_raises_loud_when_the_rendered_text_exceeds_the_cap():
     from elenchus.model import _TURN_RENDER_CAP
     from elenchus.prompt_text import labelled
 
-    overhead = len(labelled("Text to screen:", ""))  # the fixed label+indent wrapper
+    label = "Text to screen:"
+    overhead = len(labelled(label, ""))
+    assert overhead == _labelled_overhead(label)  # discriminates `labelled` from the bare form
     text = "x" * (_TURN_RENDER_CAP - overhead + 1)
-    assert len(labelled("Text to screen:", text)) == _TURN_RENDER_CAP + 1  # pin the construction
 
     client = _Client(parse_result=_Resp(parsed_output=None))
     with pytest.raises(ModelError, match="screen_moves"):
@@ -942,9 +984,10 @@ def test_screen_moves_composes_normally_one_character_under_the_cap():
     from elenchus.prompt_text import labelled
     from elenchus.types import EgressScreen
 
-    overhead = len(labelled("Text to screen:", ""))
+    label = "Text to screen:"
+    overhead = len(labelled(label, ""))
+    assert overhead == _labelled_overhead(label)  # discriminates `labelled` from the bare form
     text = "x" * (_TURN_RENDER_CAP - overhead)
-    assert len(labelled("Text to screen:", text)) == _TURN_RENDER_CAP  # pin the construction
 
     screen = EgressScreen(performed=[], evidence="e")
     client = _Client(parse_result=_Resp(parsed_output=screen))
@@ -1066,9 +1109,10 @@ def test_map_territories_bounds_a_pathological_situation_on_the_rendered_output(
 
 # ---------------------------------------------------------------------------
 # Task 6: the three sites task 4 MISSED. Found while building tests/test_prompt_text.py's
-# source-reading guard (see its "A NOTE ON SCOPE" comment, which names all three and says sealing
-# them is a follow-up): `grade_sharper`'s `response`, `grade_answer`'s `answer`, and
-# `concierge_sitting_close`'s `situation` plus the per-turn `text` in its transcript loop. Each was
+# source-reading guard (see its "HOW THIS GUARD ALREADY PAID FOR ITSELF" comment, which names all
+# three and records that this task sealed them): `grade_sharper`'s `response`, `grade_answer`'s
+# `answer`, and `concierge_sitting_close`'s `situation` plus the per-turn `text` in its transcript
+# loop. Each was
 # spliced bare into an f-string, so a learner newline could open a line at column 0 of the composed
 # prompt, indistinguishable from a heading the engine itself wrote, and none of the four bounded
 # the rendered size.
@@ -1144,11 +1188,10 @@ def test_grade_answer_raises_loud_when_the_rendered_answer_exceeds_the_cap():
     from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
     from elenchus.prompt_text import labelled
 
-    overhead = len(labelled("Student answer:", ""))  # the fixed label+indent wrapper
+    label = "Student answer:"
+    overhead = len(labelled(label, ""))
+    assert overhead == _labelled_overhead(label)  # discriminates `labelled` from the bare form
     answer = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead + 1)
-    assert (
-        len(labelled("Student answer:", answer)) == _LEARNER_TEXT_REFUSAL_CAP + 1
-    )  # pin the shape
 
     client = _Client(parse_result=_Resp(parsed_output=None))
     with pytest.raises(ModelError, match="grade_answer"):
@@ -1165,9 +1208,10 @@ def test_grade_answer_composes_normally_one_character_under_the_cap():
     from elenchus.prompt_text import labelled
     from elenchus.types import CheckableGrade
 
-    overhead = len(labelled("Student answer:", ""))
+    label = "Student answer:"
+    overhead = len(labelled(label, ""))
+    assert overhead == _labelled_overhead(label)  # discriminates `labelled` from the bare form
     answer = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead)
-    assert len(labelled("Student answer:", answer)) == _LEARNER_TEXT_REFUSAL_CAP  # pin the shape
 
     client = _Client(parse_result=_Resp(parsed_output=CheckableGrade(correct=True)))
     AnthropicModel(client=client).grade_answer(_exp(), _checkable_q(), answer)
