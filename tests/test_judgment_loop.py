@@ -847,7 +847,14 @@ def test_push_label_leak_clears_ordinary_pushes_on_real_content():
     None. The docstring on `_push_label_leak` used to cite a separately measured figure from the
     controller's own corpus, distinct from this test's 5-of-12. Commit fc63938 replaced that
     unreproducible figure with this test's own count, so the source now cites this test
-    directly: its 5-of-12 IS this test's number, not a second, independent one."""
+    directly: its 5-of-12 IS this test's number, not a second, independent one.
+
+    This 5-of-12 is a fact about these 12 pushes, not a measured false-positive rate on the real
+    distribution -- it was never more than that, and `run_push_screen_probe` (push_screen_probe.py)
+    later confirmed as much: 64 real `generate_push` outputs across all five open-ended rubrics,
+    and the full validate_scene bar rejected 0 of 64. See
+    `assessment.judgment_loop._push_label_leak`'s docstring for the full account and the
+    confidence bound on that zero."""
     from elenchus import content_loader
     from elenchus.assessment.judgment_loop import _push_label_leak
 
@@ -927,7 +934,11 @@ def test_push_label_leak_still_clears_the_two_phrases_left_on_the_scene_path():
     old-bar rejections. 'apply the' was excluded on judgment, not measurement -- no corpus push
     contains it, so the five-of-twelve figure attributes no rejection to it -- because it reads as
     ordinary instructor English ("apply the same logic to the second customer"). They stay on
-    generator.validate_scene's authored-scene path only."""
+    generator.validate_scene's authored-scene path only.
+
+    That five-of-twelve figure measured the twelve-push corpus, not the real distribution. On 64
+    real `generate_push` outputs, `run_push_screen_probe` later found the full old bar -- 'this is
+    a' included -- rejected 0 of 64 (see assessment.judgment_loop._push_label_leak's docstring)."""
     from elenchus.assessment.judgment_loop import _push_label_leak
 
     rubric = _exp().rubric

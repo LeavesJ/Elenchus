@@ -125,7 +125,14 @@ def label_leak(text: str, rubric: Rubric, framework_denylist: list[str]) -> str 
     hit, entails this bar alone also rejects 0 of 12 on the same corpus. This bar alone still
     catches all three real cases the same test pins (a named framework, a snake frame code, a
     spaced frame code): none of the seven category phrases can produce those matches, so those
-    hits are this function's, not the category scan's."""
+    hits are this function's, not the category scan's.
+
+    That twelve-push corpus is one sample, not the distribution. `run_push_screen_probe`
+    (push_screen_probe.py) later ran 64 real `generate_push` outputs across all five open-ended
+    rubrics through `_push_label_leak` (this function's result OR'd with the category scan, same
+    as above) and found 0 of 64 rejected -- see `judgment_loop._push_label_leak`'s docstring for
+    the full account, the confidence bound on that zero, and the open question it leaves for the
+    founder."""
     phrases = [t.lower() for t in framework_denylist] + frame_trap_phrases(rubric)
     return phrase_leak(text, phrases)
 

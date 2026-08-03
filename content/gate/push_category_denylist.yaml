@@ -6,6 +6,15 @@
 # it and is one of the five old-bar rejections). 'apply the' was excluded on judgment, not
 # measurement: no corpus push contains it, and it reads as ordinary instructor English ("apply the
 # same logic to the second customer"). Both remain on the authored-scene path via validate_scene.
+#
+# That five-of-twelve figure is a fact about the twelve-push corpus, not the real distribution.
+# run_push_screen_probe later ran the full four-check old bar (which includes 'this is a' via
+# type_hint_scaffold) against 64 real generate_push outputs across all five rubrics and found 0
+# rejections on any check -- 'this is a' did not fire once. Zero of 64 does not prove the rate is
+# zero; it bounds it below roughly 4.7% at 95% confidence (see
+# assessment.judgment_loop._push_label_leak's docstring for the full account). The exclusions above
+# still stand on the distribution argument (Invariant 7: calibrated on authored scenes, a
+# different distribution), not on a demonstrated false-positive rate.
 - classic case of
 - use the framework
 - the right framework

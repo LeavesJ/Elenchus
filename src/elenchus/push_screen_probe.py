@@ -2,11 +2,18 @@
 
 The push screen was narrowed from `generator.validate_scene`'s full four-part bar to
 `assessment.judgment_loop._push_label_leak`'s label-only bar. Two prior corpora disagreed on the
-old bar's false-positive rate and neither was real `generate_push` output, so the honest rate is
-still unmeasured. This module builds a real corpus (every frame/trap angle in every rubric under
-content/rubrics/, each pushed once blind and once with real learner positions) and screens each
-output through both bars so they are compared on the same sample. The only network call in the
-whole probe is `model.generate_push`; everything else here is deterministic and model-free.
+old bar's false-positive rate and neither was real `generate_push` output, so at the time this
+module was written the honest rate was unmeasured. This module builds a real corpus (every
+frame/trap angle in every rubric under content/rubrics/, each pushed once blind and once with
+real learner positions) and screens each output through both bars so they are compared on the
+same sample. The only network call in the whole probe is `model.generate_push`; everything else
+here is deterministic and model-free.
+
+Run for real via run_push_screen_probe.py on 2026-08-03 (model claude-opus-5): 64 comparable
+outputs across all five open-ended rubrics, and both bars rejected 0. That is now the measured
+rate on this sample -- bounded, not proven zero: roughly below 4.7% at 95% confidence for one
+model over one run. See `assessment.judgment_loop._push_label_leak`'s docstring for the full
+account and .superpowers/sdd/probes-report.md for the run record.
 """
 
 from __future__ import annotations

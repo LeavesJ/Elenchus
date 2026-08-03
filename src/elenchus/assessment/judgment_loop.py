@@ -85,7 +85,25 @@ def _push_label_leak(push: str, rubric) -> str | None:
     tests/test_judgment_loop.py::test_push_label_leak_clears_ordinary_pushes_on_real_content, run
     against the real rubric content/rubrics/license_continuity.yaml: the full validate_scene bar
     rejects 5 of 12 ordinary instructor pushes; this bar rejects 0 of 12 and still catches a named
-    framework, a snake frame code, and a spaced frame code.
+    framework, a snake frame code, and a spaced frame code. That 5-of-12 is a measurement of that
+    twelve-push corpus, not of the real push distribution -- a second, independently written
+    corpus had already disagreed with it completely before this bar shipped (see
+    push_screen_probe.py's module docstring).
+
+    `run_push_screen_probe` later measured the real distribution directly: 64 real `generate_push`
+    outputs (model claude-opus-5, all five open-ended rubrics, 32 with real learner positions and
+    32 blind, 20 stress and 44 not, one run, 2026-08-03) and BOTH bars -- this one and the full
+    validate_scene bar -- rejected 0 of 64. On real push output there was no false-positive
+    problem for the narrowing to fix, so the empirical argument above is falsified by the same
+    kind of evidence it was supposed to rest on. Zero rejections in 64 trials does not establish a
+    zero rate: it bounds the true rejection rate below roughly 4.7% at 95% confidence (rule of
+    three, 3/64; exact one-sided Clopper-Pearson bound 4.6%), for one model, five rubrics, one run
+    -- not a rate pinned to zero and not a bound that necessarily holds for a different model or a
+    larger sample. What still justifies staying off the full bar on the push path is the
+    distribution argument two paragraphs up (Invariant 7), not an empirical false-positive rate.
+    Whether to simply restore the full bar on the push path, now that it too rejects nothing on
+    the measured distribution, is open and unresolved here -- a question for the founder, not
+    answered by this docstring.
 
     Screens the OUTPUT rather than sanitising the input: stripping labels from the learner's
     positions would destroy signal, because a learner naming a frame is itself information the
