@@ -49,7 +49,9 @@ def _labelled_overhead(label: str) -> int:
     """The `labelled(label, "")` overhead, derived independently of `labelled` itself: the label
     line, its newline, and `LEARNER_INDENT` once for the (empty) first line.
 
-    boundary-8 review: three cap-boundary tests each used to compute this same overhead by
+    boundary-8 review: six cap-boundary tests, one pair each for `classify_response`,
+    `screen_moves`, and `grade_answer` (a "raises loud at the cap" test and a "composes normally
+    one character under the cap" test per site), each used to compute this same overhead by
     calling `labelled(label, "")` a second time and comparing THAT result to a THIRD call on the
     constructed input -- an algebraic identity, since `len(labelled(label, response))` always
     equals `overhead + len(response)` by construction, whatever `labelled` actually does. Even
@@ -66,10 +68,20 @@ def _labelled_overhead(label: str) -> int:
 def test_cap_rendered_turn_marks_the_elision_when_it_trims():
     """A4 (boundary-8 review): `_cap_rendered_turn`'s own docstring promises truncation "marking
     the elision" -- the "…[trimmed]" suffix that tells the model the text was CUT, not that the
-    learner stopped there. None of this file's end-to-end bound tests pin this directly: each
-    only bounds the composed `user`'s TOTAL length with enough slack (the "+ 100" style margins)
-    to stay green even if the marker were silently dropped and the cap simply cut the tail bare.
-    Pinned here, at the helper the docstring's claim actually belongs to."""
+    learner stopped there. Most of this file's end-to-end bound tests only bound the composed
+    `user`'s TOTAL length with slack (the "+ 100" style margins), which would stay green even if
+    the marker were silently dropped and the cap simply cut the tail bare.
+
+    boundary-9 review: two DO pin the marker directly, both on `classify_intake`, whose composed
+    message carries no outer wrapper so its length can be pinned exactly rather than merely
+    bounded --
+    `test_classify_intake_bounds_a_pathological_opening_on_the_rendered_output` asserts
+    `user.endswith("…[trimmed]")` outright, and
+    `test_classify_intake_never_sends_a_hundred_thousand_character_opening_at_full_length` asserts
+    the exact length `cap + len("…[trimmed]")`, no slack -- a silently dropped marker would leave
+    `user` exactly `len("…[trimmed]")` characters short of what both assert, so both would fail.
+    Pinned again here anyway, directly at the helper the claim belongs to, so the guarantee does
+    not depend on a caller composing a wrapper-free message to be provable."""
     from elenchus.model import _cap_rendered_turn
 
     over = "x" * 50

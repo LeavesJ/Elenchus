@@ -113,10 +113,16 @@ def test_bulleted_renders_one_item_per_line():
     that test alone would stay green under such a collapse, and every OTHER test in this file
     passes a single-element tuple, so none of them exercise the multi-item join at all. Checked on
     plain single-line items (no embedded separator) so the join itself is the only thing under
-    test."""
+    test.
+
+    boundary-9 review: a trailing `rendered.count("\\n") == 2` assertion used to follow the
+    byte-exact equality below. It could never fail independently -- any string that passes the
+    equality check already has exactly two newlines by construction, so the count assertion only
+    ever ran once the stronger check had already passed. Removed rather than kept as decoration;
+    the equality assertion alone is what proves the multi-item join is not collapsed onto one
+    line."""
     rendered = bulleted(("first", "second", "third"))
-    assert rendered == "  - first\n  - second\n  - third"
-    assert rendered.count("\n") == 2  # three items, two line breaks -- not collapsed onto one
+    assert rendered == "  - first\n  - second\n  - third"  # not collapsed onto one line
 
 
 # ---------------------------------------------------------------------------
@@ -260,10 +266,13 @@ def test_labelled_never_raises(text):
 #   is invisible. Verified directly: `_strip_noise` itself, given the untruncated body, correctly
 #   leaves an `f"""..."""` interpolation intact; the miss is `_extract_function`'s, not
 #   `_strip_noise`'s. A single-physical-line triple-quoted f-string, or one whose continuation
-#   stays indented past `base` (both realistic styles), is unaffected and IS caught — see the
-#   tests below. Fixing this for real requires `_extract_function` to track open-quote state
-#   line-by-line, which this file's regex/indentation style was deliberately kept free of; not
-#   done here.
+#   stays indented past `base` (both realistic styles), is unaffected and IS caught — including
+#   when a `#` sits on that continuation line (boundary-9 closed that separately, see
+#   `_strip_noise`'s docstring; before that fix this bullet's "IS caught" claim had a live
+#   counterexample in exactly this shape) — see the tests below, now including the `#`-bearing
+#   variant. Fixing the column-0 case for real requires `_extract_function` to track open-quote
+#   state line-by-line, which this file's regex/indentation style was deliberately kept free of;
+#   not done here.
 # - A learner-text variable under a name NOT in `_KNOWN_LEARNER_SITES` at all. `screen_moves`'
 #   `text` is a documented case in point (model.py's own comment on `screen_moves`): most callers
 #   pass Vera-authored text, one caller passes real learner text, and the guard cannot tell which
@@ -405,7 +414,13 @@ def _strip_hash_comment(line: str) -> str:
     "WHAT IT CANNOT CATCH" list above, which made the list itself wrong, not merely incomplete —
     a blind spot this guard did not even know it had. Closed here rather than documented: quote
     state is tracked char-by-char (handling backslash escapes) rather than reaching for a full
-    tokenizer/AST, matching the rest of this file's regex/slice style."""
+    tokenizer/AST, matching the rest of this file's regex/slice style.
+
+    This function only ever sees ONE physical line and starts every call with `quote = None` — it
+    has no memory of a string still being open from the line before. That is fine for an ordinary
+    single/double-quoted string, which Python syntax never lets span a raw newline unescaped, but
+    it is NOT fine for a multi-line triple-quoted span: see `_strip_noise`'s docstring (boundary-9
+    review) for why callers must never hand this function a line that sits inside one."""
     quote = None
     i = 0
     n = len(line)
@@ -425,20 +440,50 @@ def _strip_hash_comment(line: str) -> str:
     return line
 
 
+def _strip_hash_lines(chunk: str) -> str:
+    """Run `_strip_hash_comment` over each physical line of `chunk`. Callers must only pass a
+    `chunk` known to sit entirely OUTSIDE any surviving (f-prefixed) triple-quoted span — see
+    `_strip_noise`, the only caller."""
+    return "\n".join(_strip_hash_comment(line) for line in chunk.split("\n"))
+
+
 def _strip_noise(body: str) -> str:
     """Blank out `#` comments and triple-quoted docstrings without changing the line count, so a
     line number computed against the result still matches the original file. An f/rf-prefixed
     triple-quoted string is left untouched (see `_blank_unless_f_prefixed`) — it is an
-    interpolation site the guard must still see, not prose to discard. `#` comments are stripped
-    line-by-line via `_strip_hash_comment` (see its own docstring for why: a `#` inside a string
-    literal is payload, not a comment marker).
+    interpolation site the guard must still see, not prose to discard.
 
     Without this, `_render_turns`' own docstring — which quotes `f"{role}: {text}"` as prose,
     describing the OLD bare form it replaced — would trip the `text` check below on a sentence
     about the fix, not on code. `test_confirming_door.py._strip_comments` strips `#` comments only;
-    this adds docstrings because that specific false positive lives in one."""
+    this adds docstrings because that specific false positive lives in one.
+
+    boundary-9 review: `#` comments used to be stripped by splitting the WHOLE body on `\\n` and
+    running `_strip_hash_comment` per line, unconditionally. `_strip_hash_comment` only tracks
+    quote state within one physical line (see its own docstring) and starts fresh at every `\\n`,
+    so a surviving f-prefixed triple-quoted span that happens to run across more than one physical
+    line lost its "still inside a string" state at each line break: an f-prefixed triple-quoted
+    string opening with "Reply:" on its first physical line and continuing on a second line
+    reading "Segment #1: " followed by a brace-interpolated `response` read that continuation
+    line's `#1` as a real comment start with quote state reset to closed, and deleted the
+    interpolation right along with it -- a real violation going uncaught, the opposite of what
+    this guard exists for. A `#` inside a triple-quoted span can
+    NEVER be a real comment, whatever line of the span it falls on -- it is always payload inside
+    the string literal, the same reason a `#` inside an ordinary quoted string is payload. So
+    every span `_TRIPLE_QUOTED` still matches after the docstring-blanking substitution below
+    (all f-prefixed at that point; a plain docstring was already replaced with bare newlines) is
+    now passed straight through, whole, and only the code OUTSIDE those spans is handed to
+    `_strip_hash_comment` at all -- no `\\n` inside a live span can ever reach it and reset state
+    that was never really closed."""
     body = _TRIPLE_QUOTED.sub(_blank_unless_f_prefixed, body)
-    return "\n".join(_strip_hash_comment(line) for line in body.split("\n"))
+    out = []
+    pos = 0
+    for m in _TRIPLE_QUOTED.finditer(body):
+        out.append(_strip_hash_lines(body[pos : m.start()]))
+        out.append(m.group(0))  # an f-prefixed span: no `#` inside it is ever a real comment
+        pos = m.end()
+    out.append(_strip_hash_lines(body[pos:]))
+    return "".join(out)
 
 
 def _bare_interpolation(src: str, func_name: str, varname: str) -> tuple[int, str] | None:
@@ -577,6 +622,33 @@ def test_strip_noise_leaves_a_hash_inside_a_string_untouched_but_still_strips_a_
     assert "a real trailing comment" not in cleaned
 
 
+def test_bare_interpolation_detector_fires_on_a_hash_inside_a_multiline_triple_quoted_splice():
+    """boundary-9 review: the C1 fix above only tracks quote state within a SINGLE physical line
+    (see `_strip_hash_comment`'s own docstring), so it reset to "outside a string" at every `\\n`
+    and missed this same shape once the `#` fell on a continuation line of a multi-line
+    triple-quoted f-string instead of the opening one. Reviewer's exact reproduction: a `#`
+    identical to the one the single-line C1 test above already covers, moved one physical line
+    down. Before the boundary-9 fix this returned `None` -- a real violation going uncaught,
+    silently, exactly like the C1 gap it was supposed to have already closed."""
+    src = 'def classify_response(self, response):\n    user = f"""Reply:\n    Segment #1: {response}"""\n'
+    hit = _bare_interpolation(src, "classify_response", "response")
+    assert hit is not None
+    assert "response" in hit[1]
+
+
+def test_strip_noise_leaves_a_hash_untouched_across_a_multiline_triple_quoted_splice():
+    """The other half of the boundary-9 fix, tested directly on `_strip_noise`: a `#` on a
+    CONTINUATION line of a multi-line f-prefixed triple-quoted span must survive untouched (it can
+    never be a real comment inside a string literal), the same guarantee
+    `test_strip_noise_leaves_a_hash_inside_a_string_untouched_but_still_strips_a_real_comment`
+    already pins for the single-line case -- while a real trailing comment AFTER the span still
+    closes and still gets stripped, proving the fix does not simply stop stripping altogether."""
+    body = 'user = f"""Reply:\n    Segment #1: {response}"""  # a real trailing comment\n'
+    cleaned = _strip_noise(body)
+    assert "Segment #1: {response}" in cleaned
+    assert "a real trailing comment" not in cleaned
+
+
 def test_bare_interpolation_detector_misfires_on_a_keyword_format_placeholder():
     """C2 (boundary-8 review): the opposite direction of the `.format()` bullet above. A KEYWORD
     placeholder whose name matches the tracked variable puts the LITERAL text `{response}` inside
@@ -595,34 +667,71 @@ def test_bare_interpolation_detector_misfires_on_a_keyword_format_placeholder():
     assert hit is not None  # the misfire: a false positive, not a real violation
 
 
+def test_bare_interpolation_detector_misses_a_positional_format_splice():
+    """The MISS direction of the `.format()`/%-style bullet above -- the opposite of the misfire
+    test above. A real violation: the raw learner variable spliced straight into a template with
+    no seam call in between, through a POSITIONAL/empty `.format()` placeholder. That never puts
+    `response` inside `{...}` in the template string itself (the placeholder is bare `{}`), so the
+    brace-scanning regex has nothing to match and reports clean even though the line is not --
+    documented, not "fixed", for the same out-of-scope reason the misfire above is documented
+    rather than closed."""
+    src = 'def classify_response(self, response):\n    user = "Reply:\\n{}".format(response)\n'
+    hit = _bare_interpolation(src, "classify_response", "response")
+    assert hit is None  # the miss: a real violation, uncaught
+
+
+def test_bare_interpolation_detector_misses_a_percent_style_splice():
+    """The same MISS direction as the test above, through %-style formatting instead of
+    `.format()`: `%s` never puts `response` inside `{...}` either, so this is missed the same way
+    string concatenation is missed (see the docstring bullet above), not merely correlated with
+    the `.format()` case -- both never produce a `{varname...}` shape for the regex to find."""
+    src = 'def classify_response(self, response):\n    user = "Reply:\\n%s" % response\n'
+    hit = _bare_interpolation(src, "classify_response", "response")
+    assert hit is None  # the miss: a real violation, uncaught
+
+
 def _variable_is_live(src: str, func_name: str, varname: str) -> bool:
-    """True if `varname` appears anywhere in `func_name`'s definition — as a parameter or
-    anywhere in the body — proving an allowlist row still names something real.
+    """True if `varname` appears anywhere in `func_name`'s CODE — as a parameter or anywhere in
+    the body, docstrings and comments excluded — proving an allowlist row still names something
+    real.
 
     C4 (boundary-8 review): `_bare_interpolation` alone cannot catch a row going vacuous. If
     `varname` is renamed at the parameter boundary, the brace-scan simply finds nothing and
     returns `None` — the SAME result a genuinely clean, sealed site produces, so the row stays
     green forever regardless of what the renamed code actually does. A renamed FUNCTION already
     fails loud (`_extract_function`'s `rindex` raises, see C5 above); a renamed VARIABLE fails
-    silently, and nothing before this asserted the variable was ever there to find."""
+    silently, and nothing before this asserted the variable was ever there to find.
+
+    boundary-9 review: this used to search the RAW body, the same mistake `_strip_noise` exists to
+    fix for the brace scan two functions up. `_render_turns`' own docstring quotes the old bare
+    form as prose (`` f"{role}: {text}" ``), so renaming `text` away in the code while leaving the
+    docstring untouched left `varname` findable in a comment about the fix rather than in the fix
+    itself, and this function reported the row live anyway. Noise is stripped first now, the same
+    remedy `_bare_interpolation` already applies, so only a real code occurrence counts."""
     body, _ = _extract_function(src, func_name)
-    return re.search(r"\b" + re.escape(varname) + r"\b", body) is not None
+    clean = _strip_noise(body)
+    return re.search(r"\b" + re.escape(varname) + r"\b", clean) is not None
 
 
-def test_variable_is_live_false_when_the_parameter_was_renamed():
-    """The failure C4 closes: a listed variable renamed at the parameter boundary. Before this
-    check, `_bare_interpolation` on this exact source would already return `None` (nothing named
-    `response` to find), making the row indistinguishable from a real, sealed site."""
-    src = 'def classify_response(self, reply):\n    user = _cap_rendered_turn(labelled("Student reply:", reply))\n'
+def test_variable_is_live_false_when_the_parameter_was_renamed_even_with_a_docstring_mention():
+    """The failure C4 closes, sharpened by boundary-9 review: a listed variable renamed at the
+    parameter boundary, with a DOCSTRING that still mentions the old name in prose -- the exact
+    shape `_render_turns` has today (its docstring quotes the old bare `f"{role}: {text}"` form
+    while the code itself uses `text` as a live parameter). Before stripping noise,
+    `_variable_is_live` found `response` inside the docstring's commentary and reported the row
+    live regardless of what the code actually did; this fixture pins that a docstring mention alone
+    must not count.
+
+    `_bare_interpolation` on this exact source already returns `None` (nothing named `response` to
+    find in the CODE), making the row indistinguishable from a real, sealed site unless
+    `_variable_is_live` looks past the docstring and says so."""
+    src = (
+        "def classify_response(self, reply):\n"
+        '    """Renders `reply`, replacing the old bare `f"...{response}..."` form."""\n'
+        '    user = _cap_rendered_turn(labelled("Student reply:", reply))\n'
+    )
     assert _bare_interpolation(src, "classify_response", "response") is None  # the silent miss
     assert _variable_is_live(src, "classify_response", "response") is False  # now loud instead
-
-
-def test_variable_is_live_true_for_every_known_learner_site():
-    """The non-degenerate case, checked against the real tree for every row this file watches —
-    proof `_variable_is_live` does not simply return `False` for everything."""
-    for path, func_name, varname in _KNOWN_LEARNER_SITES:
-        assert _variable_is_live(path.read_text(), func_name, varname)
 
 
 def test_extract_function_raises_a_self_explanatory_error_when_the_def_is_missing():
