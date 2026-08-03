@@ -48,20 +48,19 @@ def truncate_to_complete_draw(draws: list[Draw], names: list[str]) -> tuple[list
     mid-draw, which leaves the first k payloads at m and the rest at m-1. Scoring ragged data
     silently would let the payloads that happened to run first carry more weight, so the scorer
     truncates and says so. Same job as the UNPROVEN gate: refuse a conclusion the data cannot
-    support."""
-    # Track which payloads appear in each draw
-    payloads_by_draw: dict[int, set[str]] = {}
+    support.
+
+    Completeness is checked as SET COVERAGE over `(payload, cell)`, not as a row count. A count
+    can be satisfied by duplicate rows, and payload presence alone is weaker still: a draw where
+    one payload contributed five cells and another contributed one would pass, which is the exact
+    ragged weighting this function exists to refuse."""
+    want = {(n, c) for n in names for c in CELLS}
+    seen: dict[int, set[tuple[str, str]]] = {}
     for d in draws:
-        if d.draw not in payloads_by_draw:
-            payloads_by_draw[d.draw] = set()
-        payloads_by_draw[d.draw].add(d.payload_name)
-
-    # Find the maximum draw depth where all required payloads are present
+        seen.setdefault(d.draw, set()).add((d.payload_name, d.cell))
     depth = 0
-    required = set(names)
-    while depth + 1 in payloads_by_draw and payloads_by_draw[depth + 1] == required:
+    while want.issubset(seen.get(depth + 1, set())):
         depth += 1
-
     return [d for d in draws if d.draw <= depth], depth
 
 
