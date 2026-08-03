@@ -4,7 +4,12 @@ offline."""
 
 from __future__ import annotations
 
+import pytest
+
+from elenchus.model import ModelError
 from elenchus.push_screen_probe import (
+    PushScreenFailure,
+    PushScreenRecord,
     PushTarget,
     Probe1Result,
     build_cases,
@@ -172,7 +177,7 @@ def test_run_push_screen_probe_calls_generate_push_once_per_case():
     exp = _exp(n_frames=1, n_traps=1)
     n_cases = len(build_cases([exp]))
     model = _ScriptedModel(["an ordinary push"] * n_cases)
-    run_push_screen_probe(
+    records, failures = run_push_screen_probe(
         [exp],
         model,
         positions_pool=["real learner text"],
@@ -180,6 +185,8 @@ def test_run_push_screen_probe_calls_generate_push_once_per_case():
         scaffold_denylist=[],
     )
     assert len(model.calls) == n_cases
+    assert len(records) == n_cases
+    assert failures == []
 
 
 def test_run_push_screen_probe_blind_cases_carry_empty_positions_positioned_cases_do_not():
@@ -209,7 +216,7 @@ def test_run_push_screen_probe_screens_each_returned_push_through_both_bars():
     # First returned push leaks the frame code; the rest are ordinary.
     texts = ["You keep circling frame_0."] + ["an ordinary push"] * (n_cases - 1)
     model = _ScriptedModel(texts)
-    records = run_push_screen_probe(
+    records, _ = run_push_screen_probe(
         [exp], model, positions_pool=[], framework_denylist=[], scaffold_denylist=[]
     )
     leaking = [r for r in records if r.push_text == "You keep circling frame_0."]
@@ -222,13 +229,78 @@ def test_run_push_screen_probe_screens_each_returned_push_through_both_bars():
 
 
 # ---------------------------------------------------------------------------
+# run_push_screen_probe -- per-case ModelError resilience (probe 1 has the SAME exposure as
+# probe 2: `generate_push` has no retry at all, so a refusal is at least as likely per call)
+# ---------------------------------------------------------------------------
+
+
+class _RaisingModel:
+    """Pops a scripted push text OR raises the scripted exception, per case."""
+
+    def __init__(self, outcomes):
+        self._queue = list(outcomes)
+
+    def generate_push(self, exp, kind, code, *, stress=False, positions=Positions(), steer=""):
+        item = self._queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+def test_run_push_screen_probe_records_a_refusal_as_a_failure_and_keeps_going():
+    exp = _exp(n_frames=0, n_traps=2)  # 2 cases: trap_0, trap_1, each "blind"+"positioned" -> 4
+    n_cases = len(build_cases([exp]))
+    assert n_cases == 4
+    outcomes = [ModelError("push generation refused")] + ["an ordinary push"] * (n_cases - 1)
+    model = _RaisingModel(outcomes)
+    records, failures = run_push_screen_probe(
+        [exp], model, positions_pool=[], framework_denylist=[], scaffold_denylist=[]
+    )
+    assert len(failures) == 1
+    assert len(records) == n_cases - 1  # every OTHER case still completed
+    failure = failures[0]
+    assert isinstance(failure, PushScreenFailure)
+    assert "refused" in failure.error
+    case0 = build_cases([exp])[0]
+    assert failure.experience_id == case0.experience_id
+    assert failure.kind == case0.kind
+    assert failure.code == case0.code
+
+
+def test_run_push_screen_probe_lets_a_non_model_error_propagate_uncaught():
+    exp = _exp(n_frames=0, n_traps=1)
+    model = _RaisingModel([RuntimeError("boom, not a ModelError")])
+    with pytest.raises(RuntimeError, match="boom"):
+        run_push_screen_probe(
+            [exp], model, positions_pool=[], framework_denylist=[], scaffold_denylist=[]
+        )
+
+
+def test_run_push_screen_probe_calls_on_item_once_per_case_with_the_record_or_failure():
+    exp = _exp(n_frames=0, n_traps=2)
+    n_cases = len(build_cases([exp]))
+    outcomes = [ModelError("push generation refused")] + ["ok"] * (n_cases - 1)
+    model = _RaisingModel(outcomes)
+    seen = []
+    run_push_screen_probe(
+        [exp],
+        model,
+        positions_pool=[],
+        framework_denylist=[],
+        scaffold_denylist=[],
+        on_item=seen.append,
+    )
+    assert len(seen) == n_cases
+    assert isinstance(seen[0], PushScreenFailure)
+    assert all(isinstance(item, PushScreenRecord) for item in seen[1:])
+
+
+# ---------------------------------------------------------------------------
 # Probe1Result.summarize()
 # ---------------------------------------------------------------------------
 
 
 def test_probe1_summary_counts_new_and_old_bar_rejections_independently():
-    from elenchus.push_screen_probe import PushScreenRecord
-
     records = [
         PushScreenRecord(
             experience_id="e",
@@ -283,10 +355,67 @@ def test_probe1_summary_counts_new_and_old_bar_rejections_independently():
         framework_denylist=[],
         scaffold_denylist=[],
         records=records,
+        failures=[],
     )
     summary = result.summarize()
-    assert summary.total == 3
+    assert summary.comparable_n == 3
     assert summary.new_bar_rejected == 1
     assert summary.new_bar_rejected_phrases == {"swot": 1}
     assert summary.old_bar_rejected == 2
     assert summary.old_bar_rejected_by_check == {"named_framework": 1, "cosmetic_wrapper_word": 1}
+
+
+def test_probe1_summary_excludes_failures_from_bar_rates_and_reports_the_refusal_rate():
+    """Same anti-bias property as prompt_shift_probe's `summarize_disagreement`: a failed case
+    must not be silently treated as "clean" (which would understate both bars' rejection rates)
+    and the refusal rate must be visible and distinct from other failure classes."""
+    records = [
+        PushScreenRecord(
+            experience_id="e",
+            kind="frame",
+            code="c1",
+            stress=False,
+            position_mode="blind",
+            push_text="clean",
+            new_bar_hit=None,
+            old_bar_checks={
+                "named_framework": None,
+                "frame_trap_code_leak": None,
+                "type_hint_scaffold": None,
+                "cosmetic_wrapper_word": None,
+            },
+        ),
+    ]
+    failures = [
+        PushScreenFailure(
+            experience_id="e",
+            kind="frame",
+            code="c2",
+            stress=False,
+            position_mode="blind",
+            error="push generation refused",
+        ),
+        PushScreenFailure(
+            experience_id="e",
+            kind="trap",
+            code="t1",
+            stress=False,
+            position_mode="positioned",
+            error="no text block in push response",
+        ),
+    ]
+    result = Probe1Result(
+        model_id="claude-opus-5",
+        corpus_source="empty_fallback",
+        positions_pool_size=0,
+        framework_denylist=[],
+        scaffold_denylist=[],
+        records=records,
+        failures=failures,
+    )
+    summary = result.summarize()
+    assert summary.comparable_n == 1
+    assert summary.failed_n == 2
+    assert summary.attempted_n == 3
+    assert summary.refused_n == 1
+    assert summary.refusal_rate == pytest.approx(1 / 3)

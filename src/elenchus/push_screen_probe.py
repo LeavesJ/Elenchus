@@ -11,13 +11,13 @@ whole probe is `model.generate_push`; everything else here is deterministic and 
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import Callable, NamedTuple
 
 from pydantic import BaseModel
 
 from .assessment.judgment_loop import _push_label_leak
 from .generator import WRAPPER_WORDS, _strip_emphasis, frame_trap_phrases, phrase_leak
-from .model import Model
+from .model import Model, ModelError
 from .types import Experience, Positions, Rubric
 
 
@@ -109,6 +109,22 @@ class PushScreenRecord(BaseModel):
         return any(v is not None for v in self.old_bar_checks.values())
 
 
+class PushScreenFailure(BaseModel):
+    """One case whose `generate_push` call raised `ModelError` -- unlike prompt_shift_probe's
+    three arms, this probe spends exactly one model call per case (`generate_push`), so there is
+    no per-arm distinction to record, only the case and why it failed. `generate_push` itself
+    (model.py) has NO retry on refusal, unlike `classify_response`/`map_territories`'s single
+    retry via `_parse_required` -- this probe's one call per case is therefore at least as
+    exposed to a stochastic refusal as prompt_shift_probe's arm A/B calls, if not more."""
+
+    experience_id: str
+    kind: str
+    code: str
+    stress: bool
+    position_mode: str
+    error: str
+
+
 def run_push_screen_probe(
     experiences: list[Experience],
     model: Model,
@@ -116,39 +132,74 @@ def run_push_screen_probe(
     positions_pool: list[str],
     framework_denylist: list[str],
     scaffold_denylist: list[str],
-) -> list[PushScreenRecord]:
+    on_item: Callable[[PushScreenRecord | PushScreenFailure], None] | None = None,
+) -> tuple[list[PushScreenRecord], list[PushScreenFailure]]:
     """Pure orchestration over the Model protocol (elicitation.run_elicitation_probe's shape):
     author a push for every case `build_cases` derives from `experiences`, screen it through
-    both bars, and return one record per push. `generate_push` is the only model call."""
+    both bars, and return one record per push. `generate_push` is the only model call.
+
+    A `ModelError` from `generate_push` abandons only that case -- recorded as a
+    `PushScreenFailure`, the run continues to the next case rather than aborting -- caught
+    narrowly (not `Exception`) for the same reason `run_classify_probe` catches narrowly: an
+    unanticipated error is a different problem than the documented refusal class and must still
+    surface loud. `on_item`, when given, is called once per case with whichever of
+    `PushScreenRecord`/`PushScreenFailure` that case produced, for incremental checkpointing."""
     experiences_by_id = {e.experience_id: e for e in experiences}
-    records = []
+    records: list[PushScreenRecord] = []
+    failures: list[PushScreenFailure] = []
     for case in build_cases(experiences):
         exp = experiences_by_id[case.experience_id]
         positions = (
             Positions() if case.position_mode == "blind" else sample_positions(positions_pool)
         )
-        push_text = model.generate_push(
-            exp, case.kind, case.code, stress=case.stress, positions=positions
-        )
-        records.append(
-            PushScreenRecord(
+        try:
+            push_text = model.generate_push(
+                exp, case.kind, case.code, stress=case.stress, positions=positions
+            )
+        except ModelError as exc:
+            failure = PushScreenFailure(
                 experience_id=case.experience_id,
                 kind=case.kind,
                 code=case.code,
                 stress=case.stress,
                 position_mode=case.position_mode,
-                push_text=push_text,
-                new_bar_hit=_push_label_leak(push_text, exp.rubric),
-                old_bar_checks=old_bar_checks(
-                    push_text, exp.rubric, framework_denylist, scaffold_denylist
-                ),
+                error=str(exc),
             )
+            failures.append(failure)
+            if on_item is not None:
+                on_item(failure)
+            continue
+        record = PushScreenRecord(
+            experience_id=case.experience_id,
+            kind=case.kind,
+            code=case.code,
+            stress=case.stress,
+            position_mode=case.position_mode,
+            push_text=push_text,
+            new_bar_hit=_push_label_leak(push_text, exp.rubric),
+            old_bar_checks=old_bar_checks(
+                push_text, exp.rubric, framework_denylist, scaffold_denylist
+            ),
         )
-    return records
+        records.append(record)
+        if on_item is not None:
+            on_item(record)
+    return records, failures
+
+
+def _is_refusal(error: str) -> bool:
+    """`generate_push`'s refusal message is "push generation refused"; its other failure mode,
+    "no text block in push response", is not a refusal -- see prompt_shift_probe.py's twin of
+    this helper for the same distinction over `classify_response`/`map_territories`."""
+    return "refused" in error.lower()
 
 
 class Probe1Summary(BaseModel):
-    total: int
+    comparable_n: int  # cases with a usable push -- the denominator for the two bar-rejection rates
+    failed_n: int  # cases abandoned because generate_push raised ModelError
+    attempted_n: int  # comparable_n + failed_n -- every case the run actually tried
+    refused_n: int  # failed_n cases whose recorded failure was specifically a refusal
+    refusal_rate: float  # refused_n / attempted_n -- 0.0 when nothing was attempted
     new_bar_rejected: int
     new_bar_rejected_phrases: dict[str, int]
     old_bar_rejected: int
@@ -162,6 +213,7 @@ class Probe1Result(BaseModel):
     framework_denylist: list[str]
     scaffold_denylist: list[str]
     records: list[PushScreenRecord]
+    failures: list[PushScreenFailure]
 
     def summarize(self) -> Probe1Summary:
         new_phrases: dict[str, int] = {}
@@ -177,8 +229,17 @@ class Probe1Result(BaseModel):
                 for check, hit in r.old_bar_checks.items():
                     if hit is not None:
                         old_by_check[check] = old_by_check.get(check, 0) + 1
+        comparable_n = len(self.records)
+        failed_n = len(self.failures)
+        attempted_n = comparable_n + failed_n
+        refused_n = sum(1 for f in self.failures if _is_refusal(f.error))
+        refusal_rate = (refused_n / attempted_n) if attempted_n else 0.0
         return Probe1Summary(
-            total=len(self.records),
+            comparable_n=comparable_n,
+            failed_n=failed_n,
+            attempted_n=attempted_n,
+            refused_n=refused_n,
+            refusal_rate=refusal_rate,
             new_bar_rejected=new_rejected,
             new_bar_rejected_phrases=new_phrases,
             old_bar_rejected=old_rejected,

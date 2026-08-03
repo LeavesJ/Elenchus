@@ -4,11 +4,15 @@ scripted doubles, so every assertion here is provable offline."""
 
 from __future__ import annotations
 
-from elenchus.model import ResponseClassification
+import pytest
+
+from elenchus.model import ModelError, ResponseClassification
 from elenchus.prompt_shift_probe import (
+    ClassifyFailure,
     ClassifyItem,
     ClassifyRecord,
     Probe2Result,
+    TerritoryFailure,
     TerritoryItem,
     build_classify_corpus,
     build_territory_corpus,
@@ -268,12 +272,13 @@ def test_run_classify_probe_makes_exactly_two_model_calls_and_one_raw_parse_call
     items = [ClassifyItem(exp, "frame", "frame_0", False, "push1", "resp1")]
     model = _ScriptedClassifyModel([_rc("closed", True, False), _rc("closed", True, False)])
     raw_parse, raw_calls = _raw_parse_scripted([_rc("closed", True, False)])
-    records = run_classify_probe(
+    records, failures = run_classify_probe(
         items, model, raw_parse, system_for=lambda it: "SYSTEM", max_tokens=999
     )
     assert len(model.calls) == 2
     assert len(raw_calls) == 1
     assert len(records) == 1
+    assert failures == []
 
 
 def test_run_classify_probe_arm_c_sends_the_reconstructed_old_user_and_the_given_system():
@@ -292,7 +297,9 @@ def test_run_classify_probe_flags_same_prompt_disagreement_when_a_and_b_differ()
     items = [ClassifyItem(exp, "frame", "frame_0", False, "push1", "resp1")]
     model = _ScriptedClassifyModel([_rc("closed", True, False), _rc("unchanged", True, False)])
     raw_parse, _ = _raw_parse_scripted([_rc("closed", True, False)])  # matches arm A
-    records = run_classify_probe(items, model, raw_parse, system_for=lambda it: "S", max_tokens=1)
+    records, _ = run_classify_probe(
+        items, model, raw_parse, system_for=lambda it: "S", max_tokens=1
+    )
     assert records[0].same_prompt_disagree is True
     assert records[0].new_vs_old_disagree is False
 
@@ -302,9 +309,130 @@ def test_run_classify_probe_flags_new_vs_old_disagreement_when_a_and_c_differ():
     items = [ClassifyItem(exp, "frame", "frame_0", False, "push1", "resp1")]
     model = _ScriptedClassifyModel([_rc("closed", True, False), _rc("closed", True, False)])
     raw_parse, _ = _raw_parse_scripted([_rc("regressed", False, False)])  # differs from arm A
-    records = run_classify_probe(items, model, raw_parse, system_for=lambda it: "S", max_tokens=1)
+    records, _ = run_classify_probe(
+        items, model, raw_parse, system_for=lambda it: "S", max_tokens=1
+    )
     assert records[0].same_prompt_disagree is False
     assert records[0].new_vs_old_disagree is True
+
+
+# ---------------------------------------------------------------------------
+# run_classify_probe -- per-item ModelError resilience
+# ---------------------------------------------------------------------------
+
+
+class _RaisingClassifyModel:
+    """Arm A/B calls: pops a scripted result OR raises the scripted exception."""
+
+    def __init__(self, arm_a_b):
+        self._queue = list(arm_a_b)
+
+    def classify_response(self, exp, kind, code, push, response, *, stress=False):
+        item = self._queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+def _raw_parse_raising(outcomes):
+    """Pops a scripted result OR raises the scripted exception, per call."""
+
+    def raw_parse(*, system, user, output_format, max_tokens):
+        item = outcomes.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    return raw_parse
+
+
+def test_run_classify_probe_records_an_arm_c_refusal_as_a_failure_and_keeps_going():
+    """The founder's exact incident: arm C (`_parse_required` on the reconstructed pre-indent
+    prompt) raises `ModelError` on one item. That item must be recorded as a `ClassifyFailure`
+    naming arm "c" and the run must still process the SECOND item rather than aborting -- the
+    defect this whole change fixes."""
+    exp = _exp()
+    items = [
+        ClassifyItem(exp, "frame", "frame_0", False, "push1", "resp1"),
+        ClassifyItem(exp, "frame", "frame_0", False, "push2", "resp2"),
+    ]
+    model = _RaisingClassifyModel(
+        [_rc(), _rc(), _rc(), _rc()]  # 2 items * arm A/B each
+    )
+    raw_parse = _raw_parse_raising(
+        [ModelError("model refused or returned no parsed output"), _rc()]
+    )
+    records, failures = run_classify_probe(
+        items, model, raw_parse, system_for=lambda it: "S", max_tokens=1
+    )
+    assert len(failures) == 1
+    assert len(records) == 1  # the SECOND item still completed
+    failure = failures[0]
+    assert isinstance(failure, ClassifyFailure)
+    assert failure.arm == "c"
+    assert failure.push == "push1"
+    assert "refused" in failure.error
+    assert records[0].push == "push2"
+
+
+def test_run_classify_probe_records_which_arm_failed_for_arm_a_and_arm_b_too():
+    """Arm attribution must be correct for ALL three positions, not just arm C -- a reader needs
+    to distinguish a refusal on the FIRST call (arm A) from one on the retry-control call (arm B)
+    from the reconstructed-prompt call (arm C), since only arm C sends prompt text no shipped
+    method composes today."""
+    exp = _exp()
+    items = [ClassifyItem(exp, "frame", "frame_0", False, "push1", "resp1")]
+    model_a_fails = _RaisingClassifyModel(
+        [ModelError("model refused or returned no parsed output")]
+    )
+    _, failures_a = run_classify_probe(
+        items, model_a_fails, _raw_parse_raising([]), system_for=lambda it: "S", max_tokens=1
+    )
+    assert failures_a[0].arm == "a"
+
+    model_b_fails = _RaisingClassifyModel(
+        [_rc(), ModelError("model refused or returned no parsed output")]
+    )
+    _, failures_b = run_classify_probe(
+        items, model_b_fails, _raw_parse_raising([]), system_for=lambda it: "S", max_tokens=1
+    )
+    assert failures_b[0].arm == "b"
+
+
+def test_run_classify_probe_lets_a_non_model_error_propagate_uncaught():
+    """`ModelError` is caught narrowly, not `Exception` -- an unanticipated error class (a
+    transport failure, a programming bug) must still crash the run rather than being silently
+    absorbed as an ordinary failed item, so a reader who sees the run finish cleanly can trust
+    every non-empty `error` field really is a `ModelError`."""
+    exp = _exp()
+    items = [ClassifyItem(exp, "frame", "frame_0", False, "push1", "resp1")]
+    model = _RaisingClassifyModel([RuntimeError("boom, not a ModelError")])
+    with pytest.raises(RuntimeError, match="boom"):
+        run_classify_probe(
+            items, model, _raw_parse_raising([]), system_for=lambda it: "S", max_tokens=1
+        )
+
+
+def test_run_classify_probe_calls_on_item_once_per_item_with_the_record_or_failure():
+    """`on_item` is the checkpoint hook: it must fire exactly once per item, in order, carrying
+    whichever outcome that item actually produced -- a dropped or misordered call would silently
+    lose or misattribute a checkpointed item."""
+    exp = _exp()
+    items = [
+        ClassifyItem(exp, "frame", "frame_0", False, "push1", "resp1"),
+        ClassifyItem(exp, "frame", "frame_0", False, "push2", "resp2"),
+    ]
+    model = _RaisingClassifyModel([_rc(), _rc(), _rc(), _rc()])
+    raw_parse = _raw_parse_raising(
+        [ModelError("model refused or returned no parsed output"), _rc()]
+    )
+    seen = []
+    run_classify_probe(
+        items, model, raw_parse, system_for=lambda it: "S", max_tokens=1, on_item=seen.append
+    )
+    assert len(seen) == 2
+    assert isinstance(seen[0], ClassifyFailure) and seen[0].push == "push1"
+    assert isinstance(seen[1], ClassifyRecord) and seen[1].push == "push2"
 
 
 class _ScriptedTerritoryModel:
@@ -321,10 +449,13 @@ def test_run_territory_probe_makes_exactly_two_model_calls_and_one_raw_parse_cal
     items = [TerritoryItem("situation", (("exp_a", "desc a"),))]
     model = _ScriptedTerritoryModel([_tmap(["exp_a"]), _tmap(["exp_a"])])
     raw_parse, raw_calls = _raw_parse_scripted([_tmap(["exp_a"])])
-    records = run_territory_probe(items, model, raw_parse, system_text="SYSTEM", max_tokens=999)
+    records, failures = run_territory_probe(
+        items, model, raw_parse, system_text="SYSTEM", max_tokens=999
+    )
     assert len(model.calls) == 2
     assert len(raw_calls) == 1
     assert len(records) == 1
+    assert failures == []
 
 
 def test_run_territory_probe_arm_c_sends_the_reconstructed_old_user_and_the_given_system():
@@ -342,9 +473,52 @@ def test_run_territory_probe_flags_disagreement_by_head_not_full_rank_equality()
     items = [TerritoryItem("situation", (("exp_a", "desc a"), ("exp_b", "desc b")))]
     model = _ScriptedTerritoryModel([_tmap(["exp_a", "exp_b"]), _tmap(["exp_b", "exp_a"])])
     raw_parse, _ = _raw_parse_scripted([_tmap(["exp_a", "exp_b"])])  # same head as arm A
-    records = run_territory_probe(items, model, raw_parse, system_text="S", max_tokens=1)
+    records, _ = run_territory_probe(items, model, raw_parse, system_text="S", max_tokens=1)
     assert records[0].same_prompt_disagree is True  # arm A head exp_a, arm B head exp_b
     assert records[0].new_vs_old_disagree is False  # arm A head exp_a, arm C head exp_a
+
+
+# ---------------------------------------------------------------------------
+# run_territory_probe -- per-item ModelError resilience
+# ---------------------------------------------------------------------------
+
+
+class _RaisingTerritoryModel:
+    def __init__(self, arm_a_b):
+        self._queue = list(arm_a_b)
+
+    def map_territories(self, situation, territories):
+        item = self._queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+def test_run_territory_probe_records_an_arm_c_refusal_as_a_failure_and_keeps_going():
+    items = [
+        TerritoryItem("situation1", (("exp_a", "desc a"),)),
+        TerritoryItem("situation2", (("exp_a", "desc a"),)),
+    ]
+    model = _RaisingTerritoryModel(
+        [_tmap(["exp_a"]), _tmap(["exp_a"]), _tmap(["exp_a"]), _tmap(["exp_a"])]
+    )
+    raw_parse = _raw_parse_raising(
+        [ModelError("model refused or returned no parsed output"), _tmap(["exp_a"])]
+    )
+    records, failures = run_territory_probe(items, model, raw_parse, system_text="S", max_tokens=1)
+    assert len(failures) == 1
+    assert len(records) == 1
+    assert isinstance(failures[0], TerritoryFailure)
+    assert failures[0].arm == "c"
+    assert failures[0].situation == "situation1"
+    assert records[0].situation == "situation2"
+
+
+def test_run_territory_probe_lets_a_non_model_error_propagate_uncaught():
+    items = [TerritoryItem("situation1", (("exp_a", "desc a"),))]
+    model = _RaisingTerritoryModel([RuntimeError("boom, not a ModelError")])
+    with pytest.raises(RuntimeError, match="boom"):
+        run_territory_probe(items, model, _raw_parse_raising([]), system_text="S", max_tokens=1)
 
 
 # ---------------------------------------------------------------------------
@@ -403,8 +577,8 @@ def test_summarize_disagreement_computes_both_rates_and_the_verdict():
             new_vs_old_disagree=False,
         ),
     ]
-    rates = summarize_disagreement(records, margin=0.1)
-    assert rates.sample_size == 4
+    rates = summarize_disagreement(records, [], margin=0.1)
+    assert rates.comparable_n == 4
     assert rates.same_prompt_disagreement == 0.25
     assert rates.new_vs_old_disagreement == 0.5
     assert rates.margin == 0.1
@@ -412,24 +586,112 @@ def test_summarize_disagreement_computes_both_rates_and_the_verdict():
 
 
 def test_summarize_disagreement_is_zero_and_unclaimed_on_an_empty_corpus():
-    rates = summarize_disagreement([], margin=0.1)
-    assert rates.sample_size == 0
+    rates = summarize_disagreement([], [], margin=0.1)
+    assert rates.comparable_n == 0
     assert rates.same_prompt_disagreement == 0.0
     assert rates.new_vs_old_disagreement == 0.0
     assert rates.shift_claimed is False
 
 
+def test_summarize_disagreement_excludes_failed_items_from_both_rates_and_reports_denominators():
+    """The core anti-bias property: a failed item must shrink neither the disagreement COUNT
+    without shrinking the denominator (which would read as "agreement") nor vanish from the
+    output entirely. 1 comparable item that DISAGREES on both axes, plus 3 failed items, must
+    report disagreement rates of 1/1 = 1.0 (not 1/4 = 0.25, which is what counting failures as
+    non-disagreeing "comparable" items would produce), while still surfacing that 3 items were
+    attempted and excluded."""
+    disagreeing = ClassifyRecord(
+        experience_id="e",
+        kind="frame",
+        code="c",
+        push="p",
+        response="r",
+        arm_a=_rc("closed", True, False),
+        arm_b=_rc("unchanged", True, False),
+        arm_c=_rc("regressed", False, False),
+        same_prompt_disagree=True,
+        new_vs_old_disagree=True,
+    )
+    failures = [
+        ClassifyFailure(
+            experience_id="e",
+            kind="frame",
+            code="c",
+            push="p",
+            response="r",
+            arm="a",
+            error="model refused or returned no parsed output",
+        ),
+        ClassifyFailure(
+            experience_id="e",
+            kind="frame",
+            code="c",
+            push="p",
+            response="r",
+            arm="b",
+            error="model refused or returned no parsed output",
+        ),
+        ClassifyFailure(
+            experience_id="e",
+            kind="frame",
+            code="c",
+            push="p",
+            response="r",
+            arm="c",
+            error="structured output truncated at max_tokens -- raise this call's budget (L-17)",
+        ),
+    ]
+    rates = summarize_disagreement([disagreeing], failures, margin=0.1)
+    assert rates.comparable_n == 1
+    assert rates.failed_n == 3
+    assert rates.attempted_n == 4
+    assert rates.same_prompt_disagreement == 1.0  # 1/1, NOT 1/4
+    assert rates.new_vs_old_disagreement == 1.0  # 1/1, NOT 1/4
+
+
+def test_summarize_disagreement_reports_the_refusal_rate_distinct_from_other_failures():
+    """Only failures whose error text says "refused" count toward `refused_n`/`refusal_rate` --
+    a truncation or an oversized-input guard is a real `ModelError` too, but not the specific
+    stochastic-refusal property L-17 documents and this probe measures."""
+    failures = [
+        ClassifyFailure(
+            experience_id="e",
+            kind="frame",
+            code="c",
+            push="p",
+            response="r",
+            arm="c",
+            error="model refused or returned no parsed output",
+        ),
+        ClassifyFailure(
+            experience_id="e",
+            kind="frame",
+            code="c",
+            push="p",
+            response="r",
+            arm="a",
+            error="structured output truncated at max_tokens -- raise this call's budget (L-17)",
+        ),
+    ]
+    rates = summarize_disagreement([], failures, margin=0.1)
+    assert rates.attempted_n == 2
+    assert rates.refused_n == 1
+    assert rates.refusal_rate == 0.5
+
+
 def test_probe2_result_round_trips_through_json():
-    classify_rates = summarize_disagreement([], margin=0.1)
-    territory_rates = summarize_disagreement([], margin=0.1)
+    classify_rates = summarize_disagreement([], [], margin=0.1)
+    territory_rates = summarize_disagreement([], [], margin=0.1)
     result = Probe2Result(
         model_id="claude-opus-5",
         margin=0.1,
         classify_corpus_source="live_db",
         classify_records=[],
+        classify_failures=[],
         classify_rates=classify_rates,
         territory_corpus_source="empty_fallback",
         territory_records=[],
+        territory_failures=[],
         territory_rates=territory_rates,
     )
     again = Probe2Result.model_validate_json(result.model_dump_json())

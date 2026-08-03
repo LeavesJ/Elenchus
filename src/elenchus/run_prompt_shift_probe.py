@@ -13,12 +13,21 @@ Three arms per corpus item (A: the current prompt; B: the current prompt again, 
 the pre-change prompt, reconstructed) across both halves (classify_response, map_territories) --
 see prompt_shift_probe.py's module docstring for why three arms, not two.
 
+A single item's `ModelError` (the documented `classify_response` stochastic refusal, model.py's
+`_parse_required` docstring) no longer aborts the run: `run_classify_probe`/`run_territory_probe`
+record that item as failed and continue, and `run()` checkpoints every item (record or failure)
+to a `.checkpoint.jsonl` file the moment it completes, so a crash this module does NOT catch
+(anything other than `ModelError`) still leaves every already-paid-for item readable on disk.
+Resuming a run FROM a checkpoint is not implemented -- see `.superpowers/sdd/probes-report.md`
+for why, and what to do after a partial run instead.
+
 Run: `PYTHONPATH=src .venv/bin/python -m elenchus.run_prompt_shift_probe`
 """
 
 from __future__ import annotations
 
 import functools
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,8 +35,12 @@ from .content_loader import load_library, load_prompt, load_territory_text
 from .live_corpus import read_push_response_pairs, read_situations
 from .model import _CLASSIFY_MAX_TOKENS, _MED_PARAMS, _PARAMS, _situation_block, _target_detail
 from .prompt_shift_probe import (
+    ClassifyFailure,
     ClassifyItem,
+    ClassifyRecord,
     Probe2Result,
+    TerritoryFailure,
+    TerritoryRecord,
     build_classify_corpus,
     build_territory_corpus,
     run_classify_probe,
@@ -62,6 +75,31 @@ DEFAULT_LIMIT = 20
 # arithmetic alone, not calibrated against data -- it would be falsified by an actual run whose
 # same_prompt_disagreement routinely exceeds ~0.15 on its own.
 DEFAULT_MARGIN = 0.15
+
+
+def _checkpoint_line(
+    probe: str, item: ClassifyRecord | ClassifyFailure | TerritoryRecord | TerritoryFailure
+) -> str:
+    """One JSON line naming which half (`probe`: "classify"|"territory") and outcome
+    (`ClassifyRecord`/`TerritoryRecord` -> "record", `ClassifyFailure`/`TerritoryFailure` ->
+    "failure") `item` is, plus its full field data -- self-contained, so the checkpoint file
+    alone (no companion result file needed) tells a reader exactly which items completed, which
+    failed, and why, if the process dies before `run()` ever reaches its own `path.write_text`."""
+    outcome = "record" if isinstance(item, (ClassifyRecord, TerritoryRecord)) else "failure"
+    return json.dumps({"probe": probe, "outcome": outcome, "data": item.model_dump(mode="json")})
+
+
+def _append_checkpoint(path: Path, probe: str, item) -> None:
+    """Append-and-close per item (not one held-open handle for the whole run): each call is a
+    complete, independent write, so a crash on item N+1 cannot corrupt or truncate what item N
+    already put on disk. Granularity is per ITEM, not per arm -- the earliest point at which a
+    `ClassifyRecord`/`TerritoryRecord` exists is once all three arms of that item have
+    succeeded, and a `ClassifyFailure`/`TerritoryFailure` exists the moment an item is
+    abandoned, so every item this probe ever spends money on lands here exactly once, win or
+    lose, before the loop moves on (`prompt_shift_probe.run_classify_probe`/
+    `run_territory_probe`'s `on_item` hook calls this once per item)."""
+    with path.open("a", encoding="utf-8") as f:
+        f.write(_checkpoint_line(probe, item) + "\n")
 
 
 def _classify_system_for(item: ClassifyItem) -> str:
@@ -183,37 +221,49 @@ def run(
         raw_parse_classify = functools.partial(_raw_parse_classify, model)
         raw_parse_territory = functools.partial(_raw_parse_territory, model)
 
-    classify_records = run_classify_probe(
+    # Resolved BEFORE either probe runs (not after, as the final result's timestamp used to be)
+    # so the checkpoint file exists, and its path is known and printed, before the first real
+    # call is made -- the founder's crash lost every already-paid-for call because nothing at
+    # all was written until run() returned; a per-item checkpoint fixes that only if it starts
+    # writing from item 1, not from whatever survives to the end.
+    if now is None:
+        now = datetime.now(timezone.utc)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = data_dir / f"{now.strftime('%Y%m%dT%H%M%SZ')}.checkpoint.jsonl"
+    print(f"checkpointing every item to {checkpoint_path} as it completes")
+
+    classify_records, classify_failures = run_classify_probe(
         classify_items,
         model,
         raw_parse_classify,
         system_for=_classify_system_for,
         max_tokens=_CLASSIFY_MAX_TOKENS,
+        on_item=functools.partial(_append_checkpoint, checkpoint_path, "classify"),
     )
-    classify_rates = summarize_disagreement(classify_records, margin)
+    classify_rates = summarize_disagreement(classify_records, classify_failures, margin)
 
-    territory_records = run_territory_probe(
+    territory_records, territory_failures = run_territory_probe(
         territory_items,
         model,
         raw_parse_territory,
         _MAP_TERRITORIES_SYSTEM,
         max_tokens=_CLASSIFY_MAX_TOKENS,
+        on_item=functools.partial(_append_checkpoint, checkpoint_path, "territory"),
     )
-    territory_rates = summarize_disagreement(territory_records, margin)
+    territory_rates = summarize_disagreement(territory_records, territory_failures, margin)
 
     result = Probe2Result(
         model_id=MODEL_ID,
         margin=margin,
         classify_corpus_source=classify_corpus_source,
         classify_records=classify_records,
+        classify_failures=classify_failures,
         classify_rates=classify_rates,
         territory_corpus_source=territory_corpus_source,
         territory_records=territory_records,
+        territory_failures=territory_failures,
         territory_rates=territory_rates,
     )
-    if now is None:
-        now = datetime.now(timezone.utc)
-    data_dir.mkdir(parents=True, exist_ok=True)
     path = data_dir / f"{now.strftime('%Y%m%dT%H%M%SZ')}.json"
     path.write_text(result.model_dump_json(indent=2))
     return path, result
@@ -226,22 +276,41 @@ def main() -> None:
     path, result = outcome
     print(f"wrote {path}")
     print(
-        f"classify corpus source: {result.classify_corpus_source} ({len(result.classify_records)} items)"
+        f"classify corpus source: {result.classify_corpus_source} "
+        f"(attempted {result.classify_rates.attempted_n}, "
+        f"comparable {result.classify_rates.comparable_n}, "
+        f"failed {result.classify_rates.failed_n})"
     )
     print(
-        f"classify same-prompt disagreement: {result.classify_rates.same_prompt_disagreement:.3f}"
+        f"classify refusal rate: {result.classify_rates.refusal_rate:.3f} "
+        f"({result.classify_rates.refused_n}/{result.classify_rates.attempted_n})"
     )
-    print(f"classify new-vs-old disagreement: {result.classify_rates.new_vs_old_disagreement:.3f}")
+    print(
+        f"classify same-prompt disagreement: {result.classify_rates.same_prompt_disagreement:.3f} "
+        f"(of {result.classify_rates.comparable_n} comparable items)"
+    )
+    print(
+        f"classify new-vs-old disagreement: {result.classify_rates.new_vs_old_disagreement:.3f} "
+        f"(of {result.classify_rates.comparable_n} comparable items)"
+    )
     print(f"classify shift claimed: {result.classify_rates.shift_claimed}")
     print(
         f"territory corpus source: {result.territory_corpus_source} "
-        f"({len(result.territory_records)} items)"
+        f"(attempted {result.territory_rates.attempted_n}, "
+        f"comparable {result.territory_rates.comparable_n}, "
+        f"failed {result.territory_rates.failed_n})"
     )
     print(
-        f"territory same-prompt disagreement: {result.territory_rates.same_prompt_disagreement:.3f}"
+        f"territory refusal rate: {result.territory_rates.refusal_rate:.3f} "
+        f"({result.territory_rates.refused_n}/{result.territory_rates.attempted_n})"
     )
     print(
-        f"territory new-vs-old disagreement: {result.territory_rates.new_vs_old_disagreement:.3f}"
+        f"territory same-prompt disagreement: {result.territory_rates.same_prompt_disagreement:.3f} "
+        f"(of {result.territory_rates.comparable_n} comparable items)"
+    )
+    print(
+        f"territory new-vs-old disagreement: {result.territory_rates.new_vs_old_disagreement:.3f} "
+        f"(of {result.territory_rates.comparable_n} comparable items)"
     )
     print(f"territory shift claimed: {result.territory_rates.shift_claimed}")
 

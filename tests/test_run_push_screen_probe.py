@@ -5,10 +5,12 @@ must return before the lazy `AnthropicModel` import ever runs."""
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
 import pytest
 
+from elenchus.model import ModelError
 from elenchus.push_screen_probe import build_cases
 from elenchus.run_push_screen_probe import _confirm, run
 from elenchus.types import Positions
@@ -82,6 +84,87 @@ def test_run_writes_one_record_per_generate_push_call_and_a_timestamped_file(tmp
     assert path.name == "20260802T120000Z.json"
     assert len(result.records) == model.calls
     assert model.calls > 0
+
+
+# ---------------------------------------------------------------------------
+# per-case resilience, checkpointing, and the refusal rate -- probe 1 has the SAME exposure as
+# probe 2 (`generate_push` has no retry at all): it merely got lucky on its first real run.
+# ---------------------------------------------------------------------------
+
+
+class _RaisingModel:
+    """Counts every call (raised or not), pops a scripted result OR raises the scripted
+    exception."""
+
+    def __init__(self, outcomes):
+        self._queue = list(outcomes)
+        self.calls = 0
+
+    def generate_push(self, exp, kind, code, *, stress=False, positions=Positions(), steer=""):
+        self.calls += 1
+        item = self._queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+def test_run_records_a_refusal_without_aborting_and_reports_the_refusal_rate(tmp_path):
+    model = _RaisingModel([ModelError("push generation refused")] + ["ok"] * 999)
+    now = datetime(2026, 8, 2, tzinfo=timezone.utc)
+    _, result = run(
+        model=model,
+        db_path=tmp_path / "missing.db",
+        data_dir=tmp_path / "out",
+        confirm=lambda *a: True,
+        now=now,
+    )
+    assert len(result.failures) == 1
+    assert len(result.records) == model.calls - 1  # every OTHER case still completed
+    summary = result.summarize()
+    assert summary.failed_n == 1
+    assert summary.attempted_n == model.calls  # independent of summary's own division
+    assert summary.refused_n == 1
+    assert summary.refusal_rate == pytest.approx(1 / model.calls)
+
+
+def test_run_checkpoints_every_case_as_it_completes(tmp_path):
+    model = _ScriptedModel()
+    now = datetime(2026, 8, 2, 12, 0, 0, tzinfo=timezone.utc)
+    run(
+        model=model,
+        db_path=tmp_path / "missing.db",
+        data_dir=tmp_path / "out",
+        confirm=lambda *a: True,
+        now=now,
+    )
+    checkpoint_path = tmp_path / "out" / "20260802T120000Z.checkpoint.jsonl"
+    assert checkpoint_path.exists()
+    lines = [json.loads(line) for line in checkpoint_path.read_text().splitlines()]
+    assert len(lines) == model.calls
+    assert all(line["outcome"] == "record" for line in lines)
+
+
+def test_a_crash_partway_leaves_a_readable_checkpoint_of_the_completed_cases(tmp_path):
+    """An UNANTICIPATED error (not `ModelError`) on the second case propagates out of `run()`
+    uncaught -- the first case must already be on disk in the checkpoint, and the run's final
+    consolidated JSON file must not exist, since `run()` never reached that line."""
+    model = _RaisingModel(["push 1", RuntimeError("simulated unanticipated crash")])
+    now = datetime(2026, 8, 2, 12, 0, 0, tzinfo=timezone.utc)
+    with pytest.raises(RuntimeError, match="simulated unanticipated crash"):
+        run(
+            model=model,
+            db_path=tmp_path / "missing.db",
+            data_dir=tmp_path / "out",
+            confirm=lambda *a: True,
+            now=now,
+        )
+    checkpoint_path = tmp_path / "out" / "20260802T120000Z.checkpoint.jsonl"
+    assert checkpoint_path.exists()
+    lines = [json.loads(line) for line in checkpoint_path.read_text().splitlines()]
+    assert len(lines) == 1
+    assert lines[0]["outcome"] == "record"
+    assert lines[0]["data"]["push_text"] == "push 1"
+    assert not (tmp_path / "out" / "20260802T120000Z.json").exists()
 
 
 def test_confirm_reports_the_probe_name_call_count_and_model_before_asking(monkeypatch, capsys):

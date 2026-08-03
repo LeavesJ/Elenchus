@@ -11,7 +11,9 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 
-from elenchus.model import AnthropicModel, ResponseClassification
+import pytest
+
+from elenchus.model import AnthropicModel, ModelError, ResponseClassification
 from elenchus.prompt_shift_probe import (
     ClassifyItem,
     Probe2Result,
@@ -341,6 +343,129 @@ def test_written_result_round_trips_through_json(tmp_path):
     assert again == result
     assert result.model_id == MODEL_ID
     assert result.margin == DEFAULT_MARGIN
+
+
+# ---------------------------------------------------------------------------
+# per-item resilience, checkpointing, and the refusal rate (the founder's incident)
+# ---------------------------------------------------------------------------
+
+
+def test_run_records_a_failed_item_without_aborting_and_reports_the_refusal_rate(tmp_path):
+    """End-to-end reproduction of the founder's incident, at the `run()` level: item 1's arm C
+    refuses. `run()` must still return a result (not raise, not abort) that carries the failure
+    in `classify_failures` (never silently dropped), excludes it from `classify_records`, and
+    surfaces it in `classify_rates` -- both the shrunk `comparable_n` and the nonzero
+    `refusal_rate`."""
+    db_path = tmp_path / "db.sqlite"
+    _seeded_db(db_path, n_pairs=2, n_situations=0)
+    model = _ScriptedModel(_rc(), _tmap())
+
+    class _RefusesOnceThenOk:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self, *, system, user, output_format, max_tokens):
+            self.calls += 1
+            if self.calls == 1:
+                raise ModelError("model refused or returned no parsed output")
+            return _rc()
+
+    raw_parse_c = _RefusesOnceThenOk()
+    raw_parse_t, _ = _scripted_raw_parse(_tmap())
+    _, result = run(
+        model=model,
+        raw_parse_classify=raw_parse_c,
+        raw_parse_territory=raw_parse_t,
+        db_path=db_path,
+        data_dir=tmp_path / "out",
+        confirm=lambda *a: True,
+        now=datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+    assert len(result.classify_failures) == 1
+    assert result.classify_failures[0].arm == "c"
+    assert len(result.classify_records) == 1  # the second item still completed
+    assert result.classify_rates.comparable_n == 1
+    assert result.classify_rates.failed_n == 1
+    assert result.classify_rates.attempted_n == 2
+    assert result.classify_rates.refused_n == 1
+    assert result.classify_rates.refusal_rate == 0.5  # 1 refused / 2 attempted
+
+
+def test_run_checkpoints_every_item_as_it_completes(tmp_path):
+    """Every item (classify AND territory) lands in the `.checkpoint.jsonl` file exactly once,
+    tagged by which half it came from -- the file this founder would have needed to see the 33
+    already-paid-for items survive the crash."""
+    db_path = tmp_path / "db.sqlite"
+    _seeded_db(db_path, n_pairs=2, n_situations=2)
+    model = _ScriptedModel(_rc(), _tmap())
+    raw_parse_c, _ = _scripted_raw_parse(_rc())
+    raw_parse_t, _ = _scripted_raw_parse(_tmap())
+    now = datetime(2026, 8, 2, 12, 0, 0, tzinfo=timezone.utc)
+    run(
+        model=model,
+        raw_parse_classify=raw_parse_c,
+        raw_parse_territory=raw_parse_t,
+        db_path=db_path,
+        data_dir=tmp_path / "out",
+        confirm=lambda *a: True,
+        now=now,
+    )
+    checkpoint_path = tmp_path / "out" / "20260802T120000Z.checkpoint.jsonl"
+    assert checkpoint_path.exists()
+    lines = [json.loads(line) for line in checkpoint_path.read_text().splitlines()]
+    assert len(lines) == 4  # 2 classify items + 2 territory items
+    assert [line["probe"] for line in lines] == ["classify", "classify", "territory", "territory"]
+    assert all(line["outcome"] == "record" for line in lines)
+
+
+def test_a_crash_partway_leaves_a_readable_checkpoint_of_the_completed_items(tmp_path):
+    """The exact failure mode this change fixes: an UNANTICIPATED error (deliberately not a
+    `ModelError`, so `run_classify_probe` does not catch it and it propagates out of `run()`
+    too) hits on the second classify item's first call. The first item's three arms already
+    completed and must be on disk in the checkpoint -- readable, without needing `run()` to have
+    returned -- and the run's final consolidated JSON file must NOT exist, since `run()` never
+    reached that line."""
+    db_path = tmp_path / "db.sqlite"
+    _seeded_db(db_path, n_pairs=2, n_situations=0)  # empty territory corpus: crash never reaches it
+
+    class _CrashesOnThirdCall:
+        def __init__(self):
+            self.calls = 0
+
+        def classify_response(self, exp, kind, code, push, response, *, stress=False):
+            self.calls += 1
+            if self.calls == 3:  # item 2's arm A
+                raise RuntimeError("simulated unanticipated crash")
+            return _rc()
+
+        def map_territories(self, situation, territories):
+            raise AssertionError("territory phase must never be reached")
+
+    model = _CrashesOnThirdCall()
+    raw_parse_c, _ = _scripted_raw_parse(_rc())
+    raw_parse_t, _ = _scripted_raw_parse(_tmap())
+    now = datetime(2026, 8, 2, 12, 0, 0, tzinfo=timezone.utc)
+
+    with pytest.raises(RuntimeError, match="simulated unanticipated crash"):
+        run(
+            model=model,
+            raw_parse_classify=raw_parse_c,
+            raw_parse_territory=raw_parse_t,
+            db_path=db_path,
+            data_dir=tmp_path / "out",
+            confirm=lambda *a: True,
+            now=now,
+        )
+
+    checkpoint_path = tmp_path / "out" / "20260802T120000Z.checkpoint.jsonl"
+    assert checkpoint_path.exists()
+    lines = [json.loads(line) for line in checkpoint_path.read_text().splitlines()]
+    assert len(lines) == 1  # only item 1 (2 model calls) landed before the crash on call 3
+    assert lines[0]["probe"] == "classify"
+    assert lines[0]["outcome"] == "record"
+    assert lines[0]["data"]["push"] == "push 0"
+    result_path = tmp_path / "out" / "20260802T120000Z.json"
+    assert not result_path.exists()  # run() never reached its own path.write_text
 
 
 # ---------------------------------------------------------------------------

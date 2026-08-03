@@ -26,11 +26,11 @@ without a model, per Model or `raw_parse` double.
 
 from __future__ import annotations
 
-from typing import Callable, NamedTuple, Protocol
+from typing import Callable, Literal, NamedTuple, Protocol
 
 from pydantic import BaseModel
 
-from .model import Model, ResponseClassification
+from .model import Model, ModelError, ResponseClassification
 from .types import Experience, TerritoryMap
 
 
@@ -136,6 +136,38 @@ class ClassifyRecord(BaseModel):
     new_vs_old_disagree: bool
 
 
+class ClassifyFailure(BaseModel):
+    """One item abandoned mid-way: `arm` names which of the three calls raised (arm C, the
+    reconstructed pre-indent prompt run through `_parse_required` directly, is the one the
+    founder's live run actually hit -- L-17's documented `classify_response` stochastic refusal,
+    ~1 in 2 on a pointed reply per `_parse_required`'s own docstring). An item with any arm
+    missing has no comparable pair on either axis (same-prompt needs A+B, new-vs-old needs A+C),
+    so it never becomes a `ClassifyRecord` -- this is the record of what was tried and why it
+    could not complete, not a downgraded result."""
+
+    experience_id: str
+    kind: str
+    code: str
+    push: str
+    response: str
+    arm: Literal["a", "b", "c"]
+    error: str
+
+
+def _classify_failure(
+    it: ClassifyItem, arm: Literal["a", "b", "c"], exc: Exception
+) -> ClassifyFailure:
+    return ClassifyFailure(
+        experience_id=it.exp.experience_id,
+        kind=it.kind,
+        code=it.code,
+        push=it.push,
+        response=it.response,
+        arm=arm,
+        error=str(exc),
+    )
+
+
 class RawParse(Protocol):
     def __call__(self, *, system: str, user: str, output_format: type, max_tokens: int): ...
 
@@ -147,42 +179,76 @@ def run_classify_probe(
     system_for: Callable[[ClassifyItem], str],
     *,
     max_tokens: int,
-) -> list[ClassifyRecord]:
+    on_item: Callable[[ClassifyRecord | ClassifyFailure], None] | None = None,
+) -> tuple[list[ClassifyRecord], list[ClassifyFailure]]:
     """Pure orchestration over the Model protocol plus `raw_parse`, the one seam outside it: arm
     C sends the RECONSTRUCTED pre-indent prompt, which no shipped method composes anymore, so it
     goes through a caller-supplied raw parse function instead of `model.classify_response`.
     `system_for` supplies the exact system text `model` would use for `it`'s
     `(exp, kind, code, stress)` -- unchanged by the indent fix, so arms A/B/C all see the SAME
-    system and only `user` differs."""
-    records = []
+    system and only `user` differs.
+
+    A `ModelError` on any single arm (the documented `classify_response` refusal class -- see
+    `model._parse_required`'s docstring) abandons ONLY that item: it is recorded as a
+    `ClassifyFailure` naming which arm and why, and the loop moves to the next item rather than
+    aborting the whole run. `ModelError` is caught narrowly, not `Exception` -- an unanticipated
+    error (a transport failure, a programming bug) is a different class of problem than the
+    documented stochastic refusal and must still fail the run loud, not be silently absorbed as
+    "just another failed item". `on_item`, when given, is called once per item with whichever of
+    `ClassifyRecord`/`ClassifyFailure` that item produced, in order -- the caller's hook for
+    checkpointing paid-for results to disk as they happen, not after the whole corpus finishes."""
+    records: list[ClassifyRecord] = []
+    failures: list[ClassifyFailure] = []
     for it in items:
-        arm_a = model.classify_response(
-            it.exp, it.kind, it.code, it.push, it.response, stress=it.stress
-        )
-        arm_b = model.classify_response(
-            it.exp, it.kind, it.code, it.push, it.response, stress=it.stress
-        )
-        arm_c = raw_parse(
-            system=system_for(it),
-            user=reconstruct_old_classify_response_user(it.push, it.response),
-            output_format=ResponseClassification,
-            max_tokens=max_tokens,
-        )
-        records.append(
-            ClassifyRecord(
-                experience_id=it.exp.experience_id,
-                kind=it.kind,
-                code=it.code,
-                push=it.push,
-                response=it.response,
-                arm_a=arm_a,
-                arm_b=arm_b,
-                arm_c=arm_c,
-                same_prompt_disagree=classify_response_disagree(arm_a, arm_b),
-                new_vs_old_disagree=classify_response_disagree(arm_a, arm_c),
+        try:
+            arm_a = model.classify_response(
+                it.exp, it.kind, it.code, it.push, it.response, stress=it.stress
             )
+        except ModelError as exc:
+            failure = _classify_failure(it, "a", exc)
+            failures.append(failure)
+            if on_item is not None:
+                on_item(failure)
+            continue
+        try:
+            arm_b = model.classify_response(
+                it.exp, it.kind, it.code, it.push, it.response, stress=it.stress
+            )
+        except ModelError as exc:
+            failure = _classify_failure(it, "b", exc)
+            failures.append(failure)
+            if on_item is not None:
+                on_item(failure)
+            continue
+        try:
+            arm_c = raw_parse(
+                system=system_for(it),
+                user=reconstruct_old_classify_response_user(it.push, it.response),
+                output_format=ResponseClassification,
+                max_tokens=max_tokens,
+            )
+        except ModelError as exc:
+            failure = _classify_failure(it, "c", exc)
+            failures.append(failure)
+            if on_item is not None:
+                on_item(failure)
+            continue
+        record = ClassifyRecord(
+            experience_id=it.exp.experience_id,
+            kind=it.kind,
+            code=it.code,
+            push=it.push,
+            response=it.response,
+            arm_a=arm_a,
+            arm_b=arm_b,
+            arm_c=arm_c,
+            same_prompt_disagree=classify_response_disagree(arm_a, arm_b),
+            new_vs_old_disagree=classify_response_disagree(arm_a, arm_c),
         )
-    return records
+        records.append(record)
+        if on_item is not None:
+            on_item(record)
+    return records, failures
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +281,21 @@ class TerritoryRecord(BaseModel):
     new_vs_old_disagree: bool
 
 
+class TerritoryFailure(BaseModel):
+    """`map_territories`' shape of `ClassifyFailure` -- see that class's docstring for why a
+    failed arm excludes the whole item rather than producing a partial record."""
+
+    situation: str
+    arm: Literal["a", "b", "c"]
+    error: str
+
+
+def _territory_failure(
+    it: TerritoryItem, arm: Literal["a", "b", "c"], exc: Exception
+) -> TerritoryFailure:
+    return TerritoryFailure(situation=it.situation, arm=arm, error=str(exc))
+
+
 def run_territory_probe(
     items: list[TerritoryItem],
     model: Model,
@@ -222,33 +303,58 @@ def run_territory_probe(
     system_text: str,
     *,
     max_tokens: int,
-) -> list[TerritoryRecord]:
-    """Pure orchestration, `map_territories`' shape of `run_classify_probe`. `system_text` is
-    fixed across every item (map_territories' system carries no per-item data -- only `user`
-    does), so the caller supplies it once."""
-    records = []
+    on_item: Callable[[TerritoryRecord | TerritoryFailure], None] | None = None,
+) -> tuple[list[TerritoryRecord], list[TerritoryFailure]]:
+    """Pure orchestration, `map_territories`' shape of `run_classify_probe` -- including its
+    per-item `ModelError` resilience and `on_item` checkpoint hook; see that function's
+    docstring for both. `system_text` is fixed across every item (map_territories' system
+    carries no per-item data -- only `user` does), so the caller supplies it once."""
+    records: list[TerritoryRecord] = []
+    failures: list[TerritoryFailure] = []
     for it in items:
         territories = list(it.territories)
         known_ids = [eid for eid, _ in territories]
-        arm_a = model.map_territories(it.situation, territories)
-        arm_b = model.map_territories(it.situation, territories)
-        arm_c = raw_parse(
-            system=system_text,
-            user=reconstruct_old_map_territories_user(it.situation, territories),
-            output_format=TerritoryMap,
-            max_tokens=max_tokens,
-        )
-        records.append(
-            TerritoryRecord(
-                situation=it.situation,
-                arm_a=arm_a,
-                arm_b=arm_b,
-                arm_c=arm_c,
-                same_prompt_disagree=territories_disagree(arm_a, arm_b, known_ids),
-                new_vs_old_disagree=territories_disagree(arm_a, arm_c, known_ids),
+        try:
+            arm_a = model.map_territories(it.situation, territories)
+        except ModelError as exc:
+            failure = _territory_failure(it, "a", exc)
+            failures.append(failure)
+            if on_item is not None:
+                on_item(failure)
+            continue
+        try:
+            arm_b = model.map_territories(it.situation, territories)
+        except ModelError as exc:
+            failure = _territory_failure(it, "b", exc)
+            failures.append(failure)
+            if on_item is not None:
+                on_item(failure)
+            continue
+        try:
+            arm_c = raw_parse(
+                system=system_text,
+                user=reconstruct_old_map_territories_user(it.situation, territories),
+                output_format=TerritoryMap,
+                max_tokens=max_tokens,
             )
+        except ModelError as exc:
+            failure = _territory_failure(it, "c", exc)
+            failures.append(failure)
+            if on_item is not None:
+                on_item(failure)
+            continue
+        record = TerritoryRecord(
+            situation=it.situation,
+            arm_a=arm_a,
+            arm_b=arm_b,
+            arm_c=arm_c,
+            same_prompt_disagree=territories_disagree(arm_a, arm_b, known_ids),
+            new_vs_old_disagree=territories_disagree(arm_a, arm_c, known_ids),
         )
-    return records
+        records.append(record)
+        if on_item is not None:
+            on_item(record)
+    return records, failures
 
 
 # ---------------------------------------------------------------------------
@@ -256,28 +362,58 @@ def run_territory_probe(
 # ---------------------------------------------------------------------------
 
 
+def _is_refusal(error: str) -> bool:
+    """A failure's `error` text says "refused" (`_require`'s "model refused or returned no
+    parsed output", `generate_push`'s "push generation refused") exactly when the model itself
+    declined to answer -- distinct from a truncation, an oversized-input guard, or an unknown
+    rubric code, all of which are also `ModelError` but are not the stochastic refusal L-17
+    documents and this probe exists to measure."""
+    return "refused" in error.lower()
+
+
 class ProbeRates(BaseModel):
-    sample_size: int
+    comparable_n: int  # items where every arm succeeded -- the denominator for BOTH rates below
+    failed_n: int  # items abandoned because some arm raised ModelError
+    attempted_n: int  # comparable_n + failed_n -- every item the run actually tried
+    refused_n: int  # failed_n items whose recorded failure was specifically a refusal
+    refusal_rate: float  # refused_n / attempted_n -- 0.0 when nothing was attempted
     same_prompt_disagreement: float
     new_vs_old_disagreement: float
     margin: float
     shift_claimed: bool
 
 
-def summarize_disagreement(records: list, margin: float) -> ProbeRates:
+def summarize_disagreement(records: list, failures: list, margin: float) -> ProbeRates:
     """The two disagreement rates plus the verdict, over any record sequence carrying
     `same_prompt_disagree`/`new_vs_old_disagree` bools -- `ClassifyRecord` and `TerritoryRecord`
     both do, and this is the one place that turns per-item flags into the two rates `verdict`
-    compares, so both decision points read it off the identical computation."""
-    n = len(records)
-    if n == 0:
+    compares, so both decision points read it off the identical computation.
+
+    `records` alone are never enough to report a rate honestly: a `ClassifyItem`/`TerritoryItem`
+    whose arm failed has no comparable pair on either axis (same-prompt needs A+B; new-vs-old
+    needs A+C), so it CANNOT be silently treated as "agreed" -- doing so would shrink the
+    disagreement count without shrinking the denominator, biasing every rate toward "no shift".
+    Both rates are instead computed over `comparable_n = len(records)` only, and `failures`
+    (any sequence carrying `.error`, `ClassifyFailure`/`TerritoryFailure` both do) supplies
+    `failed_n`/`attempted_n`/`refusal_rate` so a reader can see exactly how many items were
+    excluded and why, not just the two rates in isolation."""
+    comparable_n = len(records)
+    failed_n = len(failures)
+    attempted_n = comparable_n + failed_n
+    refused_n = sum(1 for f in failures if _is_refusal(f.error))
+    if comparable_n == 0:
         same = 0.0
         new_old = 0.0
     else:
-        same = sum(1 for r in records if r.same_prompt_disagree) / n
-        new_old = sum(1 for r in records if r.new_vs_old_disagree) / n
+        same = sum(1 for r in records if r.same_prompt_disagree) / comparable_n
+        new_old = sum(1 for r in records if r.new_vs_old_disagree) / comparable_n
+    refusal_rate = (refused_n / attempted_n) if attempted_n else 0.0
     return ProbeRates(
-        sample_size=n,
+        comparable_n=comparable_n,
+        failed_n=failed_n,
+        attempted_n=attempted_n,
+        refused_n=refused_n,
+        refusal_rate=refusal_rate,
         same_prompt_disagreement=same,
         new_vs_old_disagreement=new_old,
         margin=margin,
@@ -290,7 +426,9 @@ class Probe2Result(BaseModel):
     margin: float
     classify_corpus_source: str  # "live_db" | "empty_fallback"
     classify_records: list[ClassifyRecord]
+    classify_failures: list[ClassifyFailure]
     classify_rates: ProbeRates
     territory_corpus_source: str  # "live_db" | "empty_fallback"
     territory_records: list[TerritoryRecord]
+    territory_failures: list[TerritoryFailure]
     territory_rates: ProbeRates
