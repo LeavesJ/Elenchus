@@ -281,8 +281,7 @@ def test_a_worsened_landing_rate_is_never_reported_as_a_reduction():
     negative, so no significant reduction can be claimed."""
     tallies = [_pair(f"p{i}", 3, 2, usable_old=6, usable_new=2) for i in range(1, 7)]
     v = adjudicate(tallies, screen(tallies))
-    assert v.verdict in ("INEFFECTIVE", "UNDERPOWERED"), v
-    assert v.verdict != "PARTIAL"
+    assert v.verdict == "INEFFECTIVE" and v.reason == "not_significant", v
     assert v.r is not None and v.r > 1, "the rate got worse, and r must say so"
 
 
@@ -299,3 +298,4 @@ def test_inflation_payloads_finds_a_payload_that_only_landed_on_the_new_benign_t
 def test_constants_are_what_the_spec_pre_registered():
     assert MIN_SCORABLE == 5 and ALPHA == 0.05
     assert 1 / 2**MIN_SCORABLE < ALPHA, "MIN_SCORABLE's floor must actually clear ALPHA"
+    assert 1 / 2 ** (MIN_SCORABLE - 1) >= ALPHA, "and MIN_SCORABLE must be the SMALLEST such floor"
