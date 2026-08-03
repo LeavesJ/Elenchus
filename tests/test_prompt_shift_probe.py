@@ -5,6 +5,7 @@ scripted doubles, so every assertion here is provable offline."""
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from elenchus.model import ModelError, ResponseClassification
 from elenchus.prompt_shift_probe import (
@@ -53,6 +54,19 @@ def _rc(outcome="unchanged", mechanism_supplied=False, hard_wrong=False):
 
 def _tmap(ranked, confidence="high", reflection="[reflect]"):
     return TerritoryMap(ranked=ranked, confidence=confidence, reflection=reflection)
+
+
+def _parse_failure() -> ValidationError:
+    """A REAL `pydantic.ValidationError`, matching the live incident `model._parse_required`'s
+    fix exists for (model.py): the SDK parses structured output INSIDE `client.messages.parse`
+    itself, so a truncation that breaks JSON syntax raises this exact exception class -- caught
+    internally by `_parse_required` after that fix, but this probe's own per-item catch must not
+    assume that invariant holds (see `run_classify_probe`/`run_territory_probe`'s docstrings)."""
+    try:
+        TerritoryMap.model_validate_json('{"ranked":["decision_und')
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("fixture did not raise ValidationError")  # pragma: no cover
 
 
 # ---------------------------------------------------------------------------
@@ -399,6 +413,34 @@ def test_run_classify_probe_records_which_arm_failed_for_arm_a_and_arm_b_too():
     assert failures_b[0].arm == "b"
 
 
+def test_run_classify_probe_records_an_arm_c_parse_failure_as_a_failure_and_keeps_going():
+    """`model._parse_required` now converts a parse-time truncation into `ModelError` internally
+    (model.py), but this probe must not depend on that holding: a raw `pydantic.ValidationError`
+    reaching this orchestration layer directly must be caught too, distinctly from a refusal, and
+    the run must still process the SECOND item rather than aborting -- the probe-side backstop
+    for the same incident the `ModelError`-only test above already covers for `ModelError`
+    itself."""
+    exp = _exp()
+    items = [
+        ClassifyItem(exp, "frame", "frame_0", False, "push1", "resp1"),
+        ClassifyItem(exp, "frame", "frame_0", False, "push2", "resp2"),
+    ]
+    model = _RaisingClassifyModel([_rc(), _rc(), _rc(), _rc()])  # 2 items * arm A/B each
+    raw_parse = _raw_parse_raising([_parse_failure(), _rc()])
+    records, failures = run_classify_probe(
+        items, model, raw_parse, system_for=lambda it: "S", max_tokens=1
+    )
+    assert len(failures) == 1
+    assert len(records) == 1  # the SECOND item still completed
+    failure = failures[0]
+    assert isinstance(failure, ClassifyFailure)
+    assert failure.arm == "c"
+    assert failure.push == "push1"
+    assert "TerritoryMap" in failure.error  # the real pydantic message, not a generic string
+    assert "refused" not in failure.error.lower()  # distinct from a refusal, not conflated
+    assert records[0].push == "push2"
+
+
 def test_run_classify_probe_lets_a_non_model_error_propagate_uncaught():
     """`ModelError` is caught narrowly, not `Exception` -- an unanticipated error class (a
     transport failure, a programming bug) must still crash the run rather than being silently
@@ -511,6 +553,29 @@ def test_run_territory_probe_records_an_arm_c_refusal_as_a_failure_and_keeps_goi
     assert isinstance(failures[0], TerritoryFailure)
     assert failures[0].arm == "c"
     assert failures[0].situation == "situation1"
+    assert records[0].situation == "situation2"
+
+
+def test_run_territory_probe_records_an_arm_c_parse_failure_as_a_failure_and_keeps_going():
+    """`map_territories`' twin of the classify-probe parse-failure test above -- see that test's
+    docstring. `map_territories` returns `TerritoryMap`, so this is also the exact type the live
+    incident hit (arm C on a `TerritoryMap` mid-string EOF)."""
+    items = [
+        TerritoryItem("situation1", (("exp_a", "desc a"),)),
+        TerritoryItem("situation2", (("exp_a", "desc a"),)),
+    ]
+    model = _RaisingTerritoryModel(
+        [_tmap(["exp_a"]), _tmap(["exp_a"]), _tmap(["exp_a"]), _tmap(["exp_a"])]
+    )
+    raw_parse = _raw_parse_raising([_parse_failure(), _tmap(["exp_a"])])
+    records, failures = run_territory_probe(items, model, raw_parse, system_text="S", max_tokens=1)
+    assert len(failures) == 1
+    assert len(records) == 1  # the SECOND item still completed
+    assert isinstance(failures[0], TerritoryFailure)
+    assert failures[0].arm == "c"
+    assert failures[0].situation == "situation1"
+    assert "TerritoryMap" in failures[0].error  # the real pydantic message, not a generic string
+    assert "refused" not in failures[0].error.lower()  # distinct from a refusal, not conflated
     assert records[0].situation == "situation2"
 
 

@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 from elenchus.model import AnthropicModel, ModelError, ResponseClassification
 from elenchus.types import (
@@ -8,6 +9,7 @@ from elenchus.types import (
     Mode,
     Regime,
     Rubric,
+    TerritoryMap,
     Trap,
     TrapState,
 )
@@ -154,8 +156,12 @@ class _Messages:
     def parse(self, **kwargs):
         self.parse_calls.append(kwargs)
         if isinstance(self._parse_result, list):  # sequenced: one response per call, in order
-            return self._parse_result.pop(0)
-        return self._parse_result
+            result = self._parse_result.pop(0)
+        else:
+            result = self._parse_result
+        if isinstance(result, BaseException):  # scripted failure -- raise it, don't return it
+            raise result
+        return result
 
     def create(self, **kwargs):
         self.create_calls.append(kwargs)
@@ -275,6 +281,74 @@ def test_truncation_then_refusal_stays_bounded_at_two_calls():
     calls = client.messages.parse_calls
     assert len(calls) == 2
     assert calls[1]["max_tokens"] == calls[0]["max_tokens"] * 2  # the one retry was the doubled one
+
+
+def _parse_time_truncation() -> ValidationError:
+    """A REAL `pydantic.ValidationError` — not a mock, not a stand-in shaped like one — matching
+    the live incident verbatim: `client.messages.parse` parses the structured output INSIDE
+    itself (`TypeAdapter.validate_json`, anthropic's `lib/_parse/_response.py`), so a model
+    completion that truncates mid-JSON raises this exact exception class before this module's
+    code ever sees a `resp` object with a `stop_reason` to inspect. Built the same way the SDK
+    builds it (`TerritoryMap.model_validate_json` on a string cut off mid-field), not constructed
+    by hand, so the test proves `_parse_required` catches the type the SDK actually raises."""
+    try:
+        TerritoryMap.model_validate_json('{"ranked":["decision_und')
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("fixture did not raise ValidationError")  # pragma: no cover
+
+
+def test_parse_time_truncation_costs_one_budget_doubled_retry_and_returns_the_result():
+    """The bug: `client.messages.parse` can raise `pydantic.ValidationError` directly (the common
+    truncation shape — mid-JSON, not a syntactically-valid-but-flagged completion) instead of
+    returning a `resp` with `stop_reason == "max_tokens"`. `_parse_required`'s docstring already
+    promises a budget-doubled retry for a truncation; this must fire on THIS class of truncation
+    too, not just the rarer stop_reason-flagged one the old code actually caught."""
+    wire = _Wire(
+        frames=[_Item("protect_the_core_lane", FrameState.present_reasoned)],
+        traps=[_Item("erode_core_for_one_customer", TrapState.not_tripped)],
+    )
+    client = _Client(parse_result=[_parse_time_truncation(), _Resp(parsed_output=wire)])
+    out = AnthropicModel(client=client).classify_intake(_exp(), "opening")
+    assert out.frame_states["protect_the_core_lane"] is FrameState.present_reasoned
+    calls = client.messages.parse_calls
+    assert len(calls) == 2  # exactly one retry, not zero, not two
+    assert calls[1]["max_tokens"] == calls[0]["max_tokens"] * 2  # budget-doubled, not plain
+
+
+def test_persistent_parse_time_truncation_fails_loud_naming_the_doubled_budget():
+    """If the doubled-budget retry ALSO fails to parse, `_parse_required` must fail loud with a
+    `ModelError` an operator can tell apart from both a refusal and a clean (parseable but
+    max_tokens-flagged) truncation — not let the second `pydantic.ValidationError` escape raw, and
+    not spend a third call chasing it."""
+    client = _Client(parse_result=[_parse_time_truncation(), _parse_time_truncation()])
+    with pytest.raises(ModelError) as exc_info:
+        AnthropicModel(client=client).classify_intake(_exp(), "opening")
+    calls = client.messages.parse_calls
+    assert len(calls) == 2  # bounded: the single budget-doubled retry, then loud
+    doubled_budget = calls[1]["max_tokens"]
+    assert calls[0]["max_tokens"] * 2 == doubled_budget
+    message = str(exc_info.value)
+    assert str(doubled_budget) in message  # names the budget it failed at, not a generic string
+    # distinct from _require's own two messages, not a reuse of either
+    assert message != "model refused or returned no parsed output"
+    assert "truncated at max_tokens" not in message
+
+
+def test_transport_error_during_parse_is_not_caught_and_propagates():
+    """`_parse_required` must catch `pydantic.ValidationError` ONLY — a transport-class failure
+    (connection drop, auth, rate limit) is a different problem entirely and must surface as
+    itself, never be mistaken for a truncation and silently retried."""
+    import httpx
+    from anthropic import APIConnectionError
+
+    transport_error = APIConnectionError(
+        request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    )
+    client = _Client(parse_result=[transport_error])
+    with pytest.raises(APIConnectionError):
+        AnthropicModel(client=client).classify_intake(_exp(), "opening")
+    assert len(client.messages.parse_calls) == 1  # never retried: not the anticipated class
 
 
 def test_grade_answer_parses_correctness_against_criteria():

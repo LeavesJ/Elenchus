@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .content_loader import load_prompt, load_spike_prompt
 from .prompt_text import LEARNER_INDENT, bulleted, indent_after_first, labelled
@@ -585,11 +585,44 @@ class AnthropicModel:
         reason (founder live dogfood 2026-07-03: classify_response refused mid-press on an
         ethically pointed reply — 'I'll read high … nobody can pinpoint it to me' — and killed
         the door; the instrumented live replay named the class: same dialogue, 2 clean runs,
-        1 refusal). A deterministic refusal still fails loud on the second strike."""
+        1 refusal). A deterministic refusal still fails loud on the second strike.
+
+        A truncation does not always surface as a clean `resp` with `stop_reason == "max_tokens"`:
+        the SDK parses the structured output INSIDE `client.messages.parse` itself
+        (`TypeAdapter.validate_json` in anthropic's `lib/_parse/_response.py`), so a completion
+        that truncates mid-JSON — the common shape, not the rare one — raises
+        `pydantic.ValidationError` out of that call before this method ever gets a `resp` object
+        to inspect. Live (prompt_shift_probe arm C, `_parse_required` reached directly):
+
+            pydantic_core._pydantic_core.ValidationError: 1 validation error for TerritoryMap
+              Invalid JSON: EOF while parsing a string at line 1 column 8036
+              input_value='{"ranked":["decision_und...he.The.The.The.The.The.'
+
+        a repetition-loop truncation that hit the cap mid-string. Caught here as the SAME signal
+        `stop_reason == "max_tokens"` already is, and spends the SAME single budget-doubled retry
+        — never a second one — because a completion that breaks JSON syntax on the way out is a
+        truncation whether or not the API also flags it. Caught narrowly: only
+        `pydantic.ValidationError` (identically `pydantic_core.ValidationError` — pydantic
+        re-exports the same class), never a bare `Exception`, so a transport failure, an auth
+        error, or a rate limit still propagates unchanged instead of being mistaken for a
+        truncation. If the doubled-budget retry ALSO fails to parse, that raises its own
+        `ModelError` naming the budget it failed at — distinguishable from both a refusal and a
+        clean (parseable-but-flagged) truncation, the two `_require` already names below."""
         client = self._get_client()
-        resp = client.messages.parse(model=self._model, max_tokens=max_tokens, **kwargs)
-        if getattr(resp, "stop_reason", None) == "max_tokens":
-            resp = client.messages.parse(model=self._model, max_tokens=max_tokens * 2, **kwargs)
+        try:
+            resp = client.messages.parse(model=self._model, max_tokens=max_tokens, **kwargs)
+        except ValidationError:
+            resp = None  # parse-time truncation: the same signal as stop_reason == "max_tokens"
+        if resp is None or getattr(resp, "stop_reason", None) == "max_tokens":
+            doubled_budget = max_tokens * 2
+            try:
+                resp = client.messages.parse(model=self._model, max_tokens=doubled_budget, **kwargs)
+            except ValidationError as exc:
+                raise ModelError(
+                    "structured output could not be parsed even at the doubled budget "
+                    f"({doubled_budget}) — distinct from a refusal and from a clean truncation "
+                    "(L-17)"
+                ) from exc
         elif getattr(resp, "stop_reason", None) == "refusal" or resp.parsed_output is None:
             resp = client.messages.parse(model=self._model, max_tokens=max_tokens, **kwargs)
         return _require(resp)  # the single retry is spent; both classes now fail LOUD

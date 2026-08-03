@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Callable, Literal, NamedTuple, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from .model import Model, ModelError, ResponseClassification
 from .types import Experience, TerritoryMap
@@ -191,12 +191,21 @@ def run_classify_probe(
     A `ModelError` on any single arm (the documented `classify_response` refusal class -- see
     `model._parse_required`'s docstring) abandons ONLY that item: it is recorded as a
     `ClassifyFailure` naming which arm and why, and the loop moves to the next item rather than
-    aborting the whole run. `ModelError` is caught narrowly, not `Exception` -- an unanticipated
-    error (a transport failure, a programming bug) is a different class of problem than the
-    documented stochastic refusal and must still fail the run loud, not be silently absorbed as
-    "just another failed item". `on_item`, when given, is called once per item with whichever of
-    `ClassifyRecord`/`ClassifyFailure` that item produced, in order -- the caller's hook for
-    checkpointing paid-for results to disk as they happen, not after the whole corpus finishes."""
+    aborting the whole run. A parse-time `pydantic.ValidationError` is caught the same way, for
+    the incident that motivated this: the SDK parses the structured output INSIDE
+    `client.messages.parse` itself, so a truncation that breaks JSON syntax raises this exception
+    class directly, before a `ModelError` is ever constructed (`_parse_required`'s own docstring,
+    model.py). `_parse_required` now converts that into a `ModelError` internally, so arms A/B
+    (`model.classify_response`) and arm C (`raw_parse`, which reaches `_parse_required` directly)
+    should never surface a raw `ValidationError` here anymore -- but this orchestration layer does
+    not assume that invariant holds, so it catches both exception classes itself rather than
+    depending on a fix one layer down. Both are caught narrowly, never a bare `Exception` -- an
+    unanticipated error (a transport failure, a programming bug) is a different class of problem
+    than the documented stochastic refusal/truncation and must still fail the run loud, not be
+    silently absorbed as "just another failed item". `on_item`, when given, is called once per
+    item with whichever of `ClassifyRecord`/`ClassifyFailure` that item produced, in order -- the
+    caller's hook for checkpointing paid-for results to disk as they happen, not after the whole
+    corpus finishes."""
     records: list[ClassifyRecord] = []
     failures: list[ClassifyFailure] = []
     for it in items:
@@ -204,7 +213,7 @@ def run_classify_probe(
             arm_a = model.classify_response(
                 it.exp, it.kind, it.code, it.push, it.response, stress=it.stress
             )
-        except ModelError as exc:
+        except (ModelError, ValidationError) as exc:
             failure = _classify_failure(it, "a", exc)
             failures.append(failure)
             if on_item is not None:
@@ -214,7 +223,7 @@ def run_classify_probe(
             arm_b = model.classify_response(
                 it.exp, it.kind, it.code, it.push, it.response, stress=it.stress
             )
-        except ModelError as exc:
+        except (ModelError, ValidationError) as exc:
             failure = _classify_failure(it, "b", exc)
             failures.append(failure)
             if on_item is not None:
@@ -227,7 +236,7 @@ def run_classify_probe(
                 output_format=ResponseClassification,
                 max_tokens=max_tokens,
             )
-        except ModelError as exc:
+        except (ModelError, ValidationError) as exc:
             failure = _classify_failure(it, "c", exc)
             failures.append(failure)
             if on_item is not None:
@@ -316,7 +325,7 @@ def run_territory_probe(
         known_ids = [eid for eid, _ in territories]
         try:
             arm_a = model.map_territories(it.situation, territories)
-        except ModelError as exc:
+        except (ModelError, ValidationError) as exc:
             failure = _territory_failure(it, "a", exc)
             failures.append(failure)
             if on_item is not None:
@@ -324,7 +333,7 @@ def run_territory_probe(
             continue
         try:
             arm_b = model.map_territories(it.situation, territories)
-        except ModelError as exc:
+        except (ModelError, ValidationError) as exc:
             failure = _territory_failure(it, "b", exc)
             failures.append(failure)
             if on_item is not None:
@@ -337,7 +346,7 @@ def run_territory_probe(
                 output_format=TerritoryMap,
                 max_tokens=max_tokens,
             )
-        except ModelError as exc:
+        except (ModelError, ValidationError) as exc:
             failure = _territory_failure(it, "c", exc)
             failures.append(failure)
             if on_item is not None:
