@@ -651,16 +651,26 @@ def test_content_gap_is_inert_on_a_memory_store():
     )
 
 
-def test_gap_is_logged_only_when_the_correction_still_does_not_fit():
-    # A correction that lands cleanly is NOT a gap — the mapper just needed her second phrasing.
-    # Logging every correction would drown the content axis's signal in noise.
+def test_the_gap_is_not_reconditioned_on_the_mappers_own_confidence():
+    """Reaching the cap IS the miss, so the call must not be re-gated on the mapper's self-report.
+
+    Suppressing the gap whenever the re-map returned decision/high is why this ledger held 0 rows
+    across 19 real sittings: a CONFIDENTLY wrong map is exactly the case that then records nothing
+    (the founder's 2026-07-29 equity-split dogfood).
+
+    This reads ONLY the branch condition guarding the call, never the call's own arguments —
+    `verdict=` and `confidence=` are still passed, because the row must carry them for read-time
+    filtering, so a segment-window assertion here would pass either way and prove nothing. That
+    vacuous shape is the class this branch has now removed twelve instances of.
+
+    The complementary property — that it fires at the CAP and not on every correction — is pinned
+    behaviourally, by test_a_confidently_mapped_correction_at_the_cap_is_still_a_content_gap
+    asserting exactly one row after two corrections."""
     body = _strip_comments(_fn(RUNNER.read_text(), "decide"))
-    assert "log_content_gap" in body, "the no-branch must record the miss"
-    seg = body[body.index("log_content_gap") - 900 : body.index("log_content_gap") + 400]
-    assert "corrections" in seg, "a gap is only meaningful after a correction"
-    assert "verdict" in seg and "confidence" in seg, (
-        "only log when the re-map still does not fit honestly"
-    )
+    assert "log_content_gap" in body, "the cap must record the miss"
+    call = body.index("log_content_gap")
+    guard = body[body.rindex("if ", 0, call) : call]
+    assert "verdict" not in guard and "confidence" not in guard, guard
 
 
 def test_gap_is_recorded_before_the_forge_not_after():

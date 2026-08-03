@@ -1085,14 +1085,24 @@ class SessionRegistry:
                             # through to the honest-fit beat, which names the stretch in her own
                             # words and keeps the doors answerable, then proceed. Never dead-ends.
                             #
-                            # And if the re-map STILL does not fit her corrected words, that is a
-                            # CONTENT gap — five territories, not a user failure. Record it for the
-                            # mining pipeline (server-side only, L-13). A correction that lands
-                            # cleanly is NOT a gap: the mapper simply needed her second phrasing.
-                            if sit is not None and (
-                                tmap.verdict != "decision"
-                                or tmap.confidence.strip().lower() != "high"
-                            ):
+                            # Reaching the cap is itself the miss: she corrected twice and is being
+                            # handed the honest-fit fall-through anyway. That is a CONTENT gap —
+                            # five territories, not a user failure. Record it for the mining
+                            # pipeline (server-side only, L-13).
+                            #
+                            # This used to be suppressed when the re-map came back decision/high,
+                            # on the reasoning that the mapper had simply needed her second
+                            # phrasing. That trusted the mapper's SELF-REPORT over her BEHAVIOUR,
+                            # and a confidently wrong map is precisely the case that reports
+                            # nothing: the founder's own 2026-07-29 equity-split dogfood, and the
+                            # reason this ledger held 0 rows across 19 real sittings while the
+                            # misses were happening. Confidence is what the mapper says about
+                            # itself; the second correction is what she did.
+                            #
+                            # The signal is not drowned, the discrimination MOVES: verdict and
+                            # confidence ride the row, so a confident miss and a low one separate
+                            # at read time. Filtering at write time destroyed those rows for good.
+                            if sit is not None:
                                 self._store.log_content_gap(
                                     situation=situation,
                                     mapped_eid=eid,

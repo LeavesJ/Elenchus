@@ -1765,11 +1765,19 @@ def test_a_ranking_the_library_does_not_contain_cannot_pick_the_door(tmp_path, m
         assert row is not None and row["experience_id"] == _T1, tag_
 
 
-def test_a_correction_that_lands_cleanly_at_the_cap_is_not_a_content_gap(tmp_path, make_fake):
-    """§4b: the gap ledger is the content axis's only mechanical input, so it records what the
-    door COULD NOT serve — never every correction. Two corrections that both re-map cleanly
-    (decision/high) reach the cap and must leave the ledger empty; the topic/low arm below is the
-    same path with the condition true."""
+def test_a_confidently_mapped_correction_at_the_cap_is_still_a_content_gap(tmp_path, make_fake):
+    """Reaching the cap IS the misfit signal, and it is the only one grounded in what she DID.
+
+    The gap used to be suppressed whenever the re-map came back decision/high, which trusted the
+    mapper's own self-report over her behaviour. That is exactly the founder's 2026-07-29 dogfood
+    case — a CONFIDENTLY WRONG map — and it is why `web_content_gap` held 0 rows across 19 real
+    sittings while the misses were happening. A learner who corrects twice and still gets the
+    honest-fit fall-through has told us the library could not serve her, whatever the mapper's
+    confidence says about itself.
+
+    The discrimination is not lost, it MOVES: `verdict` and `confidence` ride the row, so the
+    mining pipeline separates a confident miss from a low one at read time. Write-time filtering
+    threw those rows away permanently; read-time filtering cannot."""
     db = str(tmp_path / "gap-clean.db")
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
     reg.start("s1", now=NOW)
@@ -1782,9 +1790,11 @@ def test_a_correction_that_lands_cleanly_at_the_cap_is_not_a_content_gap(tmp_pat
     import sqlite3
 
     c = sqlite3.connect(db)
-    rows = c.execute("SELECT situation, verdict FROM web_content_gap").fetchall()
+    rows = c.execute(
+        "SELECT situation, verdict, confidence, corrected FROM web_content_gap"
+    ).fetchall()
     c.close()
-    assert rows == [], rows  # a correction the mapper served cleanly is not a content gap
+    assert rows == [("no, it's really the board review timing", "decision", "high", 1)], rows
 
 
 def test_a_correction_the_remap_still_cannot_serve_is_a_content_gap(tmp_path, make_fake):
