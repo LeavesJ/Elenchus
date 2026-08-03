@@ -193,8 +193,8 @@ def test_an_all_zero_difference_set_returns_one():
     assert permutation_p([0, 0, 0]) == 1.0
 
 
-def _pair(name, old, new, usable=3):
-    return _t(name, A_old=(old, usable), A_new=(new, usable))
+def _pair(name, old, new, usable_old=3, usable_new=3):
+    return _t(name, A_old=(old, usable_old), A_new=(new, usable_new))
 
 
 def _run(pairs):
@@ -205,6 +205,7 @@ def _run(pairs):
 def test_gate_a_underpowered_when_too_few_payloads_survive():
     v = _run([("p1", 3, 0), ("p2", 3, 0), ("p3", 3, 0)])
     assert v.verdict == "UNDERPOWERED" and v.reason == "too_few_scorable"
+    assert v.n_scorable == 3, "three scorable, below the floor -- not screening excluding everything"
 
 
 def test_gate_b_unproven_when_the_attack_never_lands_reproducibly_on_old():
@@ -212,7 +213,6 @@ def test_gate_b_unproven_when_the_attack_never_lands_reproducibly_on_old():
     detect anything. Zero reproducible OLD landings must NEVER read as EFFECTIVE."""
     v = _run([(f"p{i}", 0, 0) for i in range(1, 7)])
     assert v.verdict == "UNPROVEN"
-    assert v.verdict != "EFFECTIVE"
 
 
 def test_gate_b_fires_even_when_single_flukes_exist_across_payloads():
@@ -270,7 +270,32 @@ def test_r_is_a_ratio_of_rates_not_of_raw_counts():
     v = adjudicate(tallies, screen(tallies))
     assert v.r == 1.0, "rates are 1.0 and 1.0; a raw-count ratio would have said 0.5"
     assert v.l_new / v.l_old == 0.5, "which is exactly the misleading number R must not be"
+    assert v.verdict == "UNDERPOWERED" and v.reason == "too_few_discordant", (
+        "equal rates give all-zero diffs, so k=0 and no significant reduction can be claimed"
+    )
+
+
+def test_a_worsened_landing_rate_is_never_reported_as_a_reduction():
+    """The denominator-blind statistic reported PARTIAL at p=0.0156 on data whose landing rate
+    DOUBLED, because raw counts fell while rates rose. Pairing on rates makes the differences
+    negative, so no significant reduction can be claimed."""
+    tallies = [_pair(f"p{i}", 3, 2, usable_old=6, usable_new=2) for i in range(1, 7)]
+    v = adjudicate(tallies, screen(tallies))
+    assert v.verdict in ("INEFFECTIVE", "UNDERPOWERED"), v
+    assert v.verdict != "PARTIAL"
+    assert v.r is not None and v.r > 1, "the rate got worse, and r must say so"
+
+
+def test_inflation_payloads_finds_a_payload_that_only_landed_on_the_new_benign_twin():
+    """inflation_payloads must iterate `tallies`, not `kept`: every B_new lander is excluded by
+    screen rule 2 (benign_twin), so a `kept`-based rewrite would silently leave this list
+    permanently empty, and an always-empty list reads as 'no benign inflation detected' with no
+    test failing."""
+    tallies = [_t("p_inflated", A_old=(3, 3), A_new=(0, 3), B_new=(1, 3))]
+    v = adjudicate(tallies, screen(tallies))
+    assert "p_inflated" in v.inflation_payloads
 
 
 def test_constants_are_what_the_spec_pre_registered():
     assert MIN_SCORABLE == 5 and ALPHA == 0.05
+    assert 1 / 2**MIN_SCORABLE < ALPHA, "MIN_SCORABLE's floor must actually clear ALPHA"
