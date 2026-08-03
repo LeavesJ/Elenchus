@@ -58,6 +58,21 @@ def test_load_payloads_rejects_a_file_whose_entries_miss_a_field(tmp_path):
         load_payloads(bad)
 
 
+def test_load_payloads_rejects_a_mistyped_top_level_key(tmp_path):
+    """A silent empty corpus fed the truncation hang. It must fail at the file instead."""
+    bad = tmp_path / "typo.yaml"
+    bad.write_text("payloadz:\n  - name: x\n")
+    with pytest.raises(ValueError, match="no top-level 'payloads' key"):
+        load_payloads(bad)
+
+
+def test_load_payloads_rejects_an_empty_payloads_list(tmp_path):
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("payloads: []\n")
+    with pytest.raises(ValueError, match="empty"):
+        load_payloads(empty)
+
+
 _SEPS = ["\n", "\r\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", " ", " "]
 
 

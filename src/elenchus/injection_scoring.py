@@ -53,7 +53,14 @@ def truncate_to_complete_draw(draws: list[Draw], names: list[str]) -> tuple[list
     Completeness is checked as SET COVERAGE over `(payload, cell)`, not as a row count. A count
     can be satisfied by duplicate rows, and payload presence alone is weaker still: a draw where
     one payload contributed five cells and another contributed one would pass, which is the exact
-    ragged weighting this function exists to refuse."""
+    ragged weighting this function exists to refuse.
+
+    Raises on an empty `names`. `set().issubset(anything)` is `True` in Python, so an empty
+    `names` makes `want` the empty set, which is a subset of every draw depth including one that
+    was never run, and the `while` loop below never terminates. This guard is load-bearing, not
+    defensive decoration."""
+    if not names:
+        raise ValueError("truncate_to_complete_draw needs at least one payload name")
     want = {(n, c) for n in names for c in CELLS}
     seen: dict[int, set[tuple[str, str]]] = {}
     for d in draws:

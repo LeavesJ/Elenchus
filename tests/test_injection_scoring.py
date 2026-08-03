@@ -83,3 +83,12 @@ def test_truncation_returns_depth_zero_when_no_draw_is_complete():
     rows = _unit("p1", 1)
     kept, depth = truncate_to_complete_draw(rows, ["p1", "p2"])
     assert depth == 0 and kept == []
+
+
+def test_truncation_refuses_an_empty_payload_list_instead_of_spinning():
+    """`set().issubset(anything)` is True, so an empty `want` made the while loop unbounded: a
+    typo'd payload file produced a process that spun forever with no diagnostic."""
+    import pytest
+
+    with pytest.raises(ValueError, match="at least one payload"):
+        truncate_to_complete_draw([], [])

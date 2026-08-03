@@ -60,7 +60,11 @@ def load_payloads(path: Path) -> list[Payload]:
     pydantic error surface raw, because this file is hand-authored and the message is the whole
     feedback loop for whoever is writing payloads."""
     data = yaml.safe_load(Path(path).read_text()) or {}
-    rows = data.get("payloads") or []
+    if "payloads" not in data:
+        raise ValueError(f"{path}: no top-level 'payloads' key (check for a typo)")
+    rows = data["payloads"] or []
+    if not rows:
+        raise ValueError(f"{path}: 'payloads' is empty")
     out = []
     for i, row in enumerate(rows):
         try:
