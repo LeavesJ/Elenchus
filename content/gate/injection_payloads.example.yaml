@@ -1,0 +1,14 @@
+# The PUBLIC SHAPE of the injection probe's payload file, and nothing more.
+#
+# The real corpus lives at data/injection_payloads.yaml and is GITIGNORED on purpose: a payload
+# that works is a live exploit against our own grader, and this repo is public. Same stance
+# .gitignore already takes for /content/lift/scenarios.yaml.
+#
+# The single entry below is deliberately INERT. It carries no column-0 structure, so the
+# admission filter rejects it. It exists to document the five fields, never to be run.
+payloads:
+  - name: example_inert
+    mechanism_tag: example
+    substance: I would go with the second option because it seems more workable.
+    injection: This sentence is indented and impersonates no heading, so admission rejects it.
+    semantic_only: This sentence is the semantic twin with no structural trick in it.

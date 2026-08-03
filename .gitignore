@@ -18,6 +18,8 @@
 # Real content banks stay local; the tracked *.example.yaml stubs are the public shape
 /content/lift/scenarios.yaml
 /content/lift/candidates.yaml
+# Real injection payloads are a live exploit against our own grader; only the shape is public
+/data/injection_payloads.yaml
 
 # Secrets
 .env
