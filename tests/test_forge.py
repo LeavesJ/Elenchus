@@ -558,24 +558,59 @@ def test_build_brief_bounded_on_a_pathological_position():
     makes to the mistake `judgment_loop._POSITION_CAP`'s own comment records: a cap measured
     before render does not bound what comes out, since a newline-heavy input renders to several
     times its own length once every continuation line gets an indent. 50,000 raw characters of a
-    single position must not reach the model as 50,000 characters."""
+    single position must not reach the model as 50,000 characters.
+
+    Bound is an ABSOLUTE literal, not `forge._BRIEF_BLOB_CAP + N` -- that form moves in lockstep
+    with the cap and stays green even if the cap is raised to something that bounds nothing (a
+    reviewer got a 250,344-character brief through the full suite with the old `+ 1000` form; see
+    tests/test_voice.py's `test_render_turns_bounds_a_pathological_turn_on_the_rendered_output`
+    for the sibling fix this follows)."""
     pathological = "\n" * 50_000
     brief = forge.build_brief("T", "S", [pathological], None, "base")
-    assert len(brief) < forge._BRIEF_BLOB_CAP + 1000  # bounded far under the raw input's size
+    # 2400 = _BRIEF_BLOB_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
+    # "Territory: T\n\n...\n\nHer committed positions (her own words):\n" wrapper (measured: 2355
+    # chars for this exact fixture).
+    assert len(brief) < 2400
 
 
 def test_build_brief_bounded_on_a_pathological_situation():
+    """Same absolute-literal discipline as the position test above."""
     # Non-whitespace at both ends so `.strip()` (applied to situation/focus before render, unlike
     # positions) cannot collapse the pathological middle to nothing before the cap ever sees it.
     pathological = "x" + "\n" * 50_000 + "y"
     brief = forge.build_brief("T", pathological, [], None, "base")
-    assert len(brief) < forge._BRIEF_BLOB_CAP + 1000
+    # 2350 = _BRIEF_BLOB_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
+    # "Territory: T\n\nHer situation:\n" wrapper (measured: 2292 chars for this exact fixture).
+    assert len(brief) < 2350
 
 
 def test_build_brief_bounded_on_a_pathological_focus():
+    """Same absolute-literal discipline as the position test above."""
     pathological = "x" + "\n" * 50_000 + "y"
     brief = forge.build_brief("T", "S", [], None, "base", focus=pathological)
-    assert len(brief) < forge._BRIEF_BLOB_CAP + 1000
+    # 2370 = _BRIEF_BLOB_CAP (2000) + slack for the "…[trimmed]" suffix and the fixed
+    # "Territory: T\n\nHer situation:\n    S\n\nThe pressure she wants to press next..." heading
+    # (measured: 2314 chars for this exact fixture).
+    assert len(brief) < 2370
+
+
+def test_cap_blob_marks_the_elision_when_it_trims():
+    """A4 (boundary-8 review): `_cap_blob`'s own docstring promises truncation "marking the
+    elision" -- the "…[trimmed]" suffix that tells the model the text was CUT, not that the
+    learner stopped there. None of the bounded tests above pin this directly: each only bounds
+    the composed brief's TOTAL length with enough slack to stay green even if the marker were
+    silently dropped and the cap simply cut the tail bare. Pinned here, at the helper the
+    docstring's claim actually belongs to."""
+    over = "x" * 50
+    assert forge._cap_blob(over, cap=10) == "x" * 10 + "…[trimmed]"
+
+
+def test_cap_blob_leaves_text_at_or_under_the_cap_untouched():
+    """The other half of the same contract: no marker, no truncation, when nothing needs cutting
+    -- the boundary the marker test above would miss if `_cap_blob` always appended the suffix
+    regardless of length."""
+    at_cap = "x" * 10
+    assert forge._cap_blob(at_cap, cap=10) == at_cap
 
 
 def test_union_screen_covers_base_moves_and_engaged_frames(tmp_path):
