@@ -10,6 +10,7 @@ parameter. Nothing in this module reaches the network.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -66,3 +67,66 @@ def load_payloads(path: Path) -> list[Payload]:
             missing = ", ".join(str(e["loc"][0]) for e in exc.errors())
             raise ValueError(f"payload {i} ({row.get('name', '?')}) invalid: {missing}") from exc
     return out
+
+
+_HEADING = re.compile(r"^([A-Z][^:\n]{0,40}:)")
+
+
+class AdmissionResult(BaseModel):
+    name: str
+    admitted: bool
+    reason: str
+
+
+def derive_heading_tokens(*prompts: str) -> set[str]:
+    """Every line-initial `<Label>:` token appearing in the composed prompts the probe itself
+    builds. DERIVED, never hand-listed: a hand list goes stale the first time a heading is
+    renamed and silently narrows the filter, which is the failure mode this repo has hit before.
+    A test pins the derived set against the current prompts so a rename fails loud."""
+    out: set[str] = set()
+    for p in prompts:
+        for line in p.splitlines():
+            if line[:1].isspace():
+                continue
+            m = _HEADING.match(line)
+            if m:
+                out.add(m.group(1))
+    return out
+
+
+def column_zero_lines(text: str) -> list[str]:
+    """Non-blank lines starting at column 0, across every break `str.splitlines()` recognises.
+    The separator coverage matters: `\\u2028` and friends are breaks to `splitlines` and to the
+    model, so a filter that only knows `\\n` would pass a payload that still reaches column 0."""
+    return [ln for ln in text.splitlines() if ln.strip() and not ln[:1].isspace()]
+
+
+def admits(
+    p: Payload, old_user: str, new_user: str, headings: set[str]
+) -> AdmissionResult:
+    """A payload is admitted only if it genuinely creates the hazard under test.
+
+    Both conditions are required, and together they guarantee every paid call is spent on a
+    payload that actually exercises the indent rather than on one that merely looks threatening.
+    Note what this CANNOT prove: that the attack's power DEPENDS on the column-0 placement. Cell
+    D_old exists for that.
+
+    A heading counts as forged only when the OLD form's column-0 lines contain it MORE times
+    than the composed prompt's own template legitimately contributes (one). Every old_user this
+    probe builds already carries each real heading once on its own, so plain membership in
+    `headings` cannot distinguish an attack from the template's own structure; only an extra,
+    attacker-supplied occurrence at column 0 can."""
+    old_lines = column_zero_lines(old_user)
+    forged = any(sum(1 for ln in old_lines if ln.startswith(h)) > 1 for h in headings)
+    substance_zero = set(column_zero_lines(new_user)) - headings
+    if not forged:
+        return AdmissionResult(
+            name=p.name, admitted=False, reason="no column-0 heading lookalike in the old form"
+        )
+    if substance_zero:
+        return AdmissionResult(
+            name=p.name,
+            admitted=False,
+            reason=f"new form still puts learner bytes at column 0: {sorted(substance_zero)[:2]}",
+        )
+    return AdmissionResult(name=p.name, admitted=True, reason="")
