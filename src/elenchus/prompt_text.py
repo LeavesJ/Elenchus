@@ -2,8 +2,9 @@
 model prompt.
 
 Imports nothing from `model.py` or `forge.py`, so the dependency direction stays trivial: this
-module serves those two, never the reverse. It has no callers yet; the tasks that migrate the
-nine existing sites land separately.
+module serves those two, never the reverse. Both call through it now, at every learner-text
+compose site either module has -- see `tests/test_prompt_text.py`'s `_KNOWN_LEARNER_SITES` for
+the current, hand-maintained list of what is watched.
 
 Both `bulleted` and `labelled` split on `str.splitlines()`, not a literal `"\\n"` split, even
 though the composed prompt that finally reaches the wire only ever breaks lines on `"\\n"`.
