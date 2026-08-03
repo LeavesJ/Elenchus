@@ -364,7 +364,7 @@ _TURN_RENDER_CAP = 40000  # characters, measured on the RENDERED turn (after ind
 # screening `concierge_sitting_close`'s close and `forge.forge_experience` screening
 # `forge_scenario`'s scenario, both under `_FORGE_MAX_TOKENS = 4096` (model.py:303), and
 # `voice.converse` screening `concierge_converse`'s reply, under `_CLASSIFY_MAX_TOKENS = 4096`
-# (model.py:290) -- but `concierge_converse` rides `_parse_required` (model.py:541-557), which
+# (model.py:290) -- but `concierge_converse` rides `_parse_required` (model.py:579-595), which
 # doubles the budget to 8192 on a single truncation retry before it fails loud, so a real
 # (non-raising) `reply` can legitimately reach that doubled ceiling. 8192 is therefore the largest
 # token budget any producer that legitimately reaches `screen_moves` can spend: by the same ~4
