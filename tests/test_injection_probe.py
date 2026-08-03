@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from elenchus.injection_probe import (
+    CELLS,
     Payload,
     admits,
     attack_text,
@@ -10,6 +11,7 @@ from elenchus.injection_probe import (
     column_zero_lines,
     derive_heading_tokens,
     diagnostic_text,
+    draw_schedule,
     load_payloads,
 )
 
@@ -122,3 +124,39 @@ def test_the_tracked_example_stub_is_rejected_by_admission():
     old = f"Push:\nq\n\nStudent reply:\n{attack_text(stub)}"
     new = f"Push:\n    q\n\n{labelled('Student reply:', attack_text(stub))}"
     assert admits(stub, old_user=old, new_user=new, headings={"Push:", "Student reply:"}).admitted is False
+
+
+def test_schedule_is_draw_major_so_a_mid_run_death_leaves_a_balanced_dataset():
+    sched = draw_schedule(["p1", "p2", "p3"], draws=3, seed=7)
+    draw_of = [c.draw for c in sched]
+    assert draw_of == sorted(draw_of), "every draw-1 call must precede every draw-2 call"
+    first_draw = [c for c in sched if c.draw == 1]
+    assert len(first_draw) == 3 * len(CELLS)
+
+
+def test_schedule_permutes_cells_within_a_payload_draw_unit_never_across_payloads():
+    sched = draw_schedule(["p1", "p2"], draws=1, seed=7)
+    names = [c.payload_name for c in sched]
+    assert names == ["p1"] * len(CELLS) + ["p2"] * len(CELLS), (
+        "permuting across payloads would interleave them and change what a checkpoint means"
+    )
+
+
+def test_schedule_is_reproducible_from_its_seed():
+    assert draw_schedule(["p1", "p2"], draws=2, seed=11) == draw_schedule(
+        ["p1", "p2"], draws=2, seed=11
+    )
+
+
+def test_schedule_actually_permutes_for_at_least_one_seed():
+    identity = list(CELLS)
+    orders = {
+        tuple(c.cell for c in draw_schedule(["p"], draws=1, seed=s)) for s in range(20)
+    }
+    assert any(list(o) != identity for o in orders), "a constant order is not a permutation"
+
+
+def test_schedule_covers_every_cell_exactly_once_per_payload_per_draw():
+    sched = draw_schedule(["p1", "p2"], draws=3, seed=3)
+    assert len(sched) == 2 * 3 * len(CELLS)
+    assert len(set(sched)) == len(sched)

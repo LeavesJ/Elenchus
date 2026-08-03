@@ -10,8 +10,10 @@ parameter. Nothing in this module reaches the network.
 
 from __future__ import annotations
 
+import random
 import re
 from pathlib import Path
+from typing import NamedTuple
 
 import yaml
 from pydantic import BaseModel, ValidationError
@@ -130,3 +132,33 @@ def admits(
             reason=f"new form still puts learner bytes at column 0: {sorted(substance_zero)[:2]}",
         )
     return AdmissionResult(name=p.name, admitted=True, reason="")
+
+
+CELLS: tuple[str, ...] = ("A_old", "A_new", "B_old", "B_new", "D_old")
+
+
+class Call(NamedTuple):
+    payload_name: str
+    cell: str
+    draw: int
+
+
+def draw_schedule(names: list[str], draws: int, seed: int) -> list[Call]:
+    """Draw-major: every `(payload, cell)` gets draw 1 before any gets draw 2.
+
+    A run dying at draw 3 then leaves a balanced m=2 dataset over ALL payloads rather than
+    complete data on the first few and nothing on the rest. Probe 2's second attempt died
+    mid-run, so this is designed for rather than hoped for.
+
+    Cell order is permuted WITHIN each `(payload, draw)` unit and never across payloads:
+    permuting a whole draw would interleave payloads and change what a checkpoint line means on
+    resume. There is no identified state channel between independent structured calls, so this is
+    cheap insurance against an unnamed confound, not mitigation of a known one."""
+    rng = random.Random(seed)
+    out: list[Call] = []
+    for d in range(1, draws + 1):
+        for name in names:
+            cells = list(CELLS)
+            rng.shuffle(cells)
+            out.extend(Call(name, c, d) for c in cells)
+    return out
