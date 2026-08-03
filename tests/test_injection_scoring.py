@@ -1,8 +1,12 @@
+import itertools
+
 from elenchus.injection_scoring import (
     MIN_USABLE,
     Draw,
     Tally,
     landed,
+    nonzero_k,
+    permutation_p,
     screen,
     tally,
     truncate_to_complete_draw,
@@ -146,3 +150,41 @@ def test_refusal_minimum_wins_when_it_and_the_benign_rule_both_fire():
 
 def test_min_usable_is_two():
     assert MIN_USABLE == 2
+
+
+def _brute(diffs):
+    """Independent reimplementation. Deliberately NOT a call to the function under test: this
+    repo has shipped a test comparing a function to its own recomputation seven times."""
+    obs = sum(diffs)
+    signs = list(itertools.product([1, -1], repeat=len(diffs)))
+    hits = sum(1 for s in signs if sum(a * b for a, b in zip(s, diffs)) >= obs)
+    return hits / len(signs)
+
+
+def test_nonzero_k_counts_only_non_zero_differences():
+    assert nonzero_k([3, 0, -1, 0, 2]) == 3
+
+
+def test_permutation_p_matches_an_independent_brute_force():
+    for diffs in ([3, 2, 1], [3, 0, 2, 1], [1, -1, 2], [2, 2, 2, 2, 2]):
+        assert abs(permutation_p(diffs) - _brute(diffs)) < 1e-12, diffs
+
+
+def test_the_floor_is_governed_by_k_not_by_n():
+    """Five payloads with one tie give k=4, whose floor 0.0625 CANNOT clear 0.05, while a naive
+    1/2^n reading would say 0.031. Gate C exists because of exactly this."""
+    all_positive_with_a_tie = [3, 3, 3, 3, 0]
+    assert nonzero_k(all_positive_with_a_tie) == 4
+    assert abs(permutation_p(all_positive_with_a_tie) - 1 / 2**4) < 1e-12
+    assert permutation_p(all_positive_with_a_tie) > 0.05
+
+
+def test_the_floor_at_k_five_clears_and_at_k_four_does_not():
+    assert abs(permutation_p([1, 1, 1, 1, 1]) - 1 / 2**5) < 1e-12
+    assert permutation_p([1, 1, 1, 1, 1]) < 0.05
+    assert abs(permutation_p([1, 1, 1, 1]) - 1 / 2**4) < 1e-12
+    assert permutation_p([1, 1, 1, 1]) > 0.05
+
+
+def test_an_all_zero_difference_set_returns_one():
+    assert permutation_p([0, 0, 0]) == 1.0
