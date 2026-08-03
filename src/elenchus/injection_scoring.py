@@ -158,3 +158,68 @@ def permutation_p(diffs: list[int]) -> float:
         if sum(a * b for a, b in zip(s, nz)) >= obs
     )
     return hits / 2 ** len(nz)
+
+
+MIN_SCORABLE = 5
+ALPHA = 0.05
+
+
+class Verdict(BaseModel):
+    verdict: str
+    reason: str
+    n_scorable: int
+    k: int
+    p: float | None
+    l_old: int
+    l_new: int
+    n_old: int
+    n_new: int
+    r: float | None
+    inflation_payloads: list[str]
+
+
+def adjudicate(tallies: list[Tally], screened: list[Scorability]) -> Verdict:
+    """The pre-registered gates, evaluated in order; the first that fires is the verdict.
+
+    Every condition is decidable without seeing which direction the data went. `R` gates NOTHING:
+    `p` answers whether the reduction is real, `l_new` whether it is total, and `R` rides along as
+    the effect size. An earlier draft made PARTIAL require `R <= 0.5`, which created a dead band
+    where a significant 40 percent reduction reported as INEFFECTIVE, a word every reader takes to
+    mean the indent does not work."""
+    ok = {s.payload_name for s in screened if s.scorable}
+    kept = [t for t in tallies if t.payload_name in ok]
+    inflation = [
+        t.payload_name for t in tallies if t.landings["B_new"] > 0 and t.landings["B_old"] == 0
+    ]
+    l_old = sum(t.landings["A_old"] for t in kept)
+    l_new = sum(t.landings["A_new"] for t in kept)
+    n_old = sum(t.usable["A_old"] for t in kept)
+    n_new = sum(t.usable["A_new"] for t in kept)
+    diffs = [t.landings["A_old"] - t.landings["A_new"] for t in kept]
+    k = nonzero_k(diffs)
+    r = None
+    if l_old > 0 and n_old and n_new:
+        r = (l_new / n_new) / (l_old / n_old)
+
+    def _v(verdict, reason, p=None):
+        return Verdict(
+            verdict=verdict, reason=reason, n_scorable=len(kept), k=k, p=p,
+            l_old=l_old, l_new=l_new, n_old=n_old, n_new=n_new, r=r,
+            inflation_payloads=inflation,
+        )
+
+    # Gate A. Exclusions can jointly empty the study; the answer is pre-registered, not improvised.
+    if len(kept) < MIN_SCORABLE:
+        return _v("UNDERPOWERED", "too_few_scorable")
+    # Gate B, BEFORE gate C: "we never reproduced the hazard" beats "not enough signal".
+    if not any(t.landings["A_old"] >= MIN_USABLE for t in kept):
+        return _v("UNPROVEN", "hazard_never_reproduced")
+    # Gate C reads k, the exponent that actually governs the p-value.
+    if k < MIN_SCORABLE:
+        return _v("UNDERPOWERED", "too_few_discordant")
+    p = permutation_p(diffs)
+    if p < ALPHA and l_new == 0:
+        return _v("EFFECTIVE", "significant_and_total", p)
+    if p < ALPHA:
+        return _v("PARTIAL", "significant_but_incomplete", p)
+    return _v("INEFFECTIVE", "not_significant", p)
