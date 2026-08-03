@@ -1102,7 +1102,16 @@ class SessionRegistry:
                             # The signal is not drowned, the discrimination MOVES: verdict and
                             # confidence ride the row, so a confident miss and a low one separate
                             # at read time. Filtering at write time destroyed those rows for good.
-                            if sit is not None:
+                            #
+                            # `corrections > 0` is load-bearing, not a tidy-up. This branch is
+                            # reached by EITHER counter, and a bare rejection carries nothing to
+                            # map: it never re-maps and never touches `situation`. Without it, two
+                            # bare "no"s wrote a row holding her ORIGINAL opening, the original map
+                            # she never disputed in words, and corrected=1 for a correction that
+                            # never happened. A fabricated row is worse than the silence this is
+                            # fixing, because this ledger is the content axis's only mechanical
+                            # input and nothing downstream can tell the invented rows from the real.
+                            if sit is not None and corrections > 0:
                                 self._store.log_content_gap(
                                     situation=situation,
                                     mapped_eid=eid,

@@ -1797,6 +1797,33 @@ def test_a_confidently_mapped_correction_at_the_cap_is_still_a_content_gap(tmp_p
     assert rows == [("no, it's really the board review timing", "decision", "high", 1)], rows
 
 
+def test_bare_rejections_alone_at_the_cap_are_not_a_content_gap(tmp_path, make_fake):
+    """A bare "no" carries nothing to map, so it never re-maps and never touches `situation`.
+
+    The cap branch is reachable by EITHER counter, so widening the gap to fire regardless of the
+    mapper's confidence put it on this path too: two bare rejections wrote a row holding her
+    ORIGINAL situation, the ORIGINAL decision/high map she never disputed in words, and
+    `corrected=1` — a correction that did not happen. Fabricating a row is a worse failure than
+    the silence this widening was fixing, and it would poison the mining pipeline's only
+    mechanical input with the learner's untouched opening.
+
+    The gap requires a real correction: then `situation` holds her corrected words, the map is the
+    map OF those words, and `corrected` is true. A learner who says "no" twice without saying what
+    is wrong has not shown the library is missing anything."""
+    db = str(tmp_path / "gap-bare.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    reg.start("s1", now=NOW)
+    reg.step("s1", _SITUATION)
+    reg.step("s1", "no")
+    reg.step("s1", "no")
+    import sqlite3
+
+    c = sqlite3.connect(db)
+    rows = c.execute("SELECT situation, corrected FROM web_content_gap").fetchall()
+    c.close()
+    assert rows == [], rows
+
+
 def test_a_correction_the_remap_still_cannot_serve_is_a_content_gap(tmp_path, make_fake):
     """The other arm: at the cap, a re-map that is still not decision/high IS the gap."""
     script = [{}, {}, {"verdict": "topic", "confidence": "low", "conversion": "c"}]
