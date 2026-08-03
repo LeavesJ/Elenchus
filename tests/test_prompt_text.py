@@ -106,6 +106,19 @@ def test_bulleted_no_payload_byte_reaches_column_0_across_multiple_items():
     assert not any(char in _PAYLOAD for char in leaders)
 
 
+def test_bulleted_renders_one_item_per_line():
+    """A2 (boundary-8 review): pins `bulleted`'s stated contract -- one item, one bullet line --
+    which the column-0 test above cannot certify on its own: collapsing every item onto a single
+    joined line (e.g. `"  - " + " ".join(items)`) still keeps every payload byte off column 0, so
+    that test alone would stay green under such a collapse, and every OTHER test in this file
+    passes a single-element tuple, so none of them exercise the multi-item join at all. Checked on
+    plain single-line items (no embedded separator) so the join itself is the only thing under
+    test."""
+    rendered = bulleted(("first", "second", "third"))
+    assert rendered == "  - first\n  - second\n  - third"
+    assert rendered.count("\n") == 2  # three items, two line breaks -- not collapsed onto one
+
+
 # ---------------------------------------------------------------------------
 # splitlines() vs a naive "\n" split: separators other than \n / \r\n / \r must still be
 # recognised as line breaks and indented, not left glued to the following payload word.
@@ -226,10 +239,16 @@ def test_labelled_never_raises(text):
 #   allowlist.
 # - Text built by STRING CONCATENATION instead of an f-string: `"Reply:\n" + response` never puts
 #   `response` inside `{}`, so the brace-scanning regex never sees it.
-# - Text built with `str.format()` — `"Reply:\n{}".format(response)` — or %-STYLE formatting —
-#   `"Reply:\n%s" % response` — never puts `response` inside `{...}` either (a `.format()` template
-#   commonly has EMPTY or positional `{}`/`{0}` slots, no variable name at all), so the same
-#   brace-scanning regex misses both exactly as it misses concatenation.
+# - Text built with `str.format()` or %-STYLE formatting splits into two OPPOSITE failures, not
+#   one. A POSITIONAL or empty template — `"Reply:\n{}".format(response)` — or %-style —
+#   `"Reply:\n%s" % response` — never puts `response` inside `{...}` at all, so the brace-scanning
+#   regex misses it exactly as it misses concatenation: a real violation goes uncaught. A KEYWORD
+#   template is the opposite: `"Reply:\n{response}".format(response=rendered)` puts the LITERAL
+#   text `{response}` inside braces in the template string regardless of what `rendered` actually
+#   is, so the regex FIRES even when the raw variable was already routed through the seam and only
+#   its safe, wrapped result feeds the named argument — a false positive (a misfire, not a miss)
+#   that tells an already-compliant line to route through a seam it already uses. See the tests
+#   below for both directions.
 # - A multi-line string (triple-quoted or otherwise) whose UNINDENTED continuation line —
 #   starting at column 0, the common style for a triple-quoted block, e.g.
 #   `f"""Student reply:\n{response}"""` written across two real physical lines — lands at or
@@ -264,10 +283,15 @@ def test_labelled_never_raises(text):
 MODEL_PATH = Path("src/elenchus/model.py")
 FORGE_PATH = Path("src/elenchus/forge.py")
 
-# (file, governing function, learner-text variable name) — the nine sites tasks 2-4 migrated
-# through the seam, plus `_render_turns` (a tenth, pre-existing seam consumer named in
-# `prompt_text.indent_after_first`'s own docstring as a third caller). Hand-maintained; see the
-# docstring above for exactly how and when this rots.
+# (file, governing function, learner-text variable name) — hand-maintained; see the docstring
+# above for exactly how and when this rots. boundary-8 review: an earlier version of this comment
+# had `_render_turns` and `generate_push` backwards. `_render_turns` calls `indent_after_first`
+# directly and has done so since this module was hours old (the reason `indent_after_first` was
+# made public -- see its own docstring's "third caller") -- it is the PRE-EXISTING seam consumer.
+# `generate_push` is the opposite: it carried its own independent reimplementation of `bulleted`
+# (a local `_bulleted`) for most of this branch's life and only started calling the real seam
+# directly in the commit that sealed the thirteenth site below -- it is the NEWLY migrated one,
+# not one of an original nine.
 _KNOWN_LEARNER_SITES = (
     (MODEL_PATH, "generate_push", "positions"),
     (MODEL_PATH, "classify_response", "response"),
@@ -276,11 +300,21 @@ _KNOWN_LEARNER_SITES = (
     (MODEL_PATH, "map_territories", "situation"),
     (MODEL_PATH, "_render_turns", "text"),
     (FORGE_PATH, "build_brief", "situation"),
-    (FORGE_PATH, "build_brief", "focus"),
-    (FORGE_PATH, "build_brief", "positions"),
-    # Task 6: the three sites the "A NOTE ON SCOPE" paragraph above found and deferred. They are
-    # sealed now, so the guard can finally watch them; `concierge_sitting_close` gets two rows
-    # because it carries two learner surfaces, the situation blob and each segment's turn text.
+    # `build_brief`'s "focus" and "positions" rows were removed here (boundary-8 review): neither
+    # violation shape ever puts the bare variable name inside `{...}` in this function, so the
+    # brace-scanning regex below returns None whether the code is sealed or not -- `focus` is
+    # appended to `lines` as a plain list element, never inside an f-string, and `positions` is
+    # destructured into a per-item loop variable (`p`) before anything reaches a brace, so the
+    # collection name itself never appears there. A row green in both the sealed and unsealed
+    # state certifies nothing. Both sites are covered instead by BEHAVIORAL tests in
+    # tests/test_forge.py that exercise build_brief's actual rendered output and would catch a
+    # regression to the pre-seam form directly: test_build_brief_focus_newline_no_column_0_leak
+    # and test_build_brief_focus_is_labelled_and_indented for focus;
+    # test_build_brief_position_uses_the_seam_bulleted_form for positions.
+    # Task 6: the three sites "HOW THIS GUARD ALREADY PAID FOR ITSELF" (above) found while this
+    # guard was being built. They are sealed now, so the guard can finally watch them;
+    # `concierge_sitting_close` gets two rows because it carries two learner surfaces, the
+    # situation blob and each segment's turn text.
     (MODEL_PATH, "grade_sharper", "response"),
     (MODEL_PATH, "grade_answer", "answer"),
     (MODEL_PATH, "concierge_sitting_close", "situation"),
@@ -306,8 +340,20 @@ def _extract_function(src: str, name: str) -> tuple[str, int]:
     indentation-break `test_confirming_door.py._fn` uses would misread as the end of the function
     -- verified against a bite-check that silently passed for the wrong reason before this existed.
     Only lines AFTER the signature are subject to the indentation break. `start_line` is 1-indexed,
-    matching the file's own line numbers, for the failure message."""
-    i = src.rindex(f"def {name}(")
+    matching the file's own line numbers, for the failure message.
+
+    boundary-8 review (C5): a renamed/removed `name` used to raise a bare `ValueError` straight
+    out of `str.rindex`, which fails closed (right) but leaves the author staring at a traceback
+    into this helper's internals instead of the one-line remedy. Caught and re-raised below with
+    that remedy named directly."""
+    try:
+        i = src.rindex(f"def {name}(")
+    except ValueError as e:
+        raise ValueError(
+            f"no `def {name}(` found in this source — if `{name}` was renamed or removed, update "
+            f"the matching row in tests/test_prompt_text.py's _KNOWN_LEARNER_SITES (or this call) "
+            f"to the new name rather than chase a traceback into _extract_function."
+        ) from e
     start = src.rfind("\n", 0, i) + 1  # rfind, not rindex: -1 + 1 == 0 when def opens the file
     start_line = src.count("\n", 0, start) + 1
     base = i - start
@@ -347,18 +393,52 @@ def _blank_unless_f_prefixed(m: re.Match) -> str:
     return "\n" * quoted.count("\n")
 
 
+def _strip_hash_comment(line: str) -> str:
+    """Strip a `#...` comment from one physical `line`, but only a `#` that sits OUTSIDE a
+    single/double-quoted string.
+
+    boundary-8 review (C1): the old approach (`re.sub(r"#[^\\n]*", "", body)`) stripped from the
+    FIRST `#` on a line to end of line with no string-context awareness at all, so a composing
+    line whose own string payload contains a `#` — a prompt heading like "Segment #1" or
+    "Move #2" — would truncate away everything after it, including a real `{varname}`
+    interpolation later on that same physical line. That shape was previously ABSENT from the
+    "WHAT IT CANNOT CATCH" list above, which made the list itself wrong, not merely incomplete —
+    a blind spot this guard did not even know it had. Closed here rather than documented: quote
+    state is tracked char-by-char (handling backslash escapes) rather than reaching for a full
+    tokenizer/AST, matching the rest of this file's regex/slice style."""
+    quote = None
+    i = 0
+    n = len(line)
+    while i < n:
+        ch = line[i]
+        if quote:
+            if ch == "\\":
+                i += 2  # the escaped character can never close (or misread) the open quote
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in ("'", '"'):
+            quote = ch
+        elif ch == "#":
+            return line[:i]
+        i += 1
+    return line
+
+
 def _strip_noise(body: str) -> str:
     """Blank out `#` comments and triple-quoted docstrings without changing the line count, so a
     line number computed against the result still matches the original file. An f/rf-prefixed
     triple-quoted string is left untouched (see `_blank_unless_f_prefixed`) — it is an
-    interpolation site the guard must still see, not prose to discard.
+    interpolation site the guard must still see, not prose to discard. `#` comments are stripped
+    line-by-line via `_strip_hash_comment` (see its own docstring for why: a `#` inside a string
+    literal is payload, not a comment marker).
 
     Without this, `_render_turns`' own docstring — which quotes `f"{role}: {text}"` as prose,
     describing the OLD bare form it replaced — would trip the `text` check below on a sentence
     about the fix, not on code. `test_confirming_door.py._strip_comments` strips `#` comments only;
     this adds docstrings because that specific false positive lives in one."""
     body = _TRIPLE_QUOTED.sub(_blank_unless_f_prefixed, body)
-    return re.sub(r"#[^\n]*", "", body)
+    return "\n".join(_strip_hash_comment(line) for line in body.split("\n"))
 
 
 def _bare_interpolation(src: str, func_name: str, varname: str) -> tuple[int, str] | None:
@@ -476,12 +556,125 @@ def test_bare_interpolation_detector_is_silent_when_the_seam_wraps_the_variable(
     assert _bare_interpolation(src, "classify_response", "response") is None
 
 
+def test_bare_interpolation_detector_fires_when_a_hash_inside_the_string_precedes_the_brace():
+    """C1 (boundary-8 review): the shape `_strip_hash_comment` exists to catch. The `#` sits
+    INSIDE the f-string's own quotes, before `{response}`, not in a trailing comment — the old
+    line-blind `#`-to-end-of-line strip would have deleted `{response}` along with it and this
+    detector would have missed a real violation."""
+    src = 'def classify_response(self, response):\n    user = f"Segment #1: {response}"\n'
+    hit = _bare_interpolation(src, "classify_response", "response")
+    assert hit is not None
+    assert "response" in hit[1]
+
+
+def test_strip_noise_leaves_a_hash_inside_a_string_untouched_but_still_strips_a_real_comment():
+    """The other half of the C1 fix, tested directly on `_strip_noise` rather than end-to-end: a
+    `#` inside quotes is payload and must survive untouched, while a REAL trailing comment on the
+    same line — outside the quotes — must still be stripped, exactly as before this fix."""
+    body = 'user = f"Segment #1: {response}"  # a real trailing comment mentioning {response}\n'
+    cleaned = _strip_noise(body)
+    assert "Segment #1: {response}" in cleaned
+    assert "a real trailing comment" not in cleaned
+
+
+def test_bare_interpolation_detector_misfires_on_a_keyword_format_placeholder():
+    """C2 (boundary-8 review): the opposite direction of the `.format()` bullet above. A KEYWORD
+    placeholder whose name matches the tracked variable puts the LITERAL text `{response}` inside
+    braces in the template string itself, regardless of what actually feeds it — so the guard
+    fires even though the raw variable was already routed through the seam and only its wrapped,
+    safe result reaches `.format()`'s keyword argument. A known false positive (a misfire), not
+    evidence of a real violation — documented, not "fixed", since the correct fix (route this
+    exact shape through the seam anyway, or teach the guard `.format()` call sites) is out of
+    this task's scope."""
+    src = (
+        "def classify_response(self, response):\n"
+        '    safe = labelled("Student reply:", response)\n'
+        '    user = "Reply:\\n{response}".format(response=safe)\n'
+    )
+    hit = _bare_interpolation(src, "classify_response", "response")
+    assert hit is not None  # the misfire: a false positive, not a real violation
+
+
+def _variable_is_live(src: str, func_name: str, varname: str) -> bool:
+    """True if `varname` appears anywhere in `func_name`'s definition — as a parameter or
+    anywhere in the body — proving an allowlist row still names something real.
+
+    C4 (boundary-8 review): `_bare_interpolation` alone cannot catch a row going vacuous. If
+    `varname` is renamed at the parameter boundary, the brace-scan simply finds nothing and
+    returns `None` — the SAME result a genuinely clean, sealed site produces, so the row stays
+    green forever regardless of what the renamed code actually does. A renamed FUNCTION already
+    fails loud (`_extract_function`'s `rindex` raises, see C5 above); a renamed VARIABLE fails
+    silently, and nothing before this asserted the variable was ever there to find."""
+    body, _ = _extract_function(src, func_name)
+    return re.search(r"\b" + re.escape(varname) + r"\b", body) is not None
+
+
+def test_variable_is_live_false_when_the_parameter_was_renamed():
+    """The failure C4 closes: a listed variable renamed at the parameter boundary. Before this
+    check, `_bare_interpolation` on this exact source would already return `None` (nothing named
+    `response` to find), making the row indistinguishable from a real, sealed site."""
+    src = 'def classify_response(self, reply):\n    user = _cap_rendered_turn(labelled("Student reply:", reply))\n'
+    assert _bare_interpolation(src, "classify_response", "response") is None  # the silent miss
+    assert _variable_is_live(src, "classify_response", "response") is False  # now loud instead
+
+
+def test_variable_is_live_true_for_every_known_learner_site():
+    """The non-degenerate case, checked against the real tree for every row this file watches —
+    proof `_variable_is_live` does not simply return `False` for everything."""
+    for path, func_name, varname in _KNOWN_LEARNER_SITES:
+        assert _variable_is_live(path.read_text(), func_name, varname)
+
+
+def test_extract_function_raises_a_self_explanatory_error_when_the_def_is_missing():
+    """C5 (boundary-8 review): renaming a listed FUNCTION used to raise a bare `ValueError`
+    straight out of `str.rindex` — fails closed, which is right, but hands the author a traceback
+    into this helper's internals rather than the one-line remedy. The message must now name the
+    missing function and point at the allowlist to fix."""
+    with pytest.raises(ValueError) as exc_info:
+        _extract_function("def something_else(self): pass\n", "renamed_function")
+    message = str(exc_info.value)
+    assert "renamed_function" in message
+    assert "_KNOWN_LEARNER_SITES" in message
+
+
+def test_extract_function_reads_the_last_definition_not_an_earlier_stub_or_fake():
+    """A5 (boundary-8 review): `_extract_function`'s own docstring makes a load-bearing claim —
+    `rindex`, not `index` — because `model.py` defines several watched functions three times: a
+    `Protocol` stub (body `...`), `FakeModel`'s scripted double, and `AnthropicModel`'s real
+    implementation, in that order, with `AnthropicModel` last. Untested until now: swapping
+    `rindex` for `index` would silently start reading the Protocol stub instead, whose body never
+    interpolates anything, and every `_KNOWN_LEARNER_SITES` row against `model.py` would pass
+    regardless of what `AnthropicModel` actually does.
+
+    Checked against the real file, not a hand-built fixture — a fixture could not tell `rindex`
+    from `index` apart. `classify_response` is defined three times in `model.py`; the extracted
+    body must contain `_parse_required`, a call only `AnthropicModel`'s implementation makes (the
+    `Protocol` stub's body is a bare `...`, `FakeModel`'s is `return self._responses[code].pop(0)`
+    — neither contains it), and `start_line` must land well past where the `Protocol`/`FakeModel`
+    definitions sit."""
+    src = MODEL_PATH.read_text()
+    body, start_line = _extract_function(src, "classify_response")
+    assert "_parse_required" in body
+    assert start_line > 600
+
+
 @pytest.mark.parametrize("path, func_name, varname", _KNOWN_LEARNER_SITES)
 def test_known_compose_site_routes_learner_text_through_the_seam(path, func_name, varname):
     """The enforcement test itself: reads `path` off disk (not an in-memory fixture — a stale
     read would prove nothing about the tree actually being tested) and fails, naming file, line,
     and variable, the moment `func_name` interpolates `varname` without the seam. See the section
-    docstring above for exactly what this can and cannot catch."""
-    hit = _bare_interpolation(path.read_text(), func_name, varname)
+    docstring above for exactly what this can and cannot catch.
+
+    C4: also fails loud, separately, if `varname` no longer appears in `func_name` at all — a
+    renamed/removed site would otherwise pass this test vacuously (see `_variable_is_live`)."""
+    src = path.read_text()
+    assert _variable_is_live(src, func_name, varname), (
+        f"{path}: `{varname}` no longer appears anywhere in `{func_name}` — renamed or removed "
+        f"out from under this allowlist row, which would otherwise pass vacuously (a bare-"
+        f"interpolation search that can never match anything looks identical to a clean site). "
+        f"Update the row in _KNOWN_LEARNER_SITES to the new name, or remove it and say what "
+        f"covers the site instead."
+    )
+    hit = _bare_interpolation(src, func_name, varname)
     if hit is not None:
         pytest.fail(_seam_violation_message(path, func_name, varname, hit))
