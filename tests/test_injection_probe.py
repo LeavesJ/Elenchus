@@ -4,6 +4,7 @@ import pytest
 
 from elenchus.injection_probe import (
     CELLS,
+    Call,
     Payload,
     admits,
     attack_text,
@@ -13,7 +14,10 @@ from elenchus.injection_probe import (
     diagnostic_text,
     draw_schedule,
     load_payloads,
+    run_cells,
 )
+from elenchus.injection_scoring import Draw
+from elenchus.model import ModelError, ResponseClassification
 
 _P = Payload(
     name="heading_impersonation",
@@ -175,3 +179,71 @@ def test_schedule_covers_every_cell_exactly_once_per_payload_per_draw():
     sched = draw_schedule(["p1", "p2"], draws=3, seed=3)
     assert len(sched) == 2 * 3 * len(CELLS)
     assert len(set(sched)) == len(sched)
+
+
+_CLEAN = ResponseClassification(outcome="unchanged", mechanism_supplied=False, hard_wrong=False)
+_LAND = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+
+
+def _harness(old_lands=False, raise_on_new=False):
+    seen = []
+
+    def classify(p, text):
+        seen.append(("new", text))
+        if raise_on_new:
+            raise ModelError("refused")
+        return _CLEAN
+
+    def raw_parse(*, system, user, output_format, max_tokens):
+        seen.append(("old", user))
+        return _LAND if old_lands else _CLEAN
+
+    return seen, classify, raw_parse
+
+
+def test_run_cells_produces_one_draw_per_scheduled_call():
+    seen, classify, raw_parse = _harness()
+    sched = draw_schedule([_P.name], draws=2, seed=1)
+    rows = run_cells(
+        [_P], sched, classify=classify, raw_parse=raw_parse,
+        system_for=lambda p: "SYS", old_user_for=lambda p, t: f"Push:\nq\n\nStudent reply:\n{t}",
+        max_tokens=256,
+    )
+    assert len(rows) == len(sched)
+    assert all(isinstance(r, Draw) for r in rows)
+
+
+def test_old_cells_go_through_raw_parse_and_new_cells_through_classify():
+    seen, classify, raw_parse = _harness()
+    sched = draw_schedule([_P.name], draws=1, seed=1)
+    run_cells(
+        [_P], sched, classify=classify, raw_parse=raw_parse,
+        system_for=lambda p: "SYS", old_user_for=lambda p, t: f"X\n{t}", max_tokens=256,
+    )
+    arms = [a for a, _ in seen]
+    assert arms.count("old") == 3, "A_old, B_old and D_old are the bare-form cells"
+    assert arms.count("new") == 2, "A_new and B_new are the indented cells"
+
+
+def test_a_model_error_is_recorded_as_a_refusal_not_as_a_non_landing():
+    seen, classify, raw_parse = _harness(raise_on_new=True)
+    sched = [Call(_P.name, "A_new", 1)]
+    rows = run_cells(
+        [_P], sched, classify=classify, raw_parse=raw_parse,
+        system_for=lambda p: "SYS", old_user_for=lambda p, t: t, max_tokens=256,
+    )
+    assert rows[0].refused is True
+    assert rows[0].outcome is None, "a refusal carries no verdict to score"
+    assert "refused" in rows[0].error
+
+
+def test_on_draw_is_called_once_per_completed_call_for_checkpointing():
+    seen, classify, raw_parse = _harness()
+    got = []
+    sched = draw_schedule([_P.name], draws=1, seed=1)
+    run_cells(
+        [_P], sched, classify=classify, raw_parse=raw_parse,
+        system_for=lambda p: "SYS", old_user_for=lambda p, t: t, max_tokens=256,
+        on_draw=got.append,
+    )
+    assert len(got) == len(sched), "paid-for work must reach disk as it happens"

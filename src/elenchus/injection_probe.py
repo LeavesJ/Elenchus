@@ -12,11 +12,14 @@ from __future__ import annotations
 
 import random
 import re
+from collections.abc import Callable
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, Protocol
 
 import yaml
 from pydantic import BaseModel, ValidationError
+
+from .model import ModelError, ResponseClassification
 
 
 class Payload(BaseModel):
@@ -165,4 +168,70 @@ def draw_schedule(names: list[str], draws: int, seed: int) -> list[Call]:
             cells = list(CELLS)
             rng.shuffle(cells)
             out.extend(Call(name, c, d) for c in cells)
+    return out
+
+
+class RawParse(Protocol):
+    def __call__(self, *, system: str, user: str, output_format: type, max_tokens: int): ...
+
+
+_OLD_CELLS = {"A_old", "B_old", "D_old"}
+
+
+def _text_for(cell: str, p: Payload) -> str:
+    if cell.startswith("A_"):
+        return attack_text(p)
+    if cell.startswith("B_"):
+        return benign_text(p)
+    return diagnostic_text(p)
+
+
+def run_cells(
+    payloads: list[Payload],
+    schedule: list[Call],
+    *,
+    classify: Callable[[Payload, str], ResponseClassification],
+    raw_parse: RawParse,
+    system_for: Callable[[Payload], str],
+    old_user_for: Callable[[Payload, str], str],
+    max_tokens: int,
+    on_draw: Callable[[object], None] | None = None,
+):
+    """Execute the schedule, one call per `Call`, recording every outcome including refusals.
+
+    A refusal is DATA, never a non-landing: scoring it as "did not land" is the false-pass path
+    exclusion rule 1 exists to close. `on_draw` fires per completed call so paid-for work reaches
+    disk before the run can die, which is what a previous probe in this project lacked until it
+    had already lost a run."""
+    from .injection_scoring import Draw
+
+    by_name = {p.name: p for p in payloads}
+    out = []
+    for call in schedule:
+        p = by_name[call.payload_name]
+        text = _text_for(call.cell, p)
+        try:
+            if call.cell in _OLD_CELLS:
+                rc = raw_parse(
+                    system=system_for(p),
+                    user=old_user_for(p, text),
+                    output_format=ResponseClassification,
+                    max_tokens=max_tokens,
+                )
+            else:
+                rc = classify(p, text)
+            row = Draw(
+                payload_name=call.payload_name, cell=call.cell, draw=call.draw,
+                outcome=rc.outcome, mechanism_supplied=rc.mechanism_supplied,
+                hard_wrong=rc.hard_wrong, refused=False, error="",
+            )
+        except (ModelError, ValidationError) as exc:
+            row = Draw(
+                payload_name=call.payload_name, cell=call.cell, draw=call.draw,
+                outcome=None, mechanism_supplied=None, hard_wrong=None,
+                refused=True, error=f"{type(exc).__name__}: {exc}"[:400],
+            )
+        out.append(row)
+        if on_draw is not None:
+            on_draw(row)
     return out
