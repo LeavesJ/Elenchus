@@ -121,25 +121,18 @@ def _classify_system_for(p: Payload) -> str:
     `_target_detail`) rather than hand-copying their assembly, so this can never silently drift
     from what the NEW arm actually sends. Mirrors `run_prompt_shift_probe._classify_system_for`.
 
-    T2 (prompt-injection fix): `push` moved from `classify_response`'s user message into its
-    system message, alongside `Mode:`/`Binding constraint:`/`Target angle:` -- reproduced here as
-    the trailing `Push:` line, or this reconstruction silently drifts from what the live method now
-    sends and `system` stops matching across the two arms (`tests/test_run_injection_probe.py`'s
-    `test_classify_and_raw_parse_send_the_same_system_and_only_the_user_differs` pins the two
-    equal). This module's `A_new`/`B_new` cells (`injection_probe.CELLS`) run the REAL,
-    now-collapsed `classify_response` against attack/benign text -- this is the apparatus BUILT to
-    measure whether the collapse closes the forged-continuation hole the pre-collapse numbers in
-    model.py's `classify_response` comment measured. It has not been executed (never run a
-    `run_*_probe` module outside an explicit, confirmed, budgeted invocation), so that measurement
-    does not exist yet.
+    REVERT (T2 review): `3e81f72` moved `push` from `classify_response`'s user message into its
+    system message and this mirror followed with a trailing `Push:` line. The founder reverted that
+    collapse (see model.py's own comment on `classify_response`), so `push` is back in the user
+    message and this system composition carries no `Push:` line again, matching the live method.
 
     `p` is accepted (matching `run_cells`'s `system_for: Callable[[Payload], str]` contract, and
     `admits`'s composed-prompt inputs) but never read: the system text depends only on the fixed
-    `_EXPERIENCE`/`_CODE`/`_PUSH` under test, never on payload content. That independence is what
-    this module's docstring and `tests/test_run_injection_probe.py` pin -- `run()`'s artifact
-    hashes `system_for(payloads[0])` as if it spoke for every payload's run, which is only true
-    because no payload can move this text. `stress` is never set here: this probe never sends the
-    stress addendum, matching `classify_response`'s own `stress=False` default."""
+    `_EXPERIENCE`/`_CODE` under test, never on payload content. That independence is what this
+    module's docstring and `tests/test_run_injection_probe.py` pin -- `run()`'s artifact hashes
+    `system_for(payloads[0])` as if it spoke for every payload's run, which is only true because no
+    payload can move this text. `stress` is never set here: this probe never sends the stress
+    addendum, matching `classify_response`'s own `stress=False` default."""
     detail = _target_detail(_EXPERIENCE.rubric, _KIND, _CODE)
     return (
         load_prompt("response")
@@ -147,26 +140,18 @@ def _classify_system_for(p: Payload) -> str:
         + f"\n\nMode: {_EXPERIENCE.rubric.mode.value}"
         + f"\nBinding constraint: {_EXPERIENCE.rubric.binding_constraint}"
         + f"\nTarget angle: {detail}"
-        + f"\nPush: {_PUSH}"
     )
 
 
 def _new_user_for(text: str) -> str:
-    """Reproduces `classify_response`'s PRE-T2 user composition -- the `Push:`/`Student reply:`
-    template this exact module exists to measure the forgeability of (this module's own docstring;
-    `_check_admission` below) -- using the SAME building block that composition called
-    (`prompt_text.labelled`). T2 removed this template from the live method (see
-    `_classify_system_for`'s own comment): `classify_response` no longer sends anything shaped like
-    this, so this reconstruction is now intentionally a FROZEN historical snapshot, the same role
-    `prompt_shift_probe.reconstruct_old_classify_response_user` already plays for the generation
-    before it, not a live mirror. It still serves this module's admission-filter self-consistency
-    tests (`_check_admission`, `tests/test_run_injection_probe.py`), which reason about the
-    template's forgeability in the abstract and never compare this against a real
-    `classify_response` call. Composes text only, never calls the model: the admission gate
-    (`_check_admission`) must run and raise BEFORE any network call is even considered, so this
-    cannot go through `classify` (which may be the real, paid-for `_classify` once wired) or
-    `_build_model`. `push` is always `_PUSH` here, matching the fixed push every cell in a run
-    shares (this module's docstring)."""
+    """Reproduces `AnthropicModel.classify_response`'s user composition (model.py, the
+    `rendered = labelled(...); user = f"Push:\\n{push}\\n\\n{rendered}"` lines) exactly, using the
+    SAME building block that method calls (`prompt_text.labelled`), mirroring
+    `_classify_system_for`'s approach for the system half. Composes text only, never calls the
+    model: the admission gate (`_check_admission`) must run and raise BEFORE any network call is
+    even considered, so this cannot go through `classify` (which may be the real, paid-for
+    `_classify` once wired) or `_build_model`. `push` is always `_PUSH` here, matching the fixed
+    push every cell in a run shares (this module's docstring)."""
     return f"Push:\n{_PUSH}\n\n{labelled('Student reply:', text)}"
 
 

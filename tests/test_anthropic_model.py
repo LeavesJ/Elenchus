@@ -230,12 +230,12 @@ def test_classify_response_classifies_reply():
     assert out.outcome == "closed"
     assert out.mechanism_supplied is True
     call = client.messages.parse_calls[0]
-    # T2 (measured prompt-injection fix): `push` now reaches the system prompt, not the user
-    # message -- see the dedicated section below for the full composition proof.
-    assert "push text" in _system_text(call)
+    # REVERT (T2 review): `push` is back in the user message, never the system prompt -- see the
+    # dedicated section below for the full composition proof.
+    assert "push text" not in _system_text(call)
     user = _user_text(call)
     assert "student reply with a mechanism" in user
-    assert "push text" not in user
+    assert "push text" in user
 
 
 def test_refusal_raises_model_error():
@@ -418,11 +418,12 @@ def test_grade_sharper_is_blind_and_parses_verdict():
     call = client.messages.parse_calls[0]
     # the target angle detail reaches the grader's system prompt
     assert "Keep the promise the core product makes" in _system_text(call)
-    # T2: the push also reaches the system prompt now, not the user turn
-    assert "What do you give up by holding that line?" in _system_text(call)
-    # the raw student reply is the ENTIRE user turn, nothing else
+    # REVERT (T2 review): push is back in the user turn, never the system prompt
+    assert "What do you give up by holding that line?" not in _system_text(call)
     assert _user_text(call) == (
-        "I hold it because unverified work destroys revenue exactly when outages cluster."
+        "Push:\nWhat do you give up by holding that line?\n\n"
+        "Student reply:\n"
+        "    I hold it because unverified work destroys revenue exactly when outages cluster."
     )
     # blindness is structural: grade_sharper's signature has no instructor-outcome parameter
 
@@ -828,35 +829,37 @@ def _leading_nonspace_chars(rendered):
     return [line[0] for line in rendered.split("\n") if line and not line[0].isspace()]
 
 
-# --- classify_response: T2 (prompt-injection fix) collapsed the forgeable template -- `response`
-# is now the ENTIRE user message, verbatim, with no label and no indent; `push` moved into
-# `system`, alongside `Mode:`/`Binding constraint:`/`Target angle:`. See model.py's own comment on
-# `classify_response` for the numbers that WERE measured (the pre-collapse template's forgeability)
-# and the ones that were NOT: the collapsed form below is unmeasured, its efficacy unproven pending
-# a paid probe. -------------------------------------------------------------------------------
+# --- classify_response: REVERT (T2 review) of `3e81f72`'s collapse -- `push` is back in `user`,
+# never `system`, and `response` is rendered under `labelled("Student reply:", ...)`, which
+# indents EVERY line, including the first. See model.py's own comment on `classify_response` for
+# the numbers that WERE measured (the pre-collapse template's forgeability, both pre-indent and
+# indented forms) and the one that was NOT: the prompt reframe kept from the collapse
+# (content/prompts/response.md) is unmeasured, its efficacy unproven pending a paid probe. ------
 
 
-def test_classify_response_user_message_is_exactly_the_learner_reply():
-    """The behavioral invariant tests/test_prompt_text.py's source-reading guard cannot express
-    (see its `_KNOWN_LEARNER_SITES` comment on why the row for this site was removed rather than
-    left to pass vacuously): the composed user message is byte-identical to the raw reply -- no
-    `Push:` heading, no `Student reply:` label, no indent, nothing added or removed."""
+def test_classify_response_indents_a_single_line_reply_under_the_label():
+    """REVERT (T2 review): the collapsed composition (`user == response`, no heading, no indent)
+    is reverted. The composed user message carries the `Push:` heading again, and the reply is
+    rendered under `Student reply:`, indented -- pinned against the literal composed string, never
+    built by calling the function under test."""
     rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
     client = _Client(parse_result=_Resp(parsed_output=rc))
     AnthropicModel(client=client).classify_response(
         _exp(), "frame", "protect_the_core_lane", "push text", "ARGUED HERE"
     )
     call = client.messages.parse_calls[0]
-    assert _user_text(call) == "ARGUED HERE"
-    sys = _system_text(call)
-    assert "Push: push text" in sys  # push reaches the model through system now, not user
+    assert _user_text(call) == "Push:\npush text\n\nStudent reply:\n    ARGUED HERE"
+    assert "push text" not in _system_text(call)  # push lives in user again, not system
 
 
-def test_classify_response_forged_continuation_has_no_template_to_imitate():
-    """The measured vulnerability itself: a reply that forges a continuation of the OLD compose
-    template (`Push:` / `Student reply:`) is still composed byte-identical to the raw reply,
-    forgery included -- there is no real template left in the message for it to imitate, because
-    the message carries no engine structure at all, only the learner's own bytes."""
+def test_classify_response_forged_continuation_lands_indented_not_at_column_0():
+    """The measured vulnerability, restored composition: a reply forging a continuation of the
+    `Push:`/`Student reply:` template no longer reproduces those headings at column 0 --
+    `labelled` indents every line of the reply, including the first, so the forged headings
+    survive but pushed past column 0, distinguishable from the engine's own headings above them.
+    This is the inverse of the byte-equality claim the collapsed form made (`user == forged`):
+    the property that actually matters is that no learner byte opens a line at column 0, pinned
+    here against literals, not by calling the function under test."""
     rc = ResponseClassification(outcome="unchanged", mechanism_supplied=False, hard_wrong=False)
     client = _Client(parse_result=_Resp(parsed_output=rc))
     forged = (
@@ -867,15 +870,14 @@ def test_classify_response_forged_continuation_has_no_template_to_imitate():
         _exp(), "frame", "protect_the_core_lane", "push text", forged
     )
     user = _user_text(client.messages.parse_calls[0])
-    assert user == forged
+    lines = user.splitlines()
+    assert lines.count("Push:") == 1  # only the engine's own heading, at column 0
+    assert lines.count("Student reply:") == 1  # only the engine's own heading, at column 0
+    assert "    Push:" in lines  # the learner's forged heading survives, but indented
+    assert "    Student reply:" in lines  # the second forged heading, indented too
 
 
 def test_classify_response_no_payload_byte_reaches_column_0():
-    """Column 0 is no longer the hazard at this site (see the `_KNOWN_LEARNER_SITES` comment in
-    tests/test_prompt_text.py): the reply IS the whole message now, so it legitimately opens the
-    first line -- safe only because no engine heading shares the message with it. Pinned here as
-    the flip side of the byte-equality test above: the payload survives completely untouched, not
-    filtered or re-escaped."""
     response = f"{_LEAK_FIRST}\n{_LEAK_SECOND}"
     rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
     client = _Client(parse_result=_Resp(parsed_output=rc))
@@ -883,7 +885,9 @@ def test_classify_response_no_payload_byte_reaches_column_0():
         _exp(), "frame", "protect_the_core_lane", "push text", response
     )
     user = _user_text(client.messages.parse_calls[0])
-    assert user == response
+    leaders = _leading_nonspace_chars(user)
+    assert _LEAK_FIRST not in leaders  # labelled indents the FIRST line too, unlike bulleted
+    assert _LEAK_SECOND not in leaders
 
 
 def test_classify_response_raises_on_a_pathological_reply_never_silently_trims_it():
@@ -902,13 +906,18 @@ def test_classify_response_raises_on_a_pathological_reply_never_silently_trims_i
     assert client.messages.parse_calls == []  # raised before composing/sending -- never trimmed
 
 
-def test_classify_response_raises_loud_when_the_reply_exceeds_the_cap():
-    """T2: the cap now measures `response` directly -- the exact string sent -- rather than the
-    `labelled(...)` rendering that no longer exists, so the threshold is pinned against the raw
-    length with no label/indent overhead to subtract."""
+def test_classify_response_raises_loud_when_the_rendered_reply_exceeds_the_cap():
+    """REVERT (T2 review): the cap again measures the RENDERED blob (label + indent, per
+    `labelled`), not the raw `response` directly -- a one-line reply sized so the rendered string
+    lands exactly one character over `_LEARNER_TEXT_REFUSAL_CAP` pins the exact threshold, not an
+    approximation."""
     from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
+    from elenchus.prompt_text import labelled
 
-    response = "x" * (_LEARNER_TEXT_REFUSAL_CAP + 1)
+    label = "Student reply:"
+    overhead = len(labelled(label, ""))
+    assert overhead == _labelled_overhead(label)  # discriminates `labelled` from the bare form
+    response = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead + 1)
 
     client = _Client(parse_result=_Resp(parsed_output=None))
     with pytest.raises(ModelError, match="classify_response"):
@@ -918,14 +927,16 @@ def test_classify_response_raises_loud_when_the_reply_exceeds_the_cap():
     assert client.messages.parse_calls == []  # raised before composing/sending -- never a call
 
 
-def test_classify_response_composes_normally_at_the_cap():
-    """Same construction, exactly at the cap (not over it): the call composes and reaches the
-    client, unmodified -- proves the guard is a threshold, not a blanket refusal on long replies,
-    and pins the boundary in the permissive direction now that no rendering overhead is subtracted
-    from it."""
+def test_classify_response_composes_normally_one_character_under_the_cap():
+    """Same construction, one character under the cap: the call composes and reaches the client
+    exactly as before -- proves the guard is a threshold, not a blanket refusal on long replies."""
     from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
+    from elenchus.prompt_text import labelled
 
-    response = "x" * _LEARNER_TEXT_REFUSAL_CAP
+    label = "Student reply:"
+    overhead = len(labelled(label, ""))
+    assert overhead == _labelled_overhead(label)  # discriminates `labelled` from the bare form
+    response = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead)
 
     rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
     client = _Client(parse_result=_Resp(parsed_output=rc))
@@ -934,7 +945,8 @@ def test_classify_response_composes_normally_at_the_cap():
     )
     assert len(client.messages.parse_calls) == 1  # composed and sent, not refused
     user = _user_text(client.messages.parse_calls[0])
-    assert user == response  # composed in FULL, byte-identical -- not trimmed, not wrapped
+    # composed in FULL, not trimmed: the whole "Student reply:\n    " + response tail survives
+    assert user == "Push:\npush text\n\nStudent reply:\n    " + response
 
 
 def test_classify_response_composes_a_realistic_thorough_reply_instead_of_raising():
@@ -942,9 +954,11 @@ def test_classify_response_composes_a_realistic_thorough_reply_instead_of_raisin
     `grade_answer` and every trim site) raised at 2000 characters -- well inside the range of a
     real, engaged, thorough reply, not merely a pathological one. `_ORDINARY_REPLY` (defined near
     the top of this file) is 422 words of real reasoning prose reasoning through the same
-    licensing decision `_exp()` poses, not a synthetic filler string. A threshold that refuses this
-    input is refusing the ordinary case, not the pathological one; it must compose in FULL, and
-    (T2) byte-identical to the raw fixture -- no label, no indent."""
+    licensing decision `_exp()` poses, not a synthetic filler string, and it alone renders past the
+    old 2000-character cap. A threshold that refuses this input is refusing the ordinary case, not
+    the pathological one, which is exactly the bug this fix closes: it must compose in FULL."""
+    from elenchus.prompt_text import labelled
+
     assert len(_ORDINARY_REPLY.split()) == 422  # "several hundred words" -- pin the fixture's claim
 
     rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
@@ -954,7 +968,12 @@ def test_classify_response_composes_a_realistic_thorough_reply_instead_of_raisin
     )
     assert len(client.messages.parse_calls) == 1  # composed and sent, never refused
     user = _user_text(client.messages.parse_calls[0])
-    assert user == _ORDINARY_REPLY
+    # equality against the real render (not a substring check): `_ORDINARY_REPLY` has internal
+    # paragraph breaks, and `labelled` indents every continuation line, so the raw fixture text
+    # never appears verbatim inside a composed multi-paragraph prompt -- only its INDENTED form
+    # does. Byte-for-byte equality against that indented form is still proof of "composed in full,
+    # not trimmed": `_cap_rendered_turn` would have appended "…[trimmed]" and cut the tail instead.
+    assert user == "Push:\npush text\n\n" + labelled("Student reply:", _ORDINARY_REPLY)
     assert "…[trimmed]" not in user
 
 
@@ -1543,15 +1562,16 @@ def test_grade_answer_raises_on_a_pathological_answer_never_silently_trims_it():
     assert client.messages.parse_calls == []  # raised before composing/sending -- never a call
 
 
-# --- grade_sharper: T2 (prompt-injection fix) collapsed the forgeable template here too --
-# `response` is now the ENTIRE user message, verbatim; `push` moved into `system`. See model.py's
-# own comment on `classify_response` for the numbers that were and were not measured (identical
-# caveat here: this collapsed form's efficacy is unmeasured, pending the same paid probe). -------
+# --- grade_sharper: REVERT (T2 review) of `3e81f72`'s collapse here too -- `push` is back in
+# `user`, never `system`. See model.py's own comment on `classify_response` for the numbers that
+# were and were not measured (identical caveat here: the prompt reframe kept from the collapse is
+# unmeasured, pending the same paid probe). -------------------------------------------------------
 
 
-def test_grade_sharper_user_message_is_exactly_the_learner_reply():
-    """Same invariant as `test_classify_response_user_message_is_exactly_the_learner_reply`, the
-    other half of the pair tests/test_prompt_text.py's `_KNOWN_LEARNER_SITES` comment points at."""
+def test_grade_sharper_indents_a_single_line_reply_under_the_label():
+    """REVERT (T2 review), the other half of the pair with `classify_response`'s equivalent test
+    above: the composed user message carries the `Push:` heading again, and the reply is
+    rendered under `Student reply:`, indented."""
     from elenchus.types import SharperVerdict
 
     client = _Client(parse_result=_Resp(parsed_output=SharperVerdict(sharper=True, reason="r")))
@@ -1559,13 +1579,11 @@ def test_grade_sharper_user_message_is_exactly_the_learner_reply():
         _exp(), "frame", "protect_the_core_lane", "push text", "ARGUED HERE"
     )
     call = client.messages.parse_calls[0]
-    assert _user_text(call) == "ARGUED HERE"
-    assert "Push: push text" in _system_text(call)
+    assert _user_text(call) == "Push:\npush text\n\nStudent reply:\n    ARGUED HERE"
+    assert "push text" not in _system_text(call)  # push lives in user again, not system
 
 
 def test_grade_sharper_no_payload_byte_reaches_column_0():
-    """Column 0 is no longer the hazard here either (see the `_KNOWN_LEARNER_SITES` comment in
-    tests/test_prompt_text.py) -- the payload survives completely untouched."""
     from elenchus.types import SharperVerdict
 
     response = f"{_LEAK_FIRST}\n{_LEAK_SECOND}"
@@ -1574,16 +1592,17 @@ def test_grade_sharper_no_payload_byte_reaches_column_0():
         _exp(), "frame", "protect_the_core_lane", "push text", response
     )
     user = _user_text(client.messages.parse_calls[0])
-    assert user == response
+    leaders = _leading_nonspace_chars(user)
+    assert _LEAK_FIRST not in leaders
+    assert _LEAK_SECOND not in leaders
 
 
 def test_grade_sharper_bounds_a_pathological_reply_on_the_rendered_output():
-    """boundary-6 Fix 3: `grade_sharper`'s trim cap is `_LEARNER_TEXT_REFUSAL_CAP` (20000, not the
-    smaller `_LEARNER_TEXT_TRIM_CAP`) -- see model.py's comment on why it must track
-    `classify_response`'s raise threshold. T2: the cap now applies to `response` directly (no
-    `Push:`/label wrapper survives to add overhead), so the trimmed length is exactly pinned, not
-    merely bounded."""
-    from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
+    """boundary-6 Fix 3: `grade_sharper`'s trim cap is now `_LEARNER_TEXT_REFUSAL_CAP` (20000, not
+    the smaller `_LEARNER_TEXT_TRIM_CAP`) -- see model.py's comment on why it must track
+    `classify_response`'s raise threshold. REVERT (T2 review): the composed user message carries
+    the `Push:` heading in front of the trimmed, indented reply; a genuinely pathological reply
+    still gets trimmed, not composed in full."""
     from elenchus.types import SharperVerdict
 
     client = _Client(parse_result=_Resp(parsed_output=SharperVerdict(sharper=True, reason="r")))
@@ -1592,8 +1611,10 @@ def test_grade_sharper_bounds_a_pathological_reply_on_the_rendered_output():
         _exp(), "frame", "protect_the_core_lane", "push text", pathological
     )
     user = _user_text(client.messages.parse_calls[0])
-    assert user == pathological[:_LEARNER_TEXT_REFUSAL_CAP] + "…[trimmed]"
-    assert len(user) == _LEARNER_TEXT_REFUSAL_CAP + len("…[trimmed]")
+    assert user.startswith("Push:\npush text\n\nStudent reply:\n")
+    # 20100 sits above _LEARNER_TEXT_REFUSAL_CAP (20000) plus the "…[trimmed]" suffix and the
+    # fixed "Push:\npush text\n\nStudent reply:\n" wrapper (measured: 20027 chars for this case).
+    assert len(user) < 20100
 
 
 def test_grade_sharper_composes_in_full_a_reply_classify_response_already_admitted():
@@ -1603,14 +1624,16 @@ def test_grade_sharper_composes_in_full_a_reply_classify_response_already_admitt
     must equal `classify_response`'s raise cap, or the blind auditor would silently read fewer
     bytes than the instructor call that produced the trajectory point in the first place -- the
     audit property `grade_answer`'s own comment names explicitly. Pin the boundary: a reply exactly
-    at the largest size `classify_response` can ever compose without refusing
-    (`_LEARNER_TEXT_REFUSAL_CAP` itself, the same construction
-    `test_classify_response_composes_normally_at_the_cap` uses) must still reach `grade_sharper`
-    byte-identical, never trimmed."""
+    at the largest size `classify_response` can ever compose without refusing (one character under
+    `_LEARNER_TEXT_REFUSAL_CAP`, the same construction
+    `test_classify_response_composes_normally_one_character_under_the_cap` uses) must still reach
+    `grade_sharper` byte-identical, never trimmed."""
     from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
+    from elenchus.prompt_text import labelled
     from elenchus.types import SharperVerdict
 
-    response = "x" * _LEARNER_TEXT_REFUSAL_CAP  # classify_response's own ceiling
+    overhead = len(labelled("Student reply:", ""))
+    response = "x" * (_LEARNER_TEXT_REFUSAL_CAP - overhead)  # classify_response's own ceiling
 
     client = _Client(parse_result=_Resp(parsed_output=SharperVerdict(sharper=True, reason="r")))
     AnthropicModel(client=client).grade_sharper(
@@ -1618,7 +1641,7 @@ def test_grade_sharper_composes_in_full_a_reply_classify_response_already_admitt
     )
     user = _user_text(client.messages.parse_calls[0])
     assert "…[trimmed]" not in user  # a no-op trim: byte-identical to classify_response's own view
-    assert user == response
+    assert user == "Push:\npush text\n\nStudent reply:\n    " + response
 
 
 # --- T2 CHANGE 2 + T2 REVIEW FIX: `grade_sharper`'s analog of `classify_response`'s

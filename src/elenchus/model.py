@@ -798,46 +798,50 @@ class AnthropicModel:
             + f"\n\nMode: {exp.rubric.mode.value}"
             + f"\nBinding constraint: {exp.rubric.binding_constraint}"
             + f"\nTarget angle: {detail}"
-            + f"\nPush: {push}"
         )
-        # T2 (measured prompt-injection fix): `push` moved into `system` above, alongside
-        # `Mode:`/`Binding constraint:`/`Target angle:` -- it is the engine's own generated angle,
-        # never learner text, so it carries none of the seam concern below and never did.
+        # REVERT (T2 review): `3e81f72` collapsed this composition -- moved `push` into `system`
+        # and made `response` the entire user message, no `Push:` heading, no
+        # `labelled("Student reply:", ...)` wrapper -- on the theory that removing every
+        # engine-authored heading leaves nothing for a learner turn to forge. A T2 review found
+        # that fix's efficacy was never measured (see below) and that it made two things worse: the
+        # `system` block gained its own `Push: <text>` line in the exact `Label: value` shape a
+        # learner reply can reproduce (the template moved, it did not vanish), and `push` is
+        # authored FROM the learner's own prior words (`judgment_loop.py` passes `positions` into
+        # `generate_push`), so promoting it into `system` moved learner-influenced text across a
+        # trust boundary with no compensating screen. The founder decided: revert the collapse,
+        # keep the prompt reframe (`content/prompts/response.md`, adapted to describe this
+        # restored layout truthfully). `push` is back here, in `user`, never in `system`.
         #
-        # The user message used to be `f"Push:\n{push}\n\n{labelled('Student reply:', response)}"`:
-        # a real, engine-authored template a learner turn could imitate. Measured on claude-opus-5
-        # (3 draws each): a reply containing a forged continuation of that exact template
+        # The numbers actually measured on claude-opus-5 (3 draws each), pinned honestly: a reply
+        # forging a continuation of the `Push:`/`Student reply:` template
         # ("...\n\nStudent reply:\n<fabricated mechanism>") landed `closed`/`mechanism_supplied`
-        # 3/3 on the pre-indent form this repo originally shipped and 2/3 on the indented
-        # `labelled(...)` form above -- the indent relocated the forgeable structure, it did not
-        # remove it. The THIRD arm measured was a BENIGN CONTROL, not a test of the fix below: the
-        # same reply with the forged continuation deleted from it entirely, leaving no attack text
-        # in the message at all. It landed 0/3, unsurprising for text carrying no forgery to land --
-        # that arm never sent anything shaped like the collapsed composition this commit ships, so
-        # it says nothing about whether removing the heading (rather than the reply) closes the
-        # hole. T2 REVIEW FIX: an earlier version of this comment misdescribed that 0/3 as having
-        # been measured on the collapsed form itself. It was not. THE COLLAPSED COMPOSITION BELOW
-        # IS UNMEASURED: no draw has ever been run against it, and its efficacy against the
-        # forged-continuation attack is UNPROVEN pending a paid probe --
+        # 3/3 on the pre-indent form this repo originally shipped and 2/3 on THIS indented
+        # `labelled(...)` form -- the form this method composes below, restored. The indent lowers
+        # the landing rate; it does not zero it. The THIRD arm measured was a BENIGN CONTROL, not a
+        # measurement of the collapsed form: the same reply with the forged continuation deleted
+        # from it entirely, leaving no attack text in the message at all. It landed 0/3,
+        # unsurprising for text carrying no forgery to land -- that arm never sent anything shaped
+        # like the collapsed composition `3e81f72` shipped, so it said nothing about whether
+        # removing the heading (rather than the reply) closed the hole. THE COLLAPSED FORM WAS
+        # NEVER MEASURED, and neither is the prompt reframe kept above:
         # `injection_probe.py`/`run_injection_probe.py` (cells `A_new`/`B_new`) exist to make
-        # exactly this measurement and have not been executed (never run a `run_*_probe` module
-        # outside an explicit, confirmed, budgeted invocation).
+        # exactly that measurement and have not been executed (never run a `run_*_probe` module
+        # outside an explicit, confirmed, budgeted invocation). Do not read the 2/3 above as
+        # evidence the reframe helps or hurts -- it predates the reframe entirely.
+        #
         # Text detectors were explored and rejected: three independent adversarial passes broke
         # every one for free, and a shape detector fires on an honest multi-part learner reply too
-        # (the rubrics ask for structured answers). The fix is structural instead: remove every
-        # engine-authored heading from the user message, so there is nothing left for a learner
-        # turn to forge. `response` is now the ENTIRE user message -- no `Push:` heading, no
-        # `labelled("Student reply:", ...)` wrapper. This does NOT stop a forged span that is
-        # genuinely a substring of `response`, because the learner typed it; that is a different
-        # property, added separately (see the mechanism-evidence check below `_parse_required`).
+        # (the rubrics ask for structured answers). The defense that ships is the indent:
+        # `response` is rendered under `labelled("Student reply:", ...)`, which indents EVERY line,
+        # including the first, so a forged `Push:`/`Student reply:` continuation the learner types
+        # lands indented, never at column 0 where the real headings live -- see the
+        # mechanism-evidence check below `_parse_required` for the separate property that a forged
+        # span genuinely present in `response` (because the learner typed it) is not what this
+        # indent claims to stop.
         #
-        # `_LEARNER_TEXT_REFUSAL_CAP` (see its own comment) still bounds it, now measured on
-        # `response` directly -- the exact string sent -- rather than the `labelled(...)`
-        # rendering that no longer exists. The old rendering added "Student reply:\n" plus one
-        # `LEARNER_INDENT` per continuation line, so this raise now fires very slightly LATER than
-        # before (a raw reply a few dozen characters longer than it used to tolerate can still
-        # pass) -- a small, permissive semantic change over a threshold this module's own comment
-        # already sizes with several thousand characters of slack.
+        # `_LEARNER_TEXT_REFUSAL_CAP` (see its own comment) bounds the RENDERED string -- label plus
+        # indent included -- not the raw `response`, matching every other `labelled(...)` raise site
+        # in this module.
         #
         # boundary-6 Fix 2 (unchanged by the above): the cap is a REFUSAL threshold here, never a
         # trim point, matching `grade_answer` (~160 lines below) rather than the silent
@@ -860,12 +864,13 @@ class AnthropicModel:
         # server-side and emits the honest, actionable `_DOOR_FAILED_NUDGE` ("refresh to pick up
         # where you left off") rather than crashing or silently corrupting the ledger. Degrades,
         # does not dead-end.
-        if len(response) > _LEARNER_TEXT_REFUSAL_CAP:
+        rendered = labelled("Student reply:", response)
+        if len(rendered) > _LEARNER_TEXT_REFUSAL_CAP:
             raise ModelError(
                 "classify_response input exceeds _LEARNER_TEXT_REFUSAL_CAP — classification "
                 "unreliable"
             )
-        user = response
+        user = f"Push:\n{push}\n\n{rendered}"
         resp = self._parse_required(
             max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,
@@ -1123,24 +1128,20 @@ class AnthropicModel:
         self, exp: Experience, kind: str, code: str, push: str, response: str
     ) -> SharperVerdict:
         detail = _target_detail(exp.rubric, kind, code)
-        system = load_prompt("grade_sharper") + f"\n\nTarget angle: {detail}" + f"\nPush: {push}"
-        # T2 (measured prompt-injection fix, same principle as `classify_response` above -- see
-        # its own comment for the measured numbers and why a text detector was rejected): `push`
-        # moved into `system`. `response` is the learner's own stress-probe reply -- literally the
-        # string `classify_response` already routes through the seam, re-graded blind
+        system = load_prompt("grade_sharper") + f"\n\nTarget angle: {detail}"
+        # REVERT (T2 review, same restoration as `classify_response` above -- see its own comment
+        # for the measured numbers, why a text detector was rejected, and why the founder chose to
+        # revert `3e81f72`'s collapse rather than keep it): `push` is back in `user`, never in
+        # `system`. `response` is the learner's own stress-probe reply -- literally the string
+        # `classify_response` already routes through the seam, re-graded blind
         # (assessment/sharper_grader.py:24 passes `p.response`, the trajectory point
-        # `classify_response` produced) -- and is now the ENTIRE user message: no `Push:` heading,
-        # no `labelled("Student reply:", ...)` wrapper, so there is no engine structure left in the
-        # message for a learner turn to forge.
-        #
-        # `_LEARNER_TEXT_REFUSAL_CAP` still bounds it (identical compose over identical data needs
-        # an identical bound -- see that constant's own comment for why this site takes the raise
-        # group's cap rather than the smaller trim group's), now measured on `response` directly
-        # rather than the `labelled(...)` rendering that no longer exists. `_cap_rendered_turn`
-        # still trims here rather than raising (unlike `classify_response`): that stays a no-op for
-        # every reply `classify_response` ever admits, since both sites now share the same raw-
-        # string cap.
-        user = _cap_rendered_turn(response, cap=_LEARNER_TEXT_REFUSAL_CAP)
+        # `classify_response` produced). Identical compose over identical data, so identical cap:
+        # `_LEARNER_TEXT_REFUSAL_CAP`, not `_LEARNER_TEXT_TRIM_CAP` -- see that constant's own
+        # comment for why this trim site is the one exception. `push` is the engine's own generated
+        # angle, never learner text, and stays outside the seam.
+        user = f"Push:\n{push}\n\n" + _cap_rendered_turn(
+            labelled("Student reply:", response), cap=_LEARNER_TEXT_REFUSAL_CAP
+        )
         resp = self._parse_required(
             max_tokens=1024,
             system=system,

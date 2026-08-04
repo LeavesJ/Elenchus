@@ -109,10 +109,10 @@ def _classify_system_for(item: ClassifyItem) -> str:
     from what arms A/B actually send. Pinned in tests/test_run_prompt_shift_probe.py against a
     real `AnthropicModel(client=fake).classify_response` call's captured `system=`.
 
-    T2 (measured prompt-injection fix): `push` moved from `classify_response`'s user message into
-    its system message, alongside `Mode:`/`Binding constraint:`/`Target angle:` -- reproduced here
-    as the trailing `Push:` line, using `item.push` (the same push arm A/B send), or this
-    reconstruction silently drifts from what the live method now sends."""
+    REVERT (T2 review): `3e81f72` moved `push` from `classify_response`'s user message into its
+    system message and this mirror followed with a trailing `Push:` line. The founder reverted that
+    collapse (see model.py's own comment on `classify_response`), so `push` is back in the user
+    message and this system composition carries no `Push:` line again, matching the live method."""
     detail = _target_detail(item.exp.rubric, item.kind, item.code)
     return (
         load_prompt("response")
@@ -121,7 +121,6 @@ def _classify_system_for(item: ClassifyItem) -> str:
         + f"\n\nMode: {item.exp.rubric.mode.value}"
         + f"\nBinding constraint: {item.exp.rubric.binding_constraint}"
         + f"\nTarget angle: {detail}"
-        + f"\nPush: {item.push}"
     )
 
 
