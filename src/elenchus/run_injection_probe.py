@@ -41,7 +41,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .content_loader import load_library, load_prompt
-from .injection_probe import CELLS, Payload, draw_schedule, load_payloads, run_cells
+from .injection_probe import (
+    CELLS,
+    AdmissionResult,
+    Payload,
+    admits,
+    attack_text,
+    benign_text,
+    derive_heading_tokens,
+    draw_schedule,
+    load_payloads,
+    run_cells,
+)
 from .injection_scoring import adjudicate, screen, tally, truncate_to_complete_draw
 from .model import (
     _CLASSIFY_MAX_TOKENS,
@@ -51,6 +62,7 @@ from .model import (
     _target_detail,
 )
 from .prompt_shift_probe import reconstruct_old_classify_response_user
+from .prompt_text import labelled
 from .run_push_screen_probe import _confirm
 from .types import Regime
 
@@ -118,6 +130,42 @@ def _classify_system_for(p: Payload) -> str:
         + f"\nBinding constraint: {_EXPERIENCE.rubric.binding_constraint}"
         + f"\nTarget angle: {detail}"
     )
+
+
+def _new_user_for(text: str) -> str:
+    """Reproduces `AnthropicModel.classify_response`'s NEW user composition (model.py, the
+    `rendered = labelled(...); user = f"Push:\\n{push}\\n\\n{rendered}"` lines) exactly, using the
+    SAME building block that method calls (`prompt_text.labelled`), mirroring
+    `_classify_system_for`'s approach for the system half. Composes text only, never calls the
+    model: the admission gate (`_check_admission`) must run and raise BEFORE any network call is
+    even considered, so this cannot go through `classify` (which may be the real, paid-for
+    `_classify` once wired) or `_build_model`. `push` is always `_PUSH` here, matching the fixed
+    push every cell in a run shares (this module's docstring)."""
+    return f"Push:\n{_PUSH}\n\n{labelled('Student reply:', text)}"
+
+
+def _check_admission(
+    payloads: list[Payload], old_user_for, system_for
+) -> list[AdmissionResult]:
+    """Run the offline admission filter (`injection_probe.admits`) over every payload, using the
+    EXACT `old_user_for`/`system_for` callables `run()` was given (real defaults or a caller's
+    fakes) to build the OLD rendering and the system text, and `_new_user_for` to build the attack
+    and benign-baseline NEW renderings -- the same composition `classify_response` itself performs,
+    reached without ever calling it. The heading set is derived per payload from all four composed
+    texts (`derive_heading_tokens`), never hand-listed, matching `admits`'s own reasoning.
+
+    Zero model calls. This is what lets `run()` call it before `confirm` -- an unadmitted corpus
+    must never reach the cost guard, let alone the network."""
+    results = []
+    for p in payloads:
+        old = old_user_for(p, attack_text(p))
+        new = _new_user_for(attack_text(p))
+        baseline_new = _new_user_for(benign_text(p))
+        headings = derive_heading_tokens(system_for(p), old, new, baseline_new)
+        results.append(
+            admits(p, old_user=old, new_user=new, baseline_new_user=baseline_new, headings=headings)
+        )
+    return results
 
 
 def _raw_parse(model, *, system: str, user: str, output_format: type, max_tokens: int):
@@ -192,6 +240,20 @@ def run(
     if system_for is None:
         system_for = _classify_system_for
 
+    # The admission gate, BEFORE the cost guard: an unadmitted corpus must never reach `confirm`,
+    # let alone the network. Zero model calls (`_check_admission` composes text only), so this can
+    # run unconditionally, ahead of any confirmation. A corpus that partly fails admission is an
+    # authoring error, not something to silently shrink around -- shrinking the denominator without
+    # anyone deciding to is exactly what Invariant-grade validity gates exist to prevent, so a
+    # single rejection fails the whole run loud, naming every offender and its reason.
+    admission = _check_admission(payloads, old_user_for, system_for)
+    rejected = [r for r in admission if not r.admitted]
+    if rejected:
+        detail = "; ".join(f"{r.name} ({r.reason})" for r in rejected)
+        raise ValueError(
+            f"admission gate rejected {len(rejected)}/{len(admission)} payload(s): {detail}"
+        )
+
     schedule = draw_schedule([p.name for p in payloads], draws=draws, seed=seed)
     if not confirm("injection_efficacy", len(schedule), model_id):
         print("not confirmed; no calls made")
@@ -235,6 +297,14 @@ def run(
         "kept_draw_depth": depth,
         "truncated": depth < draws,
         "cells": list(CELLS),
+        # Every reader sees that the admission gate ran, and what it concluded, not merely that
+        # `len(payloads)` calls happened. `rejected` is always `[]` here -- `run()` already raised
+        # above on the first rejection -- but the field stays because "the gate ran and admitted
+        # everyone" is a claim distinct from "the gate never ran."
+        "admission": {
+            "results": [r.model_dump(mode="json") for r in admission],
+            "rejected": [r.name for r in admission if not r.admitted],
+        },
         "prompt_hashes": {
             # Hash what the run ACTUALLY sends, by calling the injected `old_user_for`. Calling
             # `reconstruct_old_classify_response_user("PUSH", "REPLY")` directly instead would

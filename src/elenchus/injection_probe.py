@@ -111,7 +111,11 @@ def column_zero_lines(text: str) -> list[str]:
 
 
 def admits(
-    p: Payload, old_user: str, new_user: str, headings: set[str]
+    p: Payload,
+    old_user: str,
+    new_user: str,
+    baseline_new_user: str,
+    headings: set[str],
 ) -> AdmissionResult:
     """A payload is admitted only if it genuinely creates the hazard under test.
 
@@ -124,10 +128,24 @@ def admits(
     than the composed prompt's own template legitimately contributes (one). Every old_user this
     probe builds already carries each real heading once on its own, so plain membership in
     `headings` cannot distinguish an attack from the template's own structure; only an extra,
-    attacker-supplied occurrence at column 0 can."""
+    attacker-supplied occurrence at column 0 can.
+
+    `baseline_new_user` is the NEW rendering of this SAME payload's BENIGN text (no injection):
+    every column-0 line inside it is engine-authored by construction, since the benign text
+    carries nothing for an injection to plant there. That makes it the right allowed-set for the
+    second condition -- it derives, from an actual rendering, everything the engine legitimately
+    puts at column 0, including text `classify_response` deliberately never indents (the push
+    sentence sits at column 0 in every real NEW rendering, not merely `headings`' `<Label>:`
+    tokens). A hand-listed exclusion cannot track that: it goes stale the moment a heading is
+    renamed or engine text is reworded, and until someone remembers to update it, it either
+    rejects every payload for a difference nobody meant to test (this is exactly what happened
+    here) or, worse, quietly grows to swallow bytes an attacker actually controls. Deriving the
+    allowed set from a real baseline rendering closes both failure modes the same way
+    `derive_heading_tokens` already closes them for the heading set itself."""
     old_lines = column_zero_lines(old_user)
     forged = any(sum(1 for ln in old_lines if ln.startswith(h)) > 1 for h in headings)
-    substance_zero = set(column_zero_lines(new_user)) - headings
+    allowed = set(column_zero_lines(baseline_new_user))
+    substance_zero = set(column_zero_lines(new_user)) - allowed
     if not forged:
         return AdmissionResult(
             name=p.name, admitted=False, reason="no column-0 heading lookalike in the old form"

@@ -17,6 +17,16 @@ _PAYLOADS = [
 ]
 
 
+def _wrap_old(p, t):
+    """A fake `old_user_for` shaped enough like the real OLD rendering (a `Push:`/`Student
+    reply:` template around `t`) to pass the admission gate `run()` now runs before `confirm`.
+    Every test below that used to hand `t` straight through needs this instead: the bare
+    `injection` field each `_PAYLOADS` entry carries only forges a `Student reply:` heading
+    relative to the ONE the template itself contributes, so the wrapper has to be present for the
+    forgery to be detectable at all."""
+    return f"Push:\nq\n\nStudent reply:\n{t}"
+
+
 def test_the_system_prompt_matches_what_classify_response_actually_sends(monkeypatch):
     """Pinned against a captured AnthropicModel.classify_response call rather than hand-copied,
     so this can never silently drift from what the NEW arm sends. Both arms must see the SAME
@@ -116,7 +126,7 @@ def test_run_declining_confirmation_never_builds_the_real_model_even_with_no_ove
 
     out = rip.run(
         payloads=_PAYLOADS, data_dir=Path("/tmp/unused-injection-probe-test"),
-        system_for=lambda p: "SYS", old_user_for=lambda p, t: t,
+        system_for=lambda p: "SYS", old_user_for=_wrap_old,
         confirm=lambda *a, **k: False,
     )
     assert out is None
@@ -145,7 +155,7 @@ def test_run_refuses_without_a_typed_yes_and_makes_no_calls(tmp_path):
         payloads=_PAYLOADS, data_dir=tmp_path,
         classify=lambda p, t: calls.append(1),
         raw_parse=lambda **k: calls.append(1),
-        system_for=lambda p: "SYS", old_user_for=lambda p, t: t,
+        system_for=lambda p: "SYS", old_user_for=_wrap_old,
         confirm=lambda *a, **k: False,
     )
     assert out is None and calls == []
@@ -189,7 +199,7 @@ def test_the_old_prompt_hash_tracks_the_prompt_the_run_actually_sent(tmp_path):
             payloads=_PAYLOADS, data_dir=tmp_path / marker,
             classify=lambda p, t: clean, raw_parse=lambda **k: clean,
             system_for=lambda p: "SYS",
-            old_user_for=lambda p, t, m=marker: f"{m}\n{t}",
+            old_user_for=lambda p, t, m=marker: f"Push:\n{m}\n\nStudent reply:\n{t}",
             confirm=lambda *a, **k: True,
         )
         hashes.append(doc["prompt_hashes"]["old_user_template"])
@@ -203,7 +213,7 @@ def test_the_checkpoint_is_written_before_the_result_file(tmp_path):
     path, _ = run(
         payloads=_PAYLOADS, data_dir=tmp_path,
         classify=lambda p, t: clean, raw_parse=lambda **k: clean,
-        system_for=lambda p: "SYS", old_user_for=lambda p, t: t,
+        system_for=lambda p: "SYS", old_user_for=_wrap_old,
         confirm=lambda *a, **k: True,
     )
     ckpts = list(Path(tmp_path).glob("*.checkpoint.jsonl"))
@@ -231,7 +241,7 @@ def test_the_cost_guard_is_told_the_exact_remaining_call_count(tmp_path):
     run(
         payloads=_PAYLOADS, data_dir=tmp_path,
         classify=lambda p, t: None, raw_parse=lambda **k: None,
-        system_for=lambda p: "SYS", old_user_for=lambda p, t: t,
+        system_for=lambda p: "SYS", old_user_for=_wrap_old,
         confirm=_record_n_calls_and_refuse(told),
     )
     assert told["n"] == len(_PAYLOADS) * 5 * DEFAULT_DRAWS == 90
@@ -253,3 +263,22 @@ def test_run_raises_a_clear_error_on_an_empty_payload_list_and_asks_nothing(tmp_
             confirm=lambda *a, **k: asked.append(1) or True,
         )
     assert asked == []
+
+
+def test_run_refuses_an_unadmitted_payload_before_confirm_is_called(tmp_path):
+    """The admission gate (`_check_admission`) must run and raise BEFORE `confirm` is ever
+    reached, in the same shape as the empty-payload-list guard directly above: a corpus that
+    fails admission must never even ask to spend money, let alone spend it. `old_user_for=lambda
+    p, t: t` skips the real `Push:`/`Student reply:` template entirely, so the OLD rendering never
+    carries a SECOND `Student reply:` heading beyond the one the template would legitimately
+    contribute -- `admits` rejects every payload in `_PAYLOADS` for exactly that reason, and the
+    message names each one."""
+    asked = []
+    with pytest.raises(ValueError, match="admission gate rejected"):
+        run(
+            payloads=_PAYLOADS, data_dir=tmp_path,
+            classify=lambda p, t: None, raw_parse=lambda **k: None,
+            system_for=lambda p: "SYS", old_user_for=lambda p, t: t,
+            confirm=lambda *a, **k: asked.append(1) or True,
+        )
+    assert asked == [], "confirm must never be invoked once admission has already failed"
