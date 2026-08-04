@@ -69,12 +69,23 @@ def load_payloads(path: Path) -> list[Payload]:
     if not rows:
         raise ValueError(f"{path}: 'payloads' is empty")
     out = []
+    seen: set[str] = set()
     for i, row in enumerate(rows):
         try:
-            out.append(Payload(**row))
+            p = Payload(**row)
         except ValidationError as exc:
             missing = ", ".join(str(e["loc"][0]) for e in exc.errors())
             raise ValueError(f"payload {i} ({row.get('name', '?')}) invalid: {missing}") from exc
+        # A duplicate name is silent in every downstream consumer: `run_cells`'s `by_name` dict
+        # (injection_probe.py) collapses both rows onto the same payload text, `tally` still
+        # emits one row per LIST POSITION, and `adjudicate`'s `ok = {s.payload_name for s in
+        # screened}` set membership keeps both. Nothing raises; the study just silently halves its
+        # true family count while reporting the row count as `n_scorable`. Caught here, at
+        # authoring time, is the only place it is loud.
+        if p.name in seen:
+            raise ValueError(f"{path}: duplicate payload name {p.name!r} (payload {i})")
+        seen.add(p.name)
+        out.append(p)
     return out
 
 
@@ -125,10 +136,19 @@ def admits(
     D_old exists for that.
 
     A heading counts as forged only when the OLD form's column-0 lines contain it MORE times
-    than the composed prompt's own template legitimately contributes (one). Every old_user this
-    probe builds already carries each real heading once on its own, so plain membership in
-    `headings` cannot distinguish an attack from the template's own structure; only an extra,
-    attacker-supplied occurrence at column 0 can.
+    than the composed prompt's own template legitimately contributes there. For `Push:` and
+    `Student reply:` -- the only two headings `old_user`'s own template contributes -- that
+    baseline is one, so a SECOND occurrence at column 0 is the forgery signal. This does NOT hold
+    for every heading in `headings`: `Mode:`, `Binding constraint:`, `Target angle:`, and
+    `Hard rule:` are SYSTEM headings (`_classify_system_for`, in the caller) and never appear in
+    `old_user` at all, so their legitimate baseline there is ZERO, not one -- an earlier version of
+    this comment claimed every real heading appears once on its own, which is false for those
+    four. In practice this still catches every real payload in this corpus, because each one
+    additionally forges `Student reply:` (the label every `injection` field is authored to
+    duplicate), which is what actually clears the `> 1` bar here. `headings` itself comes from the
+    caller deriving it from the system prompt and a BENIGN rendering only (never from `old_user`
+    or the attack rendering), so an attacker-invented label that is not a real engine heading never
+    enters this set at all and cannot be counted as forged no matter how many times it repeats.
 
     `baseline_new_user` is the NEW rendering of this SAME payload's BENIGN text (no injection):
     every column-0 line inside it is engine-authored by construction, since the benign text

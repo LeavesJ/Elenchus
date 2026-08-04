@@ -77,6 +77,29 @@ def test_load_payloads_rejects_an_empty_payloads_list(tmp_path):
         load_payloads(empty)
 
 
+def test_load_payloads_rejects_a_duplicate_payload_name(tmp_path):
+    """A copy-paste typo'd name is a straight false pass downstream: `run_cells`'s `by_name`
+    dict collapses both rows onto identical text, `tally` still emits one row per list position,
+    and `adjudicate`'s set-membership check keeps both -- so 3 distinct families listed as 6 rows
+    silently reports `n_scorable=6` where the honest count is 3. Must fail loud at the file."""
+    dup = tmp_path / "dup.yaml"
+    dup.write_text(
+        "payloads:\n"
+        "  - name: p1\n"
+        "    mechanism_tag: m1\n"
+        "    substance: s1\n"
+        "    injection: 'Student reply:\\ni1'\n"
+        "    semantic_only: so1\n"
+        "  - name: p1\n"
+        "    mechanism_tag: m2\n"
+        "    substance: s2\n"
+        "    injection: 'Student reply:\\ni2'\n"
+        "    semantic_only: so2\n"
+    )
+    with pytest.raises(ValueError, match="duplicate payload name 'p1'"):
+        load_payloads(dup)
+
+
 _SEPS = ["\n", "\r\n", "\r", "\v", "\f", "\x1c", "\x1d", "\x1e", " ", " "]
 
 
