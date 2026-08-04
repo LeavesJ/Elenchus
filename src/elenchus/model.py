@@ -755,7 +755,18 @@ class AnthropicModel:
         # ("...\n\nStudent reply:\n<fabricated mechanism>") landed `closed`/`mechanism_supplied`
         # 3/3 on the pre-indent form this repo originally shipped and 2/3 on the indented
         # `labelled(...)` form above -- the indent relocated the forgeable structure, it did not
-        # remove it. 0/3 once the forged structure had nothing left in the message to imitate.
+        # remove it. The THIRD arm measured was a BENIGN CONTROL, not a test of the fix below: the
+        # same reply with the forged continuation deleted from it entirely, leaving no attack text
+        # in the message at all. It landed 0/3, unsurprising for text carrying no forgery to land --
+        # that arm never sent anything shaped like the collapsed composition this commit ships, so
+        # it says nothing about whether removing the heading (rather than the reply) closes the
+        # hole. T2 REVIEW FIX: an earlier version of this comment misdescribed that 0/3 as having
+        # been measured on the collapsed form itself. It was not. THE COLLAPSED COMPOSITION BELOW
+        # IS UNMEASURED: no draw has ever been run against it, and its efficacy against the
+        # forged-continuation attack is UNPROVEN pending a paid probe --
+        # `injection_probe.py`/`run_injection_probe.py` (cells `A_new`/`B_new`) exist to make
+        # exactly this measurement and have not been executed (never run a `run_*_probe` module
+        # outside an explicit, confirmed, budgeted invocation).
         # Text detectors were explored and rejected: three independent adversarial passes broke
         # every one for free, and a shape detector fires on an honest multi-part learner reply too
         # (the rubrics ask for structured answers). The fix is structural instead: remove every

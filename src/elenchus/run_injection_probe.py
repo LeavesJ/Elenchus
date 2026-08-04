@@ -121,13 +121,17 @@ def _classify_system_for(p: Payload) -> str:
     `_target_detail`) rather than hand-copying their assembly, so this can never silently drift
     from what the NEW arm actually sends. Mirrors `run_prompt_shift_probe._classify_system_for`.
 
-    T2 (measured prompt-injection fix, the vulnerability THIS probe module measured): `push` moved
-    from `classify_response`'s user message into its system message, alongside `Mode:`/`Binding
-    constraint:`/`Target angle:` -- reproduced here as the trailing `Push:` line, or this
-    reconstruction silently drifts from what the live method now sends and `system` stops matching
-    across the two arms (`tests/test_run_injection_probe.py`'s
+    T2 (prompt-injection fix): `push` moved from `classify_response`'s user message into its
+    system message, alongside `Mode:`/`Binding constraint:`/`Target angle:` -- reproduced here as
+    the trailing `Push:` line, or this reconstruction silently drifts from what the live method now
+    sends and `system` stops matching across the two arms (`tests/test_run_injection_probe.py`'s
     `test_classify_and_raw_parse_send_the_same_system_and_only_the_user_differs` pins the two
-    equal).
+    equal). This module's `A_new`/`B_new` cells (`injection_probe.CELLS`) run the REAL,
+    now-collapsed `classify_response` against attack/benign text -- this is the apparatus BUILT to
+    measure whether the collapse closes the forged-continuation hole the pre-collapse numbers in
+    model.py's `classify_response` comment measured. It has not been executed (never run a
+    `run_*_probe` module outside an explicit, confirmed, budgeted invocation), so that measurement
+    does not exist yet.
 
     `p` is accepted (matching `run_cells`'s `system_for: Callable[[Payload], str]` contract, and
     `admits`'s composed-prompt inputs) but never read: the system text depends only on the fixed

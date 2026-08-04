@@ -828,10 +828,12 @@ def _leading_nonspace_chars(rendered):
     return [line[0] for line in rendered.split("\n") if line and not line[0].isspace()]
 
 
-# --- classify_response: T2 (measured prompt-injection fix) collapsed the forgeable template --
-# `response` is now the ENTIRE user message, verbatim, with no label and no indent; `push` moved
-# into `system`, alongside `Mode:`/`Binding constraint:`/`Target angle:`. See model.py's own
-# comment on `classify_response` for the measured numbers and the reasoning. -----------------
+# --- classify_response: T2 (prompt-injection fix) collapsed the forgeable template -- `response`
+# is now the ENTIRE user message, verbatim, with no label and no indent; `push` moved into
+# `system`, alongside `Mode:`/`Binding constraint:`/`Target angle:`. See model.py's own comment on
+# `classify_response` for the numbers that WERE measured (the pre-collapse template's forgeability)
+# and the ones that were NOT: the collapsed form below is unmeasured, its efficacy unproven pending
+# a paid probe. -------------------------------------------------------------------------------
 
 
 def test_classify_response_user_message_is_exactly_the_learner_reply():
@@ -1450,10 +1452,10 @@ def test_grade_answer_raises_on_a_pathological_answer_never_silently_trims_it():
     assert client.messages.parse_calls == []  # raised before composing/sending -- never a call
 
 
-# --- grade_sharper: T2 (measured prompt-injection fix) collapsed the forgeable template here too
-# -- `response` is now the ENTIRE user message, verbatim; `push` moved into `system`. See
-# model.py's own comment on `grade_sharper` for the reasoning (identical to `classify_response`'s,
-# above). ---------------------------------------------------------------------------------------
+# --- grade_sharper: T2 (prompt-injection fix) collapsed the forgeable template here too --
+# `response` is now the ENTIRE user message, verbatim; `push` moved into `system`. See model.py's
+# own comment on `classify_response` for the numbers that were and were not measured (identical
+# caveat here: this collapsed form's efficacy is unmeasured, pending the same paid probe). -------
 
 
 def test_grade_sharper_user_message_is_exactly_the_learner_reply():
