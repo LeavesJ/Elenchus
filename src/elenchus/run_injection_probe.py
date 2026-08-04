@@ -1,12 +1,22 @@
 """Entrypoint for the injection efficacy probe. The ONLY module here that touches the network,
 and it never does so without a typed confirmation.
 
-`classify`, `raw_parse`, `system_for`, and `old_user_for` are injected rather than built here, so
-every code path in `run()` is provable against a fake model -- the same shape as
-`run_prompt_shift_probe.py` and `run_push_screen_probe.py`. Real wiring to `AnthropicModel`
-(building `system_for` from the same pieces `AnthropicModel.classify_response` calls, and a real
-`raw_parse` over `Model._parse_required`) is a separate change; until it lands, `run()` still works
-end to end against any four callables a caller supplies.
+`classify`, `raw_parse`, `system_for`, and `old_user_for` are injected rather than hard-wired, so
+every code path in `run()` stays provable against a fake model -- the same shape as
+`run_prompt_shift_probe.py` and `run_push_screen_probe.py`. Real wiring lives in this module too
+now (`_classify_system_for`, `_raw_parse`, `_classify`, `_build_model`): `run()` falls back to it
+only when a caller leaves the corresponding parameter unset, so every existing test that supplies
+its own fakes is unaffected and only an actual `run()` invocation with no overrides ever touches
+`AnthropicModel`.
+
+`_classify_system_for` mirrors `run_prompt_shift_probe._classify_system_for` exactly: it composes
+`AnthropicModel.classify_response`'s system text by CALLING `load_prompt`, `_situation_block`, and
+`_target_detail` -- the same building blocks that method calls -- rather than hand-copying their
+assembly, so it cannot silently drift from what a real `classify_response` call sends. It is
+payload-independent by construction: every payload in a run probes the SAME fixed `_EXPERIENCE`
+and `_CODE`, never anything drawn from `Payload` itself. That independence is load-bearing, not
+incidental -- `run()`'s artifact hashes `system_for(payloads[0])` as "the system every cell saw",
+and that claim is only honest because no payload can move the system text.
 
 Two properties this module exists to guarantee:
 
@@ -24,16 +34,25 @@ Two properties this module exists to guarantee:
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .content_loader import load_library, load_prompt
 from .injection_probe import CELLS, Payload, draw_schedule, load_payloads, run_cells
 from .injection_scoring import adjudicate, screen, tally, truncate_to_complete_draw
-from .model import _CLASSIFY_MAX_TOKENS
+from .model import (
+    _CLASSIFY_MAX_TOKENS,
+    _PARAMS,
+    ResponseClassification,
+    _situation_block,
+    _target_detail,
+)
 from .prompt_shift_probe import reconstruct_old_classify_response_user
 from .run_push_screen_probe import _confirm
+from .types import Regime
 
 DEFAULT_DRAWS = 3
 DEFAULT_SEED = 20260803
@@ -49,9 +68,92 @@ DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "injection_probe"
 DB_PATH = Path(__file__).resolve().parents[2] / "data" / "elenchus.db"
 PAYLOAD_PATH = Path(__file__).resolve().parents[2] / "data" / "injection_payloads.yaml"
 
+# The one fixed experience/frame every payload is classified against. Deliberately a SINGLE
+# constant, not something each payload or call site chooses: `_classify_system_for`'s
+# payload-independence (this module's whole validity condition, per its docstring) depends on
+# every cell in a run composing the system prompt from the same experience and code, never one
+# each payload picks for itself.
+_EXPERIENCE_ID = "decision_under_stakes"
+_KIND = "frame"
+
+
+def _fixed_experience(experience_id: str):
+    """Look the experience up by id rather than taking `load_library()[0]`: list order is an
+    implementation detail of `content/`'s directory scan, not a contract, so indexing into it
+    would make the fixed experience silently move if a file were added or renamed."""
+    for exp in load_library():
+        if exp.experience_id == experience_id and exp.regime is Regime.open_ended:
+            return exp
+    raise ValueError(f"open-ended experience {experience_id!r} not found in the library")
+
+
+_EXPERIENCE = _fixed_experience(_EXPERIENCE_ID)
+# `Rubric` itself validates `decision_frame` is one of `rubric.frames`' codes (types.py), so this
+# is never a code `_target_detail` cannot resolve.
+_CODE = _EXPERIENCE.rubric.decision_frame
+
 
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def _classify_system_for(p: Payload) -> str:
+    """Reproduces `AnthropicModel.classify_response`'s system composition (model.py) exactly, by
+    calling the SAME building blocks that method calls (`load_prompt`, `_situation_block`,
+    `_target_detail`) rather than hand-copying their assembly, so this can never silently drift
+    from what the NEW arm actually sends. Mirrors `run_prompt_shift_probe._classify_system_for`.
+
+    `p` is accepted (matching `run_cells`'s `system_for: Callable[[Payload], str]` contract, and
+    `admits`'s composed-prompt inputs) but never read: the system text depends only on the fixed
+    `_EXPERIENCE`/`_CODE` under test, never on payload content. That independence is what this
+    module's docstring and `tests/test_run_injection_probe.py` pin -- `run()`'s artifact hashes
+    `system_for(payloads[0])` as if it spoke for every payload's run, which is only true because no
+    payload can move this text. `stress` is never set here: this probe never sends the stress
+    addendum, matching `classify_response`'s own `stress=False` default."""
+    detail = _target_detail(_EXPERIENCE.rubric, _KIND, _CODE)
+    return (
+        load_prompt("response")
+        + _situation_block(_EXPERIENCE)
+        + f"\n\nMode: {_EXPERIENCE.rubric.mode.value}"
+        + f"\nBinding constraint: {_EXPERIENCE.rubric.binding_constraint}"
+        + f"\nTarget angle: {detail}"
+    )
+
+
+def _raw_parse(model, *, system: str, user: str, output_format: type, max_tokens: int):
+    """The OLD arm's raw parse. Mirrors `run_prompt_shift_probe._raw_parse_classify`: reaches
+    `model._parse_required` directly rather than through `classify_response`, which composes its
+    OWN new, indented user message -- exactly what the old-form cells (`A_old`/`B_old`/`D_old`)
+    must not send. `_PARAMS` matches `classify_response`'s own reasoning-effort choice, so this arm
+    and the NEW arm below differ only in how the user message was built, never in call
+    parameters."""
+    return model._parse_required(
+        max_tokens=max_tokens,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+        output_format=output_format,
+        **_PARAMS,
+    )
+
+
+def _classify(model, p: Payload, text: str) -> ResponseClassification:
+    """The NEW arm: `classify_response` itself, which composes its own indented user message via
+    `prompt_text.labelled` -- the exact code path under test. `p` is unused for the same reason
+    `_classify_system_for` doesn't read it: every payload is classified against the one fixed
+    `_EXPERIENCE`/`_CODE`, matching `run_cells`'s `classify: Callable[[Payload, str],
+    ResponseClassification]` contract, which passes `p` whether or not a real implementation needs
+    it."""
+    return model.classify_response(_EXPERIENCE, _KIND, _CODE, _PUSH, text)
+
+
+def _build_model():
+    """Lazy: constructing `AnthropicModel` never imports the `anthropic` SDK or touches the
+    network by itself (only `_get_client()`, reached from an actual call, does that), but the
+    import stays inside this function so a test that never calls it still never needs the SDK
+    installed -- the same convention `run_prompt_shift_probe.run`'s `model is None` branch uses."""
+    from .model import AnthropicModel
+
+    return AnthropicModel(model=MODEL_ID)
 
 
 def run(
@@ -87,11 +189,24 @@ def run(
     if old_user_for is None:
         def old_user_for(p, text):
             return reconstruct_old_classify_response_user(_PUSH, text)
+    if system_for is None:
+        system_for = _classify_system_for
 
     schedule = draw_schedule([p.name for p in payloads], draws=draws, seed=seed)
     if not confirm("injection_efficacy", len(schedule), model_id):
         print("not confirmed; no calls made")
         return None
+
+    if classify is None or raw_parse is None:
+        # Built only after confirmation succeeds, matching `run_prompt_shift_probe.run`'s
+        # `model is None` branch: a declined confirmation must make zero calls, and constructing
+        # the real callables before that gate would blur "no calls made" with "no callables built"
+        # even though `_build_model()` itself never touches the network.
+        model = _build_model()
+        if classify is None:
+            classify = functools.partial(_classify, model)
+        if raw_parse is None:
+            raw_parse = functools.partial(_raw_parse, model)
 
     data_dir.mkdir(parents=True, exist_ok=True)
     stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%dT%H%M%SZ")

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from elenchus.injection_probe import Payload
+from elenchus.injection_probe import Payload, load_payloads
 from elenchus.run_injection_probe import DEFAULT_DRAWS, DEFAULT_SEED, run
 
 _PAYLOADS = [
@@ -15,6 +15,128 @@ _PAYLOADS = [
     )
     for i in range(1, 7)
 ]
+
+
+def test_the_system_prompt_matches_what_classify_response_actually_sends(monkeypatch):
+    """Pinned against a captured AnthropicModel.classify_response call rather than hand-copied,
+    so this can never silently drift from what the NEW arm sends. Both arms must see the SAME
+    system text; only `user` may differ, which is the property without which the probe would
+    blame the indent for a system-prompt difference."""
+    from elenchus.run_injection_probe import _classify_system_for
+
+    got = _classify_system_for(_PAYLOADS[0])
+    assert "Mode:" in got and "Target angle:" in got
+    assert got == _classify_system_for(_PAYLOADS[1]), "system is payload-independent here"
+
+
+# ---------------------------------------------------------------------------
+# real wiring, pinned against a REAL AnthropicModel over a scripted client (never network) --
+# same convention tests/test_run_prompt_shift_probe.py uses for its own `_classify_system_for`.
+# ---------------------------------------------------------------------------
+
+
+class _Resp:
+    def __init__(self, parsed_output):
+        self.parsed_output = parsed_output
+        self.stop_reason = "end_turn"
+
+
+class _Messages:
+    def __init__(self, result):
+        self._result = result
+        self.parse_calls = []
+
+    def parse(self, **kwargs):
+        self.parse_calls.append(kwargs)
+        return _Resp(self._result)
+
+
+class _Client:
+    def __init__(self, result):
+        self.messages = _Messages(result)
+
+
+def _rc():
+    from elenchus.model import ResponseClassification
+
+    return ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+
+
+def test_classify_and_raw_parse_send_the_same_system_and_only_the_user_differs():
+    """Drives the NEW arm (`_classify`, which calls `model.classify_response`) and the OLD arm
+    (`_raw_parse`, `_parse_required` reached directly) through the SAME real `AnthropicModel` over
+    a scripted client (never network). Proves `_classify_system_for` reproduces the exact system
+    text `classify_response` composes, and that the two arms differ only in how the user message
+    was built -- the validity condition the whole probe rests on."""
+    from elenchus.model import AnthropicModel, ResponseClassification
+    from elenchus.prompt_shift_probe import reconstruct_old_classify_response_user
+    from elenchus.run_injection_probe import _PUSH, _classify, _classify_system_for, _raw_parse
+
+    client = _Client(_rc())
+    model = AnthropicModel(client=client)
+    text = "the learner's reply text"
+
+    _classify(model, _PAYLOADS[0], text)  # NEW arm
+    _raw_parse(
+        model,
+        system=_classify_system_for(_PAYLOADS[0]),
+        user=reconstruct_old_classify_response_user(_PUSH, text),
+        output_format=ResponseClassification,
+        max_tokens=4096,
+    )  # OLD arm
+
+    new_call, old_call = client.messages.parse_calls
+    assert old_call["system"] == new_call["system"]
+    assert old_call["messages"][-1]["content"] != new_call["messages"][-1]["content"]
+    assert old_call["output_config"] == new_call["output_config"]  # same effort (_PARAMS)
+
+
+def test_build_model_is_pinned_to_the_probe_model_id():
+    """`_build_model()` never touches the network on its own (only `_get_client()`, reached from
+    an actual call, does that) -- this just proves it constructs the real adapter against the
+    right model id, offline."""
+    from elenchus.run_injection_probe import MODEL_ID, _build_model
+
+    model = _build_model()
+    assert model._model == MODEL_ID
+
+
+def test_run_declining_confirmation_never_builds_the_real_model_even_with_no_overrides(
+    monkeypatch,
+):
+    """`classify`/`raw_parse` left at their real-wiring default (None) must still make zero calls
+    and construct nothing when `confirm` declines -- the real wiring must sit BEHIND the same gate
+    every fake already sits behind, never ahead of it."""
+    import elenchus.run_injection_probe as rip
+
+    def _boom():
+        raise AssertionError("must never be called -- confirm declined")
+
+    monkeypatch.setattr(rip, "_build_model", _boom)
+
+    out = rip.run(
+        payloads=_PAYLOADS, data_dir=Path("/tmp/unused-injection-probe-test"),
+        system_for=lambda p: "SYS", old_user_for=lambda p, t: t,
+        confirm=lambda *a, **k: False,
+    )
+    assert out is None
+
+
+def test_the_real_payload_file_meets_the_diversity_floor():
+    """A FLOOR on diversity, not evidence of independence: two families with different tags can
+    still share a mechanism. The permutation test's exchangeability rests on how these were
+    authored, and no test in this design verifies it."""
+    import collections
+
+    from elenchus.run_injection_probe import PAYLOAD_PATH
+
+    if not PAYLOAD_PATH.exists():
+        pytest.skip("real payloads are gitignored and absent in a fresh worktree")
+    ps = load_payloads(PAYLOAD_PATH)
+    tags = collections.Counter(p.mechanism_tag for p in ps)
+    assert len(ps) == 12
+    assert len(tags) >= 6
+    assert max(tags.values()) <= 3
 
 
 def test_run_refuses_without_a_typed_yes_and_makes_no_calls(tmp_path):
