@@ -11,8 +11,11 @@ end to end against any four callables a caller supplies.
 Two properties this module exists to guarantee:
 
 - The cost guard (`confirm`) is told the EXACT remaining call count (`len(schedule)`), so an
-  invocation made after an earlier abort re-prices only what is left rather than silently
-  re-authorizing a full budget against a partially spent one.
+  invocation prices exactly the schedule it was handed rather than silently re-authorizing a full
+  budget. There is no automatic checkpoint-aware resume: after a partial run, the next invocation
+  draws and prices its own fresh schedule from scratch, matching `run_prompt_shift_probe.py`'s
+  disclaimer (`.superpowers/sdd/probes-report.md`). The earlier `.checkpoint.jsonl` is left on
+  disk for its data, not consumed.
 - Every completed draw is checkpointed to `<timestamp>.checkpoint.jsonl` BEFORE the final
   `<timestamp>.json` result file is written. `run_cells`'s `on_draw` hook appends one line per call
   as it completes, so a crash mid-run still leaves every already-paid-for draw on disk -- a
@@ -67,9 +70,10 @@ def run(
 ) -> tuple[Path, dict] | None:
     """Execute the probe. Returns `(artifact_path, result_dict)`, or `None` if unconfirmed.
 
-    The cost guard is told the EXACT remaining call count, so an invocation after an abort
-    re-prices only what is left rather than silently re-authorizing a full budget against a
-    partially spent one."""
+    The cost guard is told the EXACT remaining call count, so it prices exactly the schedule this
+    call draws. There is no automatic resume from a checkpoint: after a partial run, the next call
+    draws and prices its own fresh schedule from scratch; the earlier checkpoint file is kept for
+    its data, not consumed."""
     payloads = payloads if payloads is not None else load_payloads(PAYLOAD_PATH)
     # `load_payloads` already raises on an empty corpus, but `run(payloads=[...])` can be called
     # directly with one, bypassing that check. Left unguarded, an empty list would run all the way
@@ -117,7 +121,12 @@ def run(
         "truncated": depth < draws,
         "cells": list(CELLS),
         "prompt_hashes": {
-            "old_user_template": _sha(reconstruct_old_classify_response_user("PUSH", "REPLY")),
+            # Hash what the run ACTUALLY sends, by calling the injected `old_user_for`. Calling
+            # `reconstruct_old_classify_response_user("PUSH", "REPLY")` directly instead would
+            # bypass both `_PUSH` and any caller-supplied `old_user_for`, so the recorded hash
+            # would stay byte-identical no matter how the real prompt changed. A provenance field
+            # insensitive to the thing it claims to record is worse than no field at all.
+            "old_user_template": _sha(old_user_for(payloads[0], "REPLY")),
             "classify_system": _sha(system_for(payloads[0])),
         },
         "denominators": {

@@ -53,6 +53,27 @@ def test_run_writes_an_artifact_carrying_the_verdict_seed_and_prompt_hashes(tmp_
     assert doc["prompt_hashes"]["classify_system"]
 
 
+def test_the_old_prompt_hash_tracks_the_prompt_the_run_actually_sent(tmp_path):
+    """A provenance field that cannot change when the prompt changes is a false claim. The hash
+    used to come from `reconstruct_old_classify_response_user("PUSH", "REPLY")`, which ignored
+    both `_PUSH` and any injected `old_user_for`, so it was byte-identical across every possible
+    real prompt."""
+    from elenchus.model import ResponseClassification
+
+    clean = ResponseClassification(outcome="unchanged", mechanism_supplied=False, hard_wrong=False)
+    hashes = []
+    for marker in ("FIRST-PROMPT-SHAPE", "SECOND-PROMPT-SHAPE"):
+        _, doc = run(
+            payloads=_PAYLOADS, data_dir=tmp_path / marker,
+            classify=lambda p, t: clean, raw_parse=lambda **k: clean,
+            system_for=lambda p: "SYS",
+            old_user_for=lambda p, t, m=marker: f"{m}\n{t}",
+            confirm=lambda *a, **k: True,
+        )
+        hashes.append(doc["prompt_hashes"]["old_user_template"])
+    assert hashes[0] != hashes[1], "the hash must move when the prompt moves"
+
+
 def test_the_checkpoint_is_written_before_the_result_file(tmp_path):
     from elenchus.model import ResponseClassification
 
