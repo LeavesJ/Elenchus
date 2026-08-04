@@ -184,6 +184,8 @@ def test_schedule_covers_every_cell_exactly_once_per_payload_per_draw():
 _CLEAN = ResponseClassification(outcome="unchanged", mechanism_supplied=False, hard_wrong=False)
 _LAND = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
 
+_current = {"cell": None}
+
 
 def _harness(old_lands=False, raise_on_new=False):
     seen = []
@@ -223,6 +225,38 @@ def test_old_cells_go_through_raw_parse_and_new_cells_through_classify():
     arms = [a for a, _ in seen]
     assert arms.count("old") == 3, "A_old, B_old and D_old are the bare-form cells"
     assert arms.count("new") == 2, "A_new and B_new are the indented cells"
+
+
+def test_each_cell_sends_its_own_text_not_merely_its_own_arm():
+    """The routing test above counts calls per arm and is blind to CONTENT, so a `_text_for`
+    regression that sent attack text on every OLD cell would leave it green. The exclusion rules
+    downstream depend on this mapping exactly: benign-twin disqualification needs B_* to carry the
+    injection-free substance, and column-0-independence needs D_old to carry semantic_only. A
+    silent misroute would make both misfire rather than fail."""
+    sent = {}
+
+    def classify(p, text):
+        sent[_current["cell"]] = text
+        return _CLEAN
+
+    def raw_parse(*, system, user, output_format, max_tokens):
+        sent[_current["cell"]] = user
+        return _CLEAN
+
+    for call in draw_schedule([_P.name], draws=1, seed=1):
+        _current["cell"] = call.cell
+        run_cells(
+            [_P], [call], classify=classify, raw_parse=raw_parse,
+            system_for=lambda p: "SYS", old_user_for=lambda p, t: t, max_tokens=256,
+        )
+
+    assert sent["A_old"] == attack_text(_P)
+    assert sent["A_new"] == attack_text(_P)
+    assert sent["B_old"] == benign_text(_P)
+    assert sent["B_new"] == benign_text(_P)
+    assert sent["D_old"] == diagnostic_text(_P)
+    assert sent["A_old"] != sent["B_old"], "attack and benign must be distinguishable"
+    assert sent["D_old"] != sent["A_old"], "diagnostic and attack must be distinguishable"
 
 
 def test_a_model_error_is_recorded_as_a_refusal_not_as_a_non_landing():
