@@ -46,6 +46,11 @@ def _closed_assessment():
                 text="push",
                 response_classification="closed",
                 response="because mechanism X",
+                # A code only reaches `frames_closed_under_pressure` (below) through the loop's
+                # credit branch, so this fixture was always modelling a CREDITED closure -- it
+                # just could not say so before `Push.gap_closed` existed, and stated the proxy
+                # instead.
+                gap_closed=True,
             )
         ],
         frame_deltas=[

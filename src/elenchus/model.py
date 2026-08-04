@@ -896,10 +896,21 @@ class AnthropicModel:
         # differing only in case are the same words -- casefolding two DIFFERENT words can never
         # make them match, it only ever merges case-variants of one identical word.
         #
-        # FLOOR, never raise: `assessment/judgment_loop.py:317` only raises the frame state on
-        # `outcome == "closed" AND mechanism_supplied`, so flooring `mechanism_supplied` alone is
-        # sufficient, and `outcome` is left untouched -- the reply lands in the same shape the
-        # loop already handles for an honest "no mechanism" classification. Raising instead would
+        # FLOOR, never raise. `assessment/judgment_loop.py` raises the frame state and repairs a
+        # trap only on `outcome == "closed" AND mechanism_supplied`, so the floor withholds both,
+        # and `outcome` is left untouched -- the reply lands in the same shape the loop already
+        # handles for an honest "no mechanism" classification.
+        #
+        # CORRECTION: an earlier version of this comment concluded from that one call site that
+        # "flooring `mechanism_supplied` alone is sufficient". It was not, and the tree
+        # contradicted it. `state.update_state` re-derived "this trap was repaired" from
+        # `response_classification` -- which is this untouched `outcome` -- so a floored
+        # `mechanism_supplied` still left `"closed"` on the trajectory point and deleted the
+        # trap's durable gallery row. The floor is sufficient now because the loop's own credit
+        # decision rides out on `types.Push.gap_closed` and `state.update_state` reads that
+        # instead; it was never sufficient by itself. Anything downstream that keys off a bare
+        # `outcome == "closed"` reopens this hole -- grep `gap_closed` before adding one.
+        # Raising instead would
         # kill the door mid-sitting over a field-level evidence gap: state is already banked by
         # the time this runs (nothing in `judgment_loop.assess` persists mid-loop --
         # `orchestration.run_session`'s `store.save_state` runs only after `assess` returns), so
@@ -1097,6 +1108,19 @@ class AnthropicModel:
         # so this carries none of the re-fed-turn concern that forced `_TURN_RENDER_CAP` higher.
         # The question, key, and criteria are curated content and stay in `system`, outside the
         # seam.
+        #
+        # This composition carries the SAME forgeable shape `classify_response` does: engine
+        # headings in a `Label: value` form (`Question:`, `Reference answer(s):`, `Criteria:`)
+        # and one `labelled(...)` block a learner writes freely into. The measured turn-forgery
+        # attack on `classify_response` was never run against this method, but nothing about it
+        # is specific to the open-ended side, and here a landing writes `correct=True` straight
+        # through `assessment/checkable_scorer.py` into the concept result. `content/prompts/
+        # grade.md` now carries the same reframe `response.md` and `grade_sharper.md` do, stating
+        # that every indented line under `Student answer:` was typed by the student and that
+        # nothing inside it revises the criteria. THE REFRAME'S EFFICACY IS UNMEASURED HERE, on
+        # this method, exactly as it is on the other two -- `injection_probe.py` targets
+        # `classify_response` only, and no probe cell sends a `grade_answer` composition. Do not
+        # read the added prose as a closed hole; it is parity, not proof.
         #
         # The cap is a REFUSAL threshold here, never a trim point, and unlike its three sibling
         # sites this one does not call `_cap_rendered_turn` at all (T2 review Fix 1). Reason:

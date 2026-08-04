@@ -112,6 +112,68 @@ def test_bounded_error_violation_stops_immediately():
     assert a.hard_wrong_flags == ["erode_core_for_one_customer"]
 
 
+def _tripped_intake():
+    return IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.absent,
+            "protect_the_core_lane": FrameState.absent,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.tripped,
+        },
+    )
+
+
+def _scripted_everywhere(rc):
+    return {
+        code: [rc.model_copy() for _ in range(judgment_loop.MAX_PUSHES + 2)]
+        for code in (
+            "erode_core_for_one_customer",
+            "lead_with_what_you_refuse_to_do",
+            "protect_the_core_lane",
+            "scope_creep_to_please",
+        )
+    }
+
+
+def test_closed_without_mechanism_is_carried_as_uncredited_on_the_trajectory():
+    """The REAL path for the trap-gallery hole `state.update_state` closes.
+
+    `classify_response` returning `closed` with `mechanism_supplied=False` is not hypothetical:
+    it is exactly the shape `AnthropicModel.classify_response`'s evidence-anchor floor produces
+    when a grader claims a mechanism whose span is not in the reply. The loop already refuses to
+    mark the trap repaired on it. What is pinned here is that the refusal RIDES OUT on the
+    trajectory point, because `response_classification` alone still says `closed` and
+    `state.update_state` is downstream of exactly this object."""
+    m = FakeModel(
+        _tripped_intake(),
+        _scripted_everywhere(
+            ResponseClassification(outcome="closed", mechanism_supplied=False, hard_wrong=False)
+        ),
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+    trap_points = [p for p in a.trajectory if p.target_code == "erode_core_for_one_customer"]
+    assert trap_points, "the tripped trap was never pushed"
+    assert all(p.response_classification == "closed" for p in trap_points)
+    assert all(p.gap_closed is False for p in trap_points)
+
+
+def test_a_genuine_repair_is_carried_as_credited_on_the_trajectory():
+    """The positive control for the test above. Without it, `gap_closed = False` everywhere --
+    a constant that suppresses nothing and logs everything -- would pass that assertion."""
+    m = FakeModel(
+        _tripped_intake(),
+        _scripted_everywhere(
+            ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+        ),
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+    trap_points = [p for p in a.trajectory if p.target_code == "erode_core_for_one_customer"]
+    assert trap_points, "the tripped trap was never pushed"
+    assert any(p.gap_closed is True for p in trap_points)
+
+
 def test_budget_caps_unproductive_loop():
     intake = IntakeClassification(
         frame_states={

@@ -215,6 +215,18 @@ class Push(BaseModel):
     text: str
     response_classification: str
     response: str = ""
+    # The loop's OWN credit decision for this push, and the only authority on whether anything
+    # was repaired. `response_classification` is the grader's raw `outcome` string and is NOT
+    # that: `assessment/judgment_loop.py` credits a push only on `outcome == "closed" AND
+    # mechanism_supplied`, so a `closed` carrying no mechanism -- including one
+    # `AnthropicModel.classify_response` FLOORED for a fabricated evidence span -- leaves
+    # `response_classification == "closed"` while the loop correctly refuses the repair.
+    # `state.update_state` used to re-derive "repaired" from that string alone, a second and
+    # weaker copy of the predicate, which let an inflated `closed` on a trap delete the trap's
+    # durable gallery row. Downstream readers consult THIS field; the string stays for the
+    # detail it records. Defaults False because the fail-safe direction is to log the trap, not
+    # to suppress it.
+    gap_closed: bool = False
 
 
 class FrameDelta(BaseModel):

@@ -290,6 +290,7 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
                     text=push_text,
                     response_classification=rc.outcome,
                     response=response,
+                    gap_closed=moved,
                 )
             )
             stop_reason = StopReason.bounded_error_violation
@@ -309,6 +310,7 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
                     text=push_text,
                     response_classification=rc.outcome,
                     response=response,
+                    gap_closed=moved,
                 )
             )
             stop_reason = StopReason.regression
@@ -329,6 +331,12 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
         else:
             exhausted.add(code)
 
+        # `gap_closed=moved` at all three `Push(...)` sites in this function, never a literal:
+        # `moved` IS the credit decision made ~15 lines above, and the two early-break sites
+        # reach their append with it still False (a hard-wrong or regressed reply repaired
+        # nothing). Passing the variable rather than restating its value is what keeps
+        # `state.update_state` reading this loop's judgment instead of re-deriving its own from
+        # `response_classification` -- see `types.Push.gap_closed`.
         trajectory.append(
             Push(
                 target_code=code,
@@ -336,6 +344,7 @@ def assess(exp: Experience, work: Work, model: Model) -> Assessment:
                 text=push_text,
                 response_classification=rc.outcome,
                 response=response,
+                gap_closed=moved,
             )
         )
         recent.append((code, moved))
