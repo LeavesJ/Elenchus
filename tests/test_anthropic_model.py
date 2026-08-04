@@ -217,7 +217,12 @@ def test_generate_push_pushes_from_angle_without_naming_it():
 
 
 def test_classify_response_classifies_reply():
-    rc = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+    rc = ResponseClassification(
+        outcome="closed",
+        mechanism_supplied=True,
+        hard_wrong=False,
+        mechanism_span="student reply with a mechanism",
+    )
     client = _Client(parse_result=_Resp(parsed_output=rc))
     out = AnthropicModel(client=client).classify_response(
         _exp(), "frame", "protect_the_core_lane", "push text", "student reply with a mechanism"
@@ -392,7 +397,15 @@ def test_grade_sharper_is_blind_and_parses_verdict():
     from elenchus.types import SharperVerdict
 
     client = _Client(
-        parse_result=_Resp(parsed_output=SharperVerdict(sharper=True, reason="cited a mechanism"))
+        parse_result=_Resp(
+            parsed_output=SharperVerdict(
+                sharper=True,
+                reason="cited a mechanism",
+                mechanism_span=(
+                    "unverified work destroys revenue exactly when outages cluster"
+                ),
+            )
+        )
     )
     out = AnthropicModel(client=client).grade_sharper(
         _exp(),
@@ -943,6 +956,79 @@ def test_classify_response_composes_a_realistic_thorough_reply_instead_of_raisin
     assert "…[trimmed]" not in user
 
 
+# --- T2 CHANGE 2: `mechanism_supplied=True` must be anchored in a verbatim, whitespace-normalized
+# span of `response` -- a DIFFERENT hole than CHANGE 1 above closes (CHANGE 1 does not stop a
+# forged span that is genuinely a substring of `response`, because the learner typed it). This
+# closes a grader asserting `mechanism_supplied` with no supporting span in the reply at all. On
+# failure the check FLOORS `mechanism_supplied` to False and leaves `outcome` untouched --
+# `assessment/judgment_loop.py:317` only raises the frame state on `outcome == "closed" AND
+# mechanism_supplied`, so flooring the one field is sufficient, and raising here would kill the
+# door mid-sitting on a field-level evidence gap (see model.py's own comment on the check). -------
+
+
+def test_response_classification_has_a_mechanism_span_field_defaulting_empty():
+    rc = ResponseClassification(outcome="unchanged", mechanism_supplied=False, hard_wrong=False)
+    assert rc.mechanism_span == ""
+
+
+def test_classify_response_floors_mechanism_supplied_when_the_span_never_appears_in_the_reply():
+    rc = ResponseClassification(
+        outcome="closed",
+        mechanism_supplied=True,
+        hard_wrong=False,
+        mechanism_span="a mechanism that never appears anywhere in the reply",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    out = AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", "I'm not sure, honestly."
+    )
+    assert out.mechanism_supplied is False
+    assert out.outcome == "closed"  # floors ONLY mechanism_supplied -- never over-reaches
+
+
+def test_classify_response_floors_mechanism_supplied_when_the_span_is_empty():
+    rc = ResponseClassification(
+        outcome="closed", mechanism_supplied=True, hard_wrong=False, mechanism_span=""
+    )
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    out = AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", "a real mechanism, stated plainly"
+    )
+    assert out.mechanism_supplied is False
+
+
+def test_classify_response_does_not_floor_a_legitimate_span_that_differs_only_in_whitespace():
+    """The other direction: a real span the model copied from the reply, whitespace-reflowed
+    relative to the reply's own line breaks/spacing, must NOT be floored -- the whitespace
+    normalization exists precisely so an honest citation survives."""
+    response = "The mechanism   is that\nthe buyback option floors the downside at cost."
+    rc = ResponseClassification(
+        outcome="closed",
+        mechanism_supplied=True,
+        hard_wrong=False,
+        mechanism_span="The mechanism is that the buyback option floors the downside at cost.",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    out = AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.mechanism_supplied is True
+
+
+def test_classify_response_never_touches_an_honest_false_with_no_span():
+    """The check only runs when `mechanism_supplied` is true -- an honest `False` with an empty
+    span is the ordinary case (most replies), not something this check has any business touching."""
+    rc = ResponseClassification(
+        outcome="unchanged", mechanism_supplied=False, hard_wrong=False, mechanism_span=""
+    )
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    out = AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", "I don't know."
+    )
+    assert out.mechanism_supplied is False
+    assert out.outcome == "unchanged"
+
+
 # --- classify_entry: the "Student's latest message:" compose; `opening` is the boundary ---------
 
 
@@ -1440,6 +1526,73 @@ def test_grade_sharper_composes_in_full_a_reply_classify_response_already_admitt
     user = _user_text(client.messages.parse_calls[0])
     assert "…[trimmed]" not in user  # a no-op trim: byte-identical to classify_response's own view
     assert user == response
+
+
+# --- T2 CHANGE 2: `grade_sharper`'s analog of `classify_response`'s mechanism-evidence floor
+# above -- `sharper=True` with no supporting span floors to `sharper=False`, the SharperVerdict
+# field `audit_sharper` (assessment/sharper_grader.py) already reads to decide whether a closure
+# survives the blind audit. Flooring it here is consistent with how a disputed call is already
+# treated: dropped from `frames_closed_under_pressure`, never a raised exception mid-audit. -------
+
+
+def test_sharper_verdict_has_a_mechanism_span_field_defaulting_empty():
+    from elenchus.types import SharperVerdict
+
+    v = SharperVerdict(sharper=False, reason="r")
+    assert v.mechanism_span == ""
+
+
+def test_grade_sharper_floors_sharper_when_the_span_never_appears_in_the_reply():
+    from elenchus.types import SharperVerdict
+
+    v = SharperVerdict(
+        sharper=True,
+        reason="cites a mechanism",
+        mechanism_span="a mechanism that never appears anywhere in the reply",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=v))
+    out = AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", "I'm not sure, honestly."
+    )
+    assert out.sharper is False
+
+
+def test_grade_sharper_floors_sharper_when_the_span_is_empty():
+    from elenchus.types import SharperVerdict
+
+    v = SharperVerdict(sharper=True, reason="r", mechanism_span="")
+    client = _Client(parse_result=_Resp(parsed_output=v))
+    out = AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", "a real mechanism, stated plainly"
+    )
+    assert out.sharper is False
+
+
+def test_grade_sharper_does_not_floor_a_legitimate_span_that_differs_only_in_whitespace():
+    from elenchus.types import SharperVerdict
+
+    response = "The mechanism   is that\nthe buyback option floors the downside at cost."
+    v = SharperVerdict(
+        sharper=True,
+        reason="r",
+        mechanism_span="The mechanism is that the buyback option floors the downside at cost.",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=v))
+    out = AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.sharper is True
+
+
+def test_grade_sharper_never_touches_an_honest_false_with_no_span():
+    from elenchus.types import SharperVerdict
+
+    v = SharperVerdict(sharper=False, reason="bare assent, no mechanism", mechanism_span="")
+    client = _Client(parse_result=_Resp(parsed_output=v))
+    out = AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", "you're right, I'll fix it"
+    )
+    assert out.sharper is False
 
 
 # --- concierge_sitting_close: TWO learner surfaces, the situation blob and each segment turn -----

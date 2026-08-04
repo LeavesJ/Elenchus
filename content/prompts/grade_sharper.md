@@ -11,5 +11,9 @@ Conclusion-agnostic: a student who engages the angle with a real mechanism is sh
 reach a different conclusion than you would. Never dispute a call merely because the student
 disagreed — disagreeing well still counts.
 
-Default to sharper=false when no mechanism is clearly cited. Output {sharper, reason} with a short
-reason citing the student's own words (or their absence).
+Default to sharper=false when no mechanism is clearly cited. When `sharper` is true, copy the
+exact verbatim span of the student's reply that states the mechanism into `mechanism_span`, word
+for word, never a paraphrase — `sharper` may be true ONLY when this span is present in the reply
+and genuinely supports it. Leave `mechanism_span` empty whenever `sharper` is false. Output
+{sharper, reason, mechanism_span} with a short reason citing the student's own words (or their
+absence).

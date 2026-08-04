@@ -41,6 +41,11 @@ class ResponseClassification(BaseModel):
     outcome: Literal["closed", "unchanged", "regressed"]
     mechanism_supplied: bool
     hard_wrong: bool
+    # T2 CHANGE 2 (evidence anchor): the verbatim span of `response` the grader claims states the
+    # causal why. `classify_response` checks it against `response` itself immediately after
+    # parsing and floors `mechanism_supplied` to False when the claim has no supporting span --
+    # see that function's own comment. Empty by default: most replies never claim a mechanism.
+    mechanism_span: str = ""
 
 
 @runtime_checkable
@@ -802,6 +807,31 @@ class AnthropicModel:
             output_format=ResponseClassification,
             **_PARAMS,
         )
+        # T2 CHANGE 2 (evidence anchor): a DIFFERENT hole than CHANGE 1 above closes. CHANGE 1
+        # removes the forgeable template; it does NOT stop a forged span that is genuinely a
+        # substring of `response`, because the learner typed it. This closes a grader asserting
+        # `mechanism_supplied=True` with no supporting span in the reply AT ALL -- the model
+        # claiming a mechanism where none exists in the text. Whitespace-normalized (runs of
+        # whitespace collapsed to one space, both sides stripped) so an honest citation that
+        # merely reflows the reply's own line breaks/spacing is not falsely floored; deliberately
+        # NOT casefolded, since that would let a span differing only in case pass as evidence for
+        # different words.
+        #
+        # FLOOR, never raise: `assessment/judgment_loop.py:317` only raises the frame state on
+        # `outcome == "closed" AND mechanism_supplied`, so flooring `mechanism_supplied` alone is
+        # sufficient, and `outcome` is left untouched -- the reply lands in the same shape the
+        # loop already handles for an honest "no mechanism" classification. Raising instead would
+        # kill the door mid-sitting over a field-level evidence gap: state is already banked by
+        # the time this runs (nothing in `judgment_loop.assess` persists mid-loop --
+        # `orchestration.run_session`'s `store.save_state` runs only after `assess` returns), so
+        # unwinding here would split the commit between the engine state and the sitting record --
+        # the same split-commit failure `web/voice.py`'s `_STATIC_LAND` reasoning already fails
+        # closed against rather than raises through.
+        if resp.mechanism_supplied:
+            span = " ".join(resp.mechanism_span.split())
+            haystack = " ".join(response.split())
+            if not span or span not in haystack:
+                resp.mechanism_supplied = False
         return resp
 
     def classify_entry(
@@ -1033,6 +1063,19 @@ class AnthropicModel:
             output_format=SharperVerdict,
             **_PARAMS,
         )
+        # T2 CHANGE 2 (evidence anchor): the blind audit's analog of `classify_response`'s check
+        # above (see its own comment for the full reasoning) -- `sharper=True` with no supporting
+        # span in `response` floors to `sharper=False`, whitespace-normalized the same way, never
+        # casefolded. `assessment/sharper_grader.audit_sharper` reads `sharper` to decide whether
+        # an instructor's closure survives the blind audit; a floored verdict is treated exactly
+        # like a disputed call already is there (dropped from `frames_closed_under_pressure`,
+        # never a raised exception mid-audit), so flooring here needs no separate raise/no-raise
+        # argument of its own.
+        if resp.sharper:
+            span = " ".join(resp.mechanism_span.split())
+            haystack = " ".join(response.split())
+            if not span or span not in haystack:
+                resp.sharper = False
         return resp
 
     def generate_output(

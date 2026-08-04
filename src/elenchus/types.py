@@ -226,6 +226,15 @@ class FrameDelta(BaseModel):
 class SharperVerdict(BaseModel):
     sharper: bool
     reason: str
+    # T2 CHANGE 2 (evidence anchor): `grade_sharper`'s analog of `ResponseClassification.
+    # mechanism_span` (model.py) -- the verbatim span of the reply the grader claims supports
+    # `sharper`. `grade_sharper` checks it and floors `sharper` to False when the claim has no
+    # supporting span, the same way `classify_response` floors `mechanism_supplied`; see
+    # `AnthropicModel.grade_sharper`'s own comment. `audit_sharper`
+    # (assessment/sharper_grader.py) reads `sharper` to decide whether an instructor's closure
+    # survives the blind audit, so this field must exist here too, not only on
+    # `ResponseClassification`, for that check to be possible at this site at all.
+    mechanism_span: str = ""
 
 
 class SharperAuditItem(BaseModel):
