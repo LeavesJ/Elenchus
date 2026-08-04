@@ -284,10 +284,15 @@ def test_labelled_never_raises(text):
 # `response`, `concierge_sitting_close`'s `situation` (and the per-turn `text` in its transcript
 # loop), and `grade_answer`'s `answer` (the `cs_technical` checkable regime). None were among the
 # nine sites this branch's earlier tasks migrated, so the guard could not have caught them; a human
-# reading the allowlist found them. Task 6 sealed all three and added their rows below, so they are
+# reading the allowlist found them. Task 6 sealed all three and added their rows below, so they were
 # watched from here on. That is the honest shape of this guard's value: it does not DISCOVER sites,
 # it stops known ones from regressing — and the act of writing down what is known is what turns up
 # what is missing.
+#
+# `grade_sharper`'s `response` row was later REMOVED (T2, measured prompt-injection fix): the fix
+# for that site was to stop wrapping `response` in a seam at all, not to keep wrapping it, so the
+# thing this guard checks for stopped being the right check at that one site. See the block
+# directly below `_KNOWN_LEARNER_SITES` for the honest replacement.
 
 MODEL_PATH = Path("src/elenchus/model.py")
 FORGE_PATH = Path("src/elenchus/forge.py")
@@ -303,7 +308,6 @@ FORGE_PATH = Path("src/elenchus/forge.py")
 # not one of an original nine.
 _KNOWN_LEARNER_SITES = (
     (MODEL_PATH, "generate_push", "positions"),
-    (MODEL_PATH, "classify_response", "response"),
     (MODEL_PATH, "classify_entry", "opening"),
     (MODEL_PATH, "screen_moves", "text"),
     (MODEL_PATH, "map_territories", "situation"),
@@ -324,11 +328,47 @@ _KNOWN_LEARNER_SITES = (
     # guard was being built. They are sealed now, so the guard can finally watch them;
     # `concierge_sitting_close` gets two rows because it carries two learner surfaces, the
     # situation blob and each segment's turn text.
-    (MODEL_PATH, "grade_sharper", "response"),
     (MODEL_PATH, "grade_answer", "answer"),
     (MODEL_PATH, "concierge_sitting_close", "situation"),
     (MODEL_PATH, "concierge_sitting_close", "text"),
 )
+
+# T2 (measured prompt-injection fix) REMOVED two rows that lived here: `(MODEL_PATH,
+# "classify_response", "response")` and `(MODEL_PATH, "grade_sharper", "response")`. This is not a
+# silent weakening -- read the reasoning before assuming it is.
+#
+# This guard's premise is "a known learner-text variable must route through
+# `bulleted`/`labelled`/`indent_after_first` before it reaches the composed prompt", proved by
+# showing the raw variable is never spliced bare inside `{...}`. `classify_response` and
+# `grade_sharper` no longer call any of those three functions on `response` AT ALL: the composed
+# user message IS `response`, unwrapped, with no label and no indent (see model.py's own comment on
+# both sites for why -- the prior `Push:`/`Student reply:` template was itself the forgeable
+# surface a measured attack exploited, so it was removed rather than defended). A row for either
+# site would now pass this guard VACUOUSLY: `_bare_interpolation` finds no `{response}` brace
+# splice, not because the seam wraps it, but because there is no f-string interpolation of it left
+# to find. That is a real property (there is no unwrapped bare splice), but it is NOT the property
+# this guard exists to prove (that the seam was called), and leaving the row here would let a
+# reader believe the latter from the former.
+#
+# The property that actually matters post-change -- the composed user message is EXACTLY the
+# learner's reply, no engine-authored heading, no added structure -- is a BEHAVIORAL claim this
+# source-reading guard cannot express at all (it reads text, it does not compose a message and
+# inspect it). tests/test_anthropic_model.py proves it directly instead, one test per site:
+# `test_classify_response_user_message_is_exactly_the_learner_reply` and
+# `test_grade_sharper_user_message_is_exactly_the_learner_reply` (plus a forged-heading variant
+# each) capture the real composed `user` via a fake client and assert byte equality with the raw
+# reply. Those tests are what makes this exemption honest: they fail loudly the day anyone adds
+# engine text back into either message, which is the regression this allowlist row used to guard
+# against here.
+#
+# Column 0 is also no longer the hazard for these two sites specifically: the guard's other
+# premise -- "learner text must never open a line at column 0, where the composed prompt's own
+# headings live" -- assumed the message had engine headings to collide with. After this change the
+# learner's reply IS the whole user message, trivially at column 0 from its very first byte, and
+# that is safe ONLY because no engine structure shares the message with it for a forged line to
+# imitate. Every OTHER row in `_KNOWN_LEARNER_SITES` above still composes learner text alongside
+# real engine headings in the same message, so the indent discipline those rows check remains load-
+# bearing there, unchanged.
 
 
 def _extract_function(src: str, name: str) -> tuple[str, int]:

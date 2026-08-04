@@ -738,38 +738,63 @@ class AnthropicModel:
             + f"\n\nMode: {exp.rubric.mode.value}"
             + f"\nBinding constraint: {exp.rubric.binding_constraint}"
             + f"\nTarget angle: {detail}"
+            + f"\nPush: {push}"
         )
-        # Task 4: `response` is the learner's own reply -- the boundary seam,
-        # `_LEARNER_TEXT_REFUSAL_CAP` (see its comment). `push` is the engine's own generated
-        # angle, never learner text, and stays outside the seam.
+        # T2 (measured prompt-injection fix): `push` moved into `system` above, alongside
+        # `Mode:`/`Binding constraint:`/`Target angle:` -- it is the engine's own generated angle,
+        # never learner text, so it carries none of the seam concern below and never did.
         #
-        # boundary-6 Fix 2: the cap is a REFUSAL threshold here, never a trim point, matching
-        # `grade_answer` (~160 lines below) rather than the silent `_cap_rendered_turn` this used
-        # to call. `grade_answer`'s own comment argues the raise is required because a silently
-        # clipped tail that carried what `criteria` asks for turns a correct answer into
-        # `correct=False` -- a wrong grade wearing a checkmark. That argument applies verbatim
-        # here: `outcome`/`mechanism_supplied` are read in `assessment/judgment_loop.py` (line
-        # ~262) to set `FrameState.present_reasoned`, lower a frame state on regression, and decide
-        # whether the loop stops -- durable learner state, exactly like a grade. A reply silently
-        # clipped past the mechanism the target angle asks for could turn a real closure into a
-        # false "not closed" (or worse, a false "regressed"), corrupting `FrameState` the same way
-        # a clipped answer corrupts a checkable grade. Fail loud instead: raise before composing,
-        # never trim. The raise propagates out of `judgment_loop.assess` uncaught (nothing there is
-        # persisted mid-loop -- `orchestration.run_session`'s `store.save_state` runs only AFTER
-        # `assess` returns), so no state is banked for this experience; it surfaces at the same
-        # worker-level catch `web/session_runner.py`'s `except Exception:` already uses for every
-        # other critical-call failure (`classify_intake`, `generate_push`, and -- via
-        # `checkable_scorer.score_question` -- this exact `grade_answer` raise on the cs_technical
-        # side), which logs the traceback server-side and emits the honest, actionable
-        # `_DOOR_FAILED_NUDGE` ("refresh to pick up where you left off") rather than crashing or
-        # silently corrupting the ledger. Degrades, does not dead-end.
-        rendered = labelled("Student reply:", response)
-        if len(rendered) > _LEARNER_TEXT_REFUSAL_CAP:
+        # The user message used to be `f"Push:\n{push}\n\n{labelled('Student reply:', response)}"`:
+        # a real, engine-authored template a learner turn could imitate. Measured on claude-opus-5
+        # (3 draws each): a reply containing a forged continuation of that exact template
+        # ("...\n\nStudent reply:\n<fabricated mechanism>") landed `closed`/`mechanism_supplied`
+        # 3/3 on the pre-indent form this repo originally shipped and 2/3 on the indented
+        # `labelled(...)` form above -- the indent relocated the forgeable structure, it did not
+        # remove it. 0/3 once the forged structure had nothing left in the message to imitate.
+        # Text detectors were explored and rejected: three independent adversarial passes broke
+        # every one for free, and a shape detector fires on an honest multi-part learner reply too
+        # (the rubrics ask for structured answers). The fix is structural instead: remove every
+        # engine-authored heading from the user message, so there is nothing left for a learner
+        # turn to forge. `response` is now the ENTIRE user message -- no `Push:` heading, no
+        # `labelled("Student reply:", ...)` wrapper. This does NOT stop a forged span that is
+        # genuinely a substring of `response`, because the learner typed it; that is a different
+        # property, added separately (see the mechanism-evidence check below `_parse_required`).
+        #
+        # `_LEARNER_TEXT_REFUSAL_CAP` (see its own comment) still bounds it, now measured on
+        # `response` directly -- the exact string sent -- rather than the `labelled(...)`
+        # rendering that no longer exists. The old rendering added "Student reply:\n" plus one
+        # `LEARNER_INDENT` per continuation line, so this raise now fires very slightly LATER than
+        # before (a raw reply a few dozen characters longer than it used to tolerate can still
+        # pass) -- a small, permissive semantic change over a threshold this module's own comment
+        # already sizes with several thousand characters of slack.
+        #
+        # boundary-6 Fix 2 (unchanged by the above): the cap is a REFUSAL threshold here, never a
+        # trim point, matching `grade_answer` (~160 lines below) rather than the silent
+        # `_cap_rendered_turn` this used to call. `grade_answer`'s own comment argues the raise is
+        # required because a silently clipped tail that carried what `criteria` asks for turns a
+        # correct answer into `correct=False` -- a wrong grade wearing a checkmark. That argument
+        # applies verbatim here: `outcome`/`mechanism_supplied` are read in
+        # `assessment/judgment_loop.py` (line ~317) to set `FrameState.present_reasoned`, lower a
+        # frame state on regression, and decide whether the loop stops -- durable learner state,
+        # exactly like a grade. A reply silently clipped past the mechanism the target angle asks
+        # for could turn a real closure into a false "not closed" (or worse, a false "regressed"),
+        # corrupting `FrameState` the same way a clipped answer corrupts a checkable grade. Fail
+        # loud instead: raise before composing, never trim. The raise propagates out of
+        # `judgment_loop.assess` uncaught (nothing there is persisted mid-loop --
+        # `orchestration.run_session`'s `store.save_state` runs only AFTER `assess` returns), so no
+        # state is banked for this experience; it surfaces at the same worker-level catch
+        # `web/session_runner.py`'s `except Exception:` already uses for every other critical-call
+        # failure (`classify_intake`, `generate_push`, and -- via `checkable_scorer.score_question`
+        # -- this exact `grade_answer` raise on the cs_technical side), which logs the traceback
+        # server-side and emits the honest, actionable `_DOOR_FAILED_NUDGE` ("refresh to pick up
+        # where you left off") rather than crashing or silently corrupting the ledger. Degrades,
+        # does not dead-end.
+        if len(response) > _LEARNER_TEXT_REFUSAL_CAP:
             raise ModelError(
                 "classify_response input exceeds _LEARNER_TEXT_REFUSAL_CAP — classification "
                 "unreliable"
             )
-        user = f"Push:\n{push}\n\n{rendered}"
+        user = response
         resp = self._parse_required(
             max_tokens=_CLASSIFY_MAX_TOKENS,
             system=system,
@@ -983,17 +1008,24 @@ class AnthropicModel:
         self, exp: Experience, kind: str, code: str, push: str, response: str
     ) -> SharperVerdict:
         detail = _target_detail(exp.rubric, kind, code)
-        system = load_prompt("grade_sharper") + f"\n\nTarget angle: {detail}"
-        # Task 6: `response` is the learner's own stress-probe reply -- literally the string
-        # `classify_response` already routes through the seam, re-graded blind
+        system = load_prompt("grade_sharper") + f"\n\nTarget angle: {detail}" + f"\nPush: {push}"
+        # T2 (measured prompt-injection fix, same principle as `classify_response` above -- see
+        # its own comment for the measured numbers and why a text detector was rejected): `push`
+        # moved into `system`. `response` is the learner's own stress-probe reply -- literally the
+        # string `classify_response` already routes through the seam, re-graded blind
         # (assessment/sharper_grader.py:24 passes `p.response`, the trajectory point
-        # classify_response produced). Identical compose over identical data, so identical cap:
-        # `_LEARNER_TEXT_REFUSAL_CAP`, not `_LEARNER_TEXT_TRIM_CAP` -- see that constant's own
-        # comment for why this trim site is the one exception. `push` is the engine's own
-        # generated angle, never learner text, and stays outside.
-        user = f"Push:\n{push}\n\n" + _cap_rendered_turn(
-            labelled("Student reply:", response), cap=_LEARNER_TEXT_REFUSAL_CAP
-        )
+        # `classify_response` produced) -- and is now the ENTIRE user message: no `Push:` heading,
+        # no `labelled("Student reply:", ...)` wrapper, so there is no engine structure left in the
+        # message for a learner turn to forge.
+        #
+        # `_LEARNER_TEXT_REFUSAL_CAP` still bounds it (identical compose over identical data needs
+        # an identical bound -- see that constant's own comment for why this site takes the raise
+        # group's cap rather than the smaller trim group's), now measured on `response` directly
+        # rather than the `labelled(...)` rendering that no longer exists. `_cap_rendered_turn`
+        # still trims here rather than raising (unlike `classify_response`): that stays a no-op for
+        # every reply `classify_response` ever admits, since both sites now share the same raw-
+        # string cap.
+        user = _cap_rendered_turn(response, cap=_LEARNER_TEXT_REFUSAL_CAP)
         resp = self._parse_required(
             max_tokens=1024,
             system=system,

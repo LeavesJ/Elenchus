@@ -107,7 +107,12 @@ def _classify_system_for(item: ClassifyItem) -> str:
     calling the SAME building blocks that method calls (`load_prompt`, `_situation_block`,
     `_target_detail`) rather than hand-copying their assembly, so this can never silently drift
     from what arms A/B actually send. Pinned in tests/test_run_prompt_shift_probe.py against a
-    real `AnthropicModel(client=fake).classify_response` call's captured `system=`."""
+    real `AnthropicModel(client=fake).classify_response` call's captured `system=`.
+
+    T2 (measured prompt-injection fix): `push` moved from `classify_response`'s user message into
+    its system message, alongside `Mode:`/`Binding constraint:`/`Target angle:` -- reproduced here
+    as the trailing `Push:` line, using `item.push` (the same push arm A/B send), or this
+    reconstruction silently drifts from what the live method now sends."""
     detail = _target_detail(item.exp.rubric, item.kind, item.code)
     return (
         load_prompt("response")
@@ -116,6 +121,7 @@ def _classify_system_for(item: ClassifyItem) -> str:
         + f"\n\nMode: {item.exp.rubric.mode.value}"
         + f"\nBinding constraint: {item.exp.rubric.binding_constraint}"
         + f"\nTarget angle: {detail}"
+        + f"\nPush: {item.push}"
     )
 
 
