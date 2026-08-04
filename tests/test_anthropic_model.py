@@ -401,9 +401,7 @@ def test_grade_sharper_is_blind_and_parses_verdict():
             parsed_output=SharperVerdict(
                 sharper=True,
                 reason="cited a mechanism",
-                mechanism_span=(
-                    "unverified work destroys revenue exactly when outages cluster"
-                ),
+                mechanism_span=("unverified work destroys revenue exactly when outages cluster"),
             )
         )
     )
@@ -1109,7 +1107,7 @@ def test_classify_response_keeps_mechanism_supplied_when_reply_has_an_em_dash_an
 
 
 def test_classify_response_keeps_mechanism_supplied_when_reply_has_curly_quotes():
-    response = 'The buyback creates a “cost floor” that limits downside risk.'
+    response = "The buyback creates a “cost floor” that limits downside risk."
     rc = ResponseClassification(
         outcome="closed",
         mechanism_supplied=True,
@@ -1789,7 +1787,7 @@ def test_grade_sharper_keeps_sharper_and_verified_when_reply_has_an_em_dash_and_
 def test_grade_sharper_keeps_sharper_and_verified_when_reply_has_curly_quotes():
     from elenchus.types import SharperVerdict
 
-    response = 'The buyback creates a “cost floor” that limits downside risk.'
+    response = "The buyback creates a “cost floor” that limits downside risk."
     v = SharperVerdict(
         sharper=True,
         reason="r",

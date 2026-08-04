@@ -185,10 +185,16 @@ def test_the_tracked_example_stub_is_rejected_by_admission():
     old = f"Push:\nq\n\nStudent reply:\n{attack_text(stub)}"
     new = f"Push:\n    q\n\n{labelled('Student reply:', attack_text(stub))}"
     baseline = f"Push:\n    q\n\n{labelled('Student reply:', benign_text(stub))}"
-    assert admits(
-        stub, old_user=old, new_user=new, baseline_new_user=baseline,
-        headings={"Push:", "Student reply:"},
-    ).admitted is False
+    assert (
+        admits(
+            stub,
+            old_user=old,
+            new_user=new,
+            baseline_new_user=baseline,
+            headings={"Push:", "Student reply:"},
+        ).admitted
+        is False
+    )
 
 
 def test_schedule_is_draw_major_so_a_mid_run_death_leaves_a_balanced_dataset():
@@ -215,9 +221,7 @@ def test_schedule_is_reproducible_from_its_seed():
 
 def test_schedule_actually_permutes_for_at_least_one_seed():
     identity = list(CELLS)
-    orders = {
-        tuple(c.cell for c in draw_schedule(["p"], draws=1, seed=s)) for s in range(20)
-    }
+    orders = {tuple(c.cell for c in draw_schedule(["p"], draws=1, seed=s)) for s in range(20)}
     assert any(list(o) != identity for o in orders), "a constant order is not a permutation"
 
 
@@ -253,8 +257,12 @@ def test_run_cells_produces_one_draw_per_scheduled_call():
     seen, classify, raw_parse = _harness()
     sched = draw_schedule([_P.name], draws=2, seed=1)
     rows = run_cells(
-        [_P], sched, classify=classify, raw_parse=raw_parse,
-        system_for=lambda p: "SYS", old_user_for=lambda p, t: f"Push:\nq\n\nStudent reply:\n{t}",
+        [_P],
+        sched,
+        classify=classify,
+        raw_parse=raw_parse,
+        system_for=lambda p: "SYS",
+        old_user_for=lambda p, t: f"Push:\nq\n\nStudent reply:\n{t}",
         max_tokens=256,
     )
     assert len(rows) == len(sched)
@@ -265,8 +273,13 @@ def test_old_cells_go_through_raw_parse_and_new_cells_through_classify():
     seen, classify, raw_parse = _harness()
     sched = draw_schedule([_P.name], draws=1, seed=1)
     run_cells(
-        [_P], sched, classify=classify, raw_parse=raw_parse,
-        system_for=lambda p: "SYS", old_user_for=lambda p, t: f"X\n{t}", max_tokens=256,
+        [_P],
+        sched,
+        classify=classify,
+        raw_parse=raw_parse,
+        system_for=lambda p: "SYS",
+        old_user_for=lambda p, t: f"X\n{t}",
+        max_tokens=256,
     )
     arms = [a for a, _ in seen]
     assert arms.count("old") == 3, "A_old, B_old and D_old are the bare-form cells"
@@ -292,8 +305,13 @@ def test_each_cell_sends_its_own_text_not_merely_its_own_arm():
     for call in draw_schedule([_P.name], draws=1, seed=1):
         _current["cell"] = call.cell
         run_cells(
-            [_P], [call], classify=classify, raw_parse=raw_parse,
-            system_for=lambda p: "SYS", old_user_for=lambda p, t: t, max_tokens=256,
+            [_P],
+            [call],
+            classify=classify,
+            raw_parse=raw_parse,
+            system_for=lambda p: "SYS",
+            old_user_for=lambda p, t: t,
+            max_tokens=256,
         )
 
     assert sent["A_old"] == attack_text(_P)
@@ -309,8 +327,13 @@ def test_a_model_error_is_recorded_as_a_refusal_not_as_a_non_landing():
     seen, classify, raw_parse = _harness(raise_on_new=True)
     sched = [Call(_P.name, "A_new", 1)]
     rows = run_cells(
-        [_P], sched, classify=classify, raw_parse=raw_parse,
-        system_for=lambda p: "SYS", old_user_for=lambda p, t: t, max_tokens=256,
+        [_P],
+        sched,
+        classify=classify,
+        raw_parse=raw_parse,
+        system_for=lambda p: "SYS",
+        old_user_for=lambda p, t: t,
+        max_tokens=256,
     )
     assert rows[0].refused is True
     assert rows[0].outcome is None, "a refusal carries no verdict to score"
@@ -322,8 +345,13 @@ def test_on_draw_is_called_once_per_completed_call_for_checkpointing():
     got = []
     sched = draw_schedule([_P.name], draws=1, seed=1)
     run_cells(
-        [_P], sched, classify=classify, raw_parse=raw_parse,
-        system_for=lambda p: "SYS", old_user_for=lambda p, t: t, max_tokens=256,
+        [_P],
+        sched,
+        classify=classify,
+        raw_parse=raw_parse,
+        system_for=lambda p: "SYS",
+        old_user_for=lambda p, t: t,
+        max_tokens=256,
         on_draw=got.append,
     )
     assert len(got) == len(sched), "paid-for work must reach disk as it happens"

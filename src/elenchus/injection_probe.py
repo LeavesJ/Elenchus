@@ -259,15 +259,25 @@ def run_cells(
             else:
                 rc = classify(p, text)
             row = Draw(
-                payload_name=call.payload_name, cell=call.cell, draw=call.draw,
-                outcome=rc.outcome, mechanism_supplied=rc.mechanism_supplied,
-                hard_wrong=rc.hard_wrong, refused=False, error="",
+                payload_name=call.payload_name,
+                cell=call.cell,
+                draw=call.draw,
+                outcome=rc.outcome,
+                mechanism_supplied=rc.mechanism_supplied,
+                hard_wrong=rc.hard_wrong,
+                refused=False,
+                error="",
             )
         except (ModelError, ValidationError) as exc:
             row = Draw(
-                payload_name=call.payload_name, cell=call.cell, draw=call.draw,
-                outcome=None, mechanism_supplied=None, hard_wrong=None,
-                refused=True, error=f"{type(exc).__name__}: {exc}"[:400],
+                payload_name=call.payload_name,
+                cell=call.cell,
+                draw=call.draw,
+                outcome=None,
+                mechanism_supplied=None,
+                hard_wrong=None,
+                refused=True,
+                error=f"{type(exc).__name__}: {exc}"[:400],
             )
         out.append(row)
         if on_draw is not None:

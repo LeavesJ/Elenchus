@@ -155,9 +155,7 @@ def _new_user_for(text: str) -> str:
     return f"Push:\n{_PUSH}\n\n{labelled('Student reply:', text)}"
 
 
-def _check_admission(
-    payloads: list[Payload], old_user_for, system_for
-) -> list[AdmissionResult]:
+def _check_admission(payloads: list[Payload], old_user_for, system_for) -> list[AdmissionResult]:
     """Run the offline admission filter (`injection_probe.admits`) over every payload, using the
     EXACT `old_user_for`/`system_for` callables `run()` was given (real defaults or a caller's
     fakes) to build the OLD rendering and the system text, and `_new_user_for` to build the attack
@@ -253,8 +251,10 @@ def run(
         raise ValueError("run() got an empty payload list -- nothing to probe")
 
     if old_user_for is None:
+
         def old_user_for(p, text):
             return reconstruct_old_classify_response_user(_PUSH, text)
+
     if system_for is None:
         system_for = _classify_system_for
 
@@ -298,9 +298,14 @@ def run(
             fh.write(json.dumps(row.model_dump(mode="json")) + "\n")
 
     rows = run_cells(
-        payloads, schedule, classify=classify, raw_parse=raw_parse,
-        system_for=system_for, old_user_for=old_user_for,
-        max_tokens=_CLASSIFY_MAX_TOKENS, on_draw=_append,
+        payloads,
+        schedule,
+        classify=classify,
+        raw_parse=raw_parse,
+        system_for=system_for,
+        old_user_for=old_user_for,
+        max_tokens=_CLASSIFY_MAX_TOKENS,
+        on_draw=_append,
     )
     names = [p.name for p in payloads]
     kept, depth = truncate_to_complete_draw(rows, names)
@@ -345,7 +350,9 @@ def run(
         # possibly-ragged `rows` `run_cells` returned.
         "refusals": {
             "by_cell": {c: s.model_dump(mode="json") for c, s in refusal_by_cell(kept).items()},
-            "old_vs_new": {a: s.model_dump(mode="json") for a, s in old_vs_new_refusal(kept).items()},
+            "old_vs_new": {
+                a: s.model_dump(mode="json") for a, s in old_vs_new_refusal(kept).items()
+            },
         },
     }
     path = data_dir / f"{stamp}.json"

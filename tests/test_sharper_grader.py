@@ -98,9 +98,7 @@ def test_grader_span_unverified_does_not_dispute_or_revert_credited_state():
     rate can be seen."""
     verdicts = {
         "protect_the_core_lane": [
-            SharperVerdict(
-                sharper=True, reason="agrees; span unverified", span_unverified=True
-            )
+            SharperVerdict(sharper=True, reason="agrees; span unverified", span_unverified=True)
         ]
     }
     audited = audit_sharper(_exp(), _closed_assessment(), _model(verdicts))

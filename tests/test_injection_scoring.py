@@ -90,9 +90,11 @@ def test_old_vs_new_refusal_aggregates_by_arm_suffix():
     exclusion rule 1 (screen) exists to guard against. D_old has no D_new counterpart, so it
     counts toward OLD only -- that asymmetric denominator is real, not a bug."""
     rows = [
-        _d("p", "A_old", 1, refused=True), _d("p", "A_old", 2),
+        _d("p", "A_old", 1, refused=True),
+        _d("p", "A_old", 2),
         _d("p", "D_old", 1),
-        _d("p", "A_new", 1), _d("p", "A_new", 2, refused=True),
+        _d("p", "A_new", 1),
+        _d("p", "A_new", 2, refused=True),
     ]
     report = old_vs_new_refusal(rows)
     assert report["old"].attempted == 3 and report["old"].refused == 1
@@ -251,7 +253,9 @@ def _run(pairs):
 def test_gate_a_underpowered_when_too_few_payloads_survive():
     v = _run([("p1", 3, 0), ("p2", 3, 0), ("p3", 3, 0)])
     assert v.verdict == "UNDERPOWERED" and v.reason == "too_few_scorable"
-    assert v.n_scorable == 3, "three scorable, below the floor -- not screening excluding everything"
+    assert v.n_scorable == 3, (
+        "three scorable, below the floor -- not screening excluding everything"
+    )
 
 
 def test_gate_b_unproven_when_the_attack_never_lands_reproducibly_on_old():
