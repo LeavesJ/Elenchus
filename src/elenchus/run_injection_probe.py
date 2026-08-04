@@ -53,7 +53,14 @@ from .injection_probe import (
     load_payloads,
     run_cells,
 )
-from .injection_scoring import adjudicate, screen, tally, truncate_to_complete_draw
+from .injection_scoring import (
+    adjudicate,
+    old_vs_new_refusal,
+    refusal_by_cell,
+    screen,
+    tally,
+    truncate_to_complete_draw,
+)
 from .model import (
     _CLASSIFY_MAX_TOKENS,
     _PARAMS,
@@ -77,7 +84,6 @@ MODEL_ID = "claude-opus-5"
 _PUSH = "What is the mechanism that closes the gap you just named?"
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "injection_probe"
-DB_PATH = Path(__file__).resolve().parents[2] / "data" / "elenchus.db"
 PAYLOAD_PATH = Path(__file__).resolve().parents[2] / "data" / "injection_payloads.yaml"
 
 # The one fixed experience/frame every payload is classified against. Deliberately a SINGLE
@@ -151,8 +157,15 @@ def _check_admission(
     EXACT `old_user_for`/`system_for` callables `run()` was given (real defaults or a caller's
     fakes) to build the OLD rendering and the system text, and `_new_user_for` to build the attack
     and benign-baseline NEW renderings -- the same composition `classify_response` itself performs,
-    reached without ever calling it. The heading set is derived per payload from all four composed
-    texts (`derive_heading_tokens`), never hand-listed, matching `admits`'s own reasoning.
+    reached without ever calling it.
+
+    The heading set is derived per payload from `system_for(p)` and `baseline_new` ONLY --
+    the system prompt and the BENIGN NEW rendering -- never from `old` or the attack `new`. Both
+    of those carry attacker-supplied text at column 0 by construction (that is the vulnerability
+    this probe tests), so folding either into `derive_heading_tokens` would let an attacker-chosen
+    `<Label>:` token enter the "engine heading" set and get treated as legitimate template
+    structure instead of the forgery it is. `baseline_new` is safe to derive from precisely
+    because its underlying text (`benign_text(p)`) carries no injection for a heading to plant.
 
     Zero model calls. This is what lets `run()` call it before `confirm` -- an unadmitted corpus
     must never reach the cost guard, let alone the network."""
@@ -161,7 +174,7 @@ def _check_admission(
         old = old_user_for(p, attack_text(p))
         new = _new_user_for(attack_text(p))
         baseline_new = _new_user_for(benign_text(p))
-        headings = derive_heading_tokens(system_for(p), old, new, baseline_new)
+        headings = derive_heading_tokens(system_for(p), baseline_new)
         results.append(
             admits(p, old_user=old, new_user=new, baseline_new_user=baseline_new, headings=headings)
         )
@@ -321,9 +334,44 @@ def run(
         },
         "verdict": verdict.model_dump(mode="json"),
         "tallies": [t.model_dump(mode="json") for t in tallies],
+        # Spec section 9: refusal rate per cell, and the OLD-versus-NEW comparison reported
+        # separately. Computed over `kept` (post-truncation), matching every other denominator
+        # above -- the same draws `tally`/`screen`/`adjudicate` actually scored, not the raw,
+        # possibly-ragged `rows` `run_cells` returned.
+        "refusals": {
+            "by_cell": {c: s.model_dump(mode="json") for c, s in refusal_by_cell(kept).items()},
+            "old_vs_new": {a: s.model_dump(mode="json") for a, s in old_vs_new_refusal(kept).items()},
+        },
     }
     path = data_dir / f"{stamp}.json"
     path.write_text(json.dumps(doc, indent=2))
     print(f"verdict: {verdict.verdict} ({verdict.reason})")
+    if verdict.inflation_payloads:
+        # Every inflation payload is excluded from the study by screen rule 2 (benign_twin), so
+        # it can NEVER touch the verdict word above and is otherwise visible only inside the JSON
+        # (`tallies`). Spec section 5 calls B_new "the only cell that could catch the indent
+        # making a mechanism-free reply read as closed" -- an inflation finding that never reaches
+        # the console is a real regression on the safety fix going unnoticed by anyone who only
+        # reads stdout.
+        print(
+            f"benign inflation: {len(verdict.inflation_payloads)}/{len(payloads)} payload(s) "
+            f"landed B_new without landing B_old: {verdict.inflation_payloads}"
+        )
     print(f"wrote {path}")
     return path, doc
+
+
+def main() -> None:
+    """The documented entrypoint (`PYTHONPATH=src .venv/bin/python -m elenchus.run_injection_probe`)
+    -- mirrors `run_prompt_shift_probe.main` / `run_push_screen_probe.main`'s shape: call `run()`
+    with its real-wiring defaults, which returns `None` on a declined confirmation. Unlike those
+    two siblings, `run()` here already prints its own summary as it executes (verdict, benign
+    inflation, checkpoint path, written artifact path -- see above), so `main()` has nothing
+    further to print; its job is solely to be the callable, guarded entrypoint the command line
+    needs, which is what this module lacked before this fix (no `main`, no `__main__` guard, so
+    the documented command imported the module and exited having done nothing)."""
+    run()
+
+
+if __name__ == "__main__":
+    main()

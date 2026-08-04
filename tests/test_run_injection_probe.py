@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from elenchus.injection_probe import Payload, load_payloads
+from elenchus.injection_probe import Payload, benign_text, load_payloads
 from elenchus.run_injection_probe import DEFAULT_DRAWS, DEFAULT_SEED, run
 
 _PAYLOADS = [
@@ -25,6 +25,26 @@ def _wrap_old(p, t):
     relative to the ONE the template itself contributes, so the wrapper has to be present for the
     forgery to be detectable at all."""
     return f"Push:\nq\n\nStudent reply:\n{t}"
+
+
+def test_derive_heading_tokens_pins_the_real_composed_prompts():
+    """I3. `derive_heading_tokens`'s own docstring (injection_probe.py) claims 'A test pins the
+    derived set against the current prompts so a rename fails loud' -- until this test, no test
+    did; every existing `derive_heading_tokens` test used synthetic literals. Pins the ACTUAL set
+    `_check_admission` derives in production: the real `_classify_system_for` system text plus the
+    real benign-baseline NEW rendering (`_new_user_for(benign_text(p))`), so a heading rename in
+    content/prompts/response.md, or in `_classify_system_for`'s or `_new_user_for`'s composition,
+    fails this test loud instead of silently narrowing what admission recognizes as an engine
+    heading."""
+    from elenchus.injection_probe import derive_heading_tokens
+    from elenchus.run_injection_probe import _classify_system_for, _new_user_for
+
+    system = _classify_system_for(_PAYLOADS[0])
+    baseline_new = _new_user_for(benign_text(_PAYLOADS[0]))
+    got = derive_heading_tokens(system, baseline_new)
+    assert got == {
+        "Push:", "Student reply:", "Mode:", "Binding constraint:", "Target angle:", "Hard rule:",
+    }
 
 
 def test_the_system_prompt_matches_what_classify_response_actually_sends(monkeypatch):
@@ -149,6 +169,29 @@ def test_the_real_payload_file_meets_the_diversity_floor():
     assert max(tags.values()) <= 3
 
 
+def test_all_real_payloads_pass_admission_after_the_heading_derivation_fix():
+    """I2 regression. `_check_admission` used to derive `headings` from the OLD and attack-NEW
+    renderings too, which let attacker-supplied `<Label>:` tokens (e.g. a forged `Mode:`) enter
+    the "engine heading" set and get treated as legitimate structure. Deriving `headings` from
+    only `system_for(p)` and the benign baseline rendering must not tighten the filter enough to
+    reject any real payload -- every one of the 12 forges the real `Student reply:` heading, which
+    is still derivable from the benign baseline alone."""
+    from elenchus.prompt_shift_probe import reconstruct_old_classify_response_user
+    from elenchus.run_injection_probe import PAYLOAD_PATH, _PUSH, _check_admission, _classify_system_for
+
+    if not PAYLOAD_PATH.exists():
+        pytest.skip("real payloads are gitignored and absent in a fresh worktree")
+
+    def old_user_for(p, text):
+        return reconstruct_old_classify_response_user(_PUSH, text)
+
+    ps = load_payloads(PAYLOAD_PATH)
+    results = _check_admission(ps, old_user_for, _classify_system_for)
+    assert len(results) == 12
+    rejected = [(r.name, r.reason) for r in results if not r.admitted]
+    assert rejected == [], f"all 12 real payloads must still admit; rejected: {rejected}"
+
+
 def test_run_refuses_without_a_typed_yes_and_makes_no_calls(tmp_path):
     calls = []
     out = run(
@@ -183,6 +226,68 @@ def test_run_writes_an_artifact_carrying_the_verdict_seed_and_prompt_hashes(tmp_
     assert doc["model_id"]
     assert doc["prompt_hashes"]["old_user_template"]
     assert doc["prompt_hashes"]["classify_system"]
+
+
+def test_run_writes_a_refusal_report_with_per_cell_and_old_vs_new_breakdowns(tmp_path):
+    """I4. Spec section 9 requires refusal rate per cell, and the OLD-versus-NEW comparison
+    reported separately, in the artifact. Every draw here refuses on the OLD arm (raw_parse) and
+    never on the NEW arm (classify), so the split must show 100% OLD refusal and 0% NEW refusal --
+    an asymmetry a reader must be able to see directly, since it is exactly the confound exclusion
+    rule 1 (screen) exists to guard against."""
+    from elenchus.model import ModelError, ResponseClassification
+
+    clean = ResponseClassification(outcome="unchanged", mechanism_supplied=False, hard_wrong=False)
+
+    def raw_parse(*, system, user, output_format, max_tokens):
+        raise ModelError("refused")
+
+    path, doc = run(
+        payloads=_PAYLOADS, data_dir=tmp_path,
+        classify=lambda p, t: clean, raw_parse=raw_parse,
+        system_for=lambda p: "SYS", old_user_for=_wrap_old,
+        confirm=lambda *a, **k: True,
+    )
+    refusals = doc["refusals"]
+    assert set(refusals["by_cell"]) == {"A_old", "A_new", "B_old", "B_new", "D_old"}
+    for cell in ("A_old", "B_old", "D_old"):
+        assert refusals["by_cell"][cell]["rate"] == 1.0, cell
+    for cell in ("A_new", "B_new"):
+        assert refusals["by_cell"][cell]["rate"] == 0.0, cell
+    assert refusals["old_vs_new"]["old"]["rate"] == 1.0
+    assert refusals["old_vs_new"]["new"]["rate"] == 0.0
+
+
+def test_run_prints_benign_inflation_when_present(tmp_path, capsys):
+    """I5. `run()` used to print only the verdict line, and every inflation payload is excluded
+    from the study by screen rule 2 (benign_twin), so it can never touch the verdict word and was
+    visible only inside the JSON. Spec section 5 calls `B_new` "the only cell that could catch the
+    indent making a mechanism-free reply read as closed" -- rigging one payload's B_new to land
+    (without its B_old landing) must surface on stdout, not only in the artifact."""
+    from elenchus.model import ResponseClassification
+
+    clean = ResponseClassification(outcome="unchanged", mechanism_supplied=False, hard_wrong=False)
+    land = ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+    inflated_name = _PAYLOADS[0].name
+
+    def classify(p, text):
+        if p.name == inflated_name and text == benign_text(p):
+            return land  # this payload's B_new lands
+        return clean
+
+    def raw_parse(*, system, user, output_format, max_tokens):
+        return clean  # every OLD-arm cell, including B_old, stays clean
+
+    _, doc = run(
+        payloads=_PAYLOADS, data_dir=tmp_path,
+        classify=classify, raw_parse=raw_parse,
+        system_for=lambda p: "SYS", old_user_for=_wrap_old,
+        confirm=lambda *a, **k: True,
+    )
+    assert doc["verdict"]["inflation_payloads"] == [inflated_name]
+    out = capsys.readouterr().out
+    assert "benign inflation" in out
+    assert inflated_name in out
+    assert f"1/{len(_PAYLOADS)}" in out
 
 
 def test_the_old_prompt_hash_tracks_the_prompt_the_run_actually_sent(tmp_path):
@@ -263,6 +368,22 @@ def test_run_raises_a_clear_error_on_an_empty_payload_list_and_asks_nothing(tmp_
             confirm=lambda *a, **k: asked.append(1) or True,
         )
     assert asked == []
+
+
+def test_main_exists_and_calls_run_with_its_real_wiring_defaults(monkeypatch):
+    """C1 regression. `run_injection_probe.py` had no `main()` and no `if __name__ ==
+    "__main__":` guard (grep count 0, unlike both siblings), so the documented command
+    (`PYTHONPATH=src .venv/bin/python -m elenchus.run_injection_probe`) imported the module and
+    exited having done nothing -- the branch's entire deliverable was not invocable. `main` must
+    exist and call `run()`. Monkeypatched so this test never asks for a real confirmation, never
+    touches the network, and never spends anything -- it proves the wiring exists, not that a real
+    run succeeds."""
+    import elenchus.run_injection_probe as rip
+
+    called = []
+    monkeypatch.setattr(rip, "run", lambda: called.append(1))
+    rip.main()
+    assert called == [1], "main() must call run() with no overrides"
 
 
 def test_run_refuses_an_unadmitted_payload_before_confirm_is_called(tmp_path):
