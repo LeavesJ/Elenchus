@@ -1031,6 +1031,97 @@ def test_classify_response_never_touches_an_honest_false_with_no_span():
     assert out.outcome == "unchanged"
 
 
+# --- T2 REVIEW FIX: `_normalize_for_span_match` folds confusable punctuation before the substring
+# test, so an honest citation is not floored merely because a learner typed on iOS (curly
+# apostrophe/quotes) or a model wrote an em dash/ellipsis a learner never typed, or because the
+# model requoted a span with a capitalized first letter. Each case below FLOORED before the fix
+# (verified against the shipped pre-fix check) and must be KEPT (mechanism_supplied stays True)
+# now. -----------------------------------------------------------------------------------------
+
+
+def test_classify_response_keeps_mechanism_supplied_when_reply_has_curly_apostrophe():
+    """Reply has U+2019 (`can’t`, what an iOS keyboard emits), span has the ASCII apostrophe (what
+    a model emitting JSON writes) -- a whitespace-only normalization treats these as different
+    words and floors an honest, verbatim closure."""
+    response = "Well, the buyback option locks in the floor so losses can’t exceed the premium."
+    rc = ResponseClassification(
+        outcome="closed",
+        mechanism_supplied=True,
+        hard_wrong=False,
+        mechanism_span="the buyback option locks in the floor so losses can't exceed the premium.",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    out = AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.mechanism_supplied is True
+
+
+def test_classify_response_keeps_mechanism_supplied_when_span_has_curly_apostrophe():
+    """The mirror of the case above: reply is ASCII, the grader's own quoted span came back with a
+    curly apostrophe instead."""
+    response = "Well, the buyback option locks in the floor so losses can't exceed the premium."
+    rc = ResponseClassification(
+        outcome="closed",
+        mechanism_supplied=True,
+        hard_wrong=False,
+        mechanism_span="the buyback option locks in the floor so losses can’t exceed the premium.",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    out = AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.mechanism_supplied is True
+
+
+def test_classify_response_keeps_mechanism_supplied_when_reply_has_an_em_dash_and_span_a_hyphen():
+    response = "The mechanism is simple — the floor caps the loss at the strike."
+    rc = ResponseClassification(
+        outcome="closed",
+        mechanism_supplied=True,
+        hard_wrong=False,
+        mechanism_span="The mechanism is simple - the floor caps the loss at the strike.",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    out = AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.mechanism_supplied is True
+
+
+def test_classify_response_keeps_mechanism_supplied_when_reply_has_curly_quotes():
+    response = 'The buyback creates a “cost floor” that limits downside risk.'
+    rc = ResponseClassification(
+        outcome="closed",
+        mechanism_supplied=True,
+        hard_wrong=False,
+        mechanism_span='The buyback creates a "cost floor" that limits downside risk.',
+    )
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    out = AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.mechanism_supplied is True
+
+
+def test_classify_response_keeps_mechanism_supplied_when_span_requotes_with_a_leading_capital():
+    """The model is allowed to quote a mid-sentence span as if it opened a sentence -- capitalizing
+    its first letter is not a different word, and casefolding must not be mistaken for something
+    that could match two genuinely different words (see `_normalize_for_span_match`'s docstring)."""
+    response = "well, i think the buyback locks in a price floor so the position is protected."
+    rc = ResponseClassification(
+        outcome="closed",
+        mechanism_supplied=True,
+        hard_wrong=False,
+        mechanism_span="The buyback locks in a price floor so the position is protected.",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=rc))
+    out = AnthropicModel(client=client).classify_response(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.mechanism_supplied is True
+
+
 # --- classify_entry: the "Student's latest message:" compose; `opening` is the boundary ---------
 
 
@@ -1530,11 +1621,16 @@ def test_grade_sharper_composes_in_full_a_reply_classify_response_already_admitt
     assert user == response
 
 
-# --- T2 CHANGE 2: `grade_sharper`'s analog of `classify_response`'s mechanism-evidence floor
-# above -- `sharper=True` with no supporting span floors to `sharper=False`, the SharperVerdict
-# field `audit_sharper` (assessment/sharper_grader.py) already reads to decide whether a closure
-# survives the blind audit. Flooring it here is consistent with how a disputed call is already
-# treated: dropped from `frames_closed_under_pressure`, never a raised exception mid-audit. -------
+# --- T2 CHANGE 2 + T2 REVIEW FIX: `grade_sharper`'s analog of `classify_response`'s
+# mechanism-evidence check above, SAME normalization, DIFFERENT consequence on a failed match.
+# `sharper=True` with no supporting span in `response` NO LONGER floors `sharper` to False -- doing
+# so used to REVERT a closure the instructor already credited (`audit_sharper`,
+# assessment/sharper_grader.py:35-38, drops the code from `frames_closed_under_pressure` and
+# reverts its `FrameDelta` whenever `sharper` reads False) over what is often nothing more than a
+# learner's own punctuation. `sharper` is left exactly as the model returned it; the span failure
+# is recorded separately on `SharperVerdict.span_unverified`, which `audit_sharper` copies onto
+# `SharperAuditItem` and never treats as a dispute (see tests/test_sharper_grader.py for the
+# audit-level proof that credited state survives). -----------------------------------------------
 
 
 def test_sharper_verdict_has_a_mechanism_span_field_defaulting_empty():
@@ -1544,7 +1640,17 @@ def test_sharper_verdict_has_a_mechanism_span_field_defaulting_empty():
     assert v.mechanism_span == ""
 
 
-def test_grade_sharper_floors_sharper_when_the_span_never_appears_in_the_reply():
+def test_sharper_verdict_has_a_span_unverified_field_defaulting_false():
+    from elenchus.types import SharperVerdict
+
+    v = SharperVerdict(sharper=True, reason="r")
+    assert v.span_unverified is False
+
+
+def test_grade_sharper_does_not_floor_sharper_when_the_span_never_appears_but_marks_unverified():
+    """T2 REVIEW FIX: this used to floor `sharper` to False (a reverted closure); now `sharper`
+    stays exactly what the model returned, and the span failure is recorded on `span_unverified`
+    instead, never disputed at the auditor."""
     from elenchus.types import SharperVerdict
 
     v = SharperVerdict(
@@ -1556,10 +1662,11 @@ def test_grade_sharper_floors_sharper_when_the_span_never_appears_in_the_reply()
     out = AnthropicModel(client=client).grade_sharper(
         _exp(), "frame", "protect_the_core_lane", "push text", "I'm not sure, honestly."
     )
-    assert out.sharper is False
+    assert out.sharper is True
+    assert out.span_unverified is True
 
 
-def test_grade_sharper_floors_sharper_when_the_span_is_empty():
+def test_grade_sharper_does_not_floor_sharper_when_the_span_is_empty_but_marks_unverified():
     from elenchus.types import SharperVerdict
 
     v = SharperVerdict(sharper=True, reason="r", mechanism_span="")
@@ -1567,7 +1674,8 @@ def test_grade_sharper_floors_sharper_when_the_span_is_empty():
     out = AnthropicModel(client=client).grade_sharper(
         _exp(), "frame", "protect_the_core_lane", "push text", "a real mechanism, stated plainly"
     )
-    assert out.sharper is False
+    assert out.sharper is True
+    assert out.span_unverified is True
 
 
 def test_grade_sharper_does_not_floor_a_legitimate_span_that_differs_only_in_whitespace():
@@ -1584,6 +1692,7 @@ def test_grade_sharper_does_not_floor_a_legitimate_span_that_differs_only_in_whi
         _exp(), "frame", "protect_the_core_lane", "push text", response
     )
     assert out.sharper is True
+    assert out.span_unverified is False
 
 
 def test_grade_sharper_never_touches_an_honest_false_with_no_span():
@@ -1595,6 +1704,97 @@ def test_grade_sharper_never_touches_an_honest_false_with_no_span():
         _exp(), "frame", "protect_the_core_lane", "push text", "you're right, I'll fix it"
     )
     assert out.sharper is False
+    assert out.span_unverified is False  # the check only runs when sharper is True
+
+
+# --- T2 REVIEW FIX: `grade_sharper`'s own mirror of the `classify_response` punctuation table
+# above -- same `_normalize_for_span_match`, so the same ordinary-typing cases must not even reach
+# `span_unverified`: the span genuinely matches once normalized. ----------------------------------
+
+
+def test_grade_sharper_keeps_sharper_and_verified_when_reply_has_curly_apostrophe():
+    from elenchus.types import SharperVerdict
+
+    response = "Well, the buyback option locks in the floor so losses can’t exceed the premium."
+    v = SharperVerdict(
+        sharper=True,
+        reason="r",
+        mechanism_span="the buyback option locks in the floor so losses can't exceed the premium.",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=v))
+    out = AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.sharper is True
+    assert out.span_unverified is False
+
+
+def test_grade_sharper_keeps_sharper_and_verified_when_span_has_curly_apostrophe():
+    from elenchus.types import SharperVerdict
+
+    response = "Well, the buyback option locks in the floor so losses can't exceed the premium."
+    v = SharperVerdict(
+        sharper=True,
+        reason="r",
+        mechanism_span="the buyback option locks in the floor so losses can’t exceed the premium.",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=v))
+    out = AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.sharper is True
+    assert out.span_unverified is False
+
+
+def test_grade_sharper_keeps_sharper_and_verified_when_reply_has_an_em_dash_and_span_a_hyphen():
+    from elenchus.types import SharperVerdict
+
+    response = "The mechanism is simple — the floor caps the loss at the strike."
+    v = SharperVerdict(
+        sharper=True,
+        reason="r",
+        mechanism_span="The mechanism is simple - the floor caps the loss at the strike.",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=v))
+    out = AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.sharper is True
+    assert out.span_unverified is False
+
+
+def test_grade_sharper_keeps_sharper_and_verified_when_reply_has_curly_quotes():
+    from elenchus.types import SharperVerdict
+
+    response = 'The buyback creates a “cost floor” that limits downside risk.'
+    v = SharperVerdict(
+        sharper=True,
+        reason="r",
+        mechanism_span='The buyback creates a "cost floor" that limits downside risk.',
+    )
+    client = _Client(parse_result=_Resp(parsed_output=v))
+    out = AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.sharper is True
+    assert out.span_unverified is False
+
+
+def test_grade_sharper_keeps_sharper_and_verified_when_span_requotes_with_a_leading_capital():
+    from elenchus.types import SharperVerdict
+
+    response = "well, i think the buyback locks in a price floor so the position is protected."
+    v = SharperVerdict(
+        sharper=True,
+        reason="r",
+        mechanism_span="The buyback locks in a price floor so the position is protected.",
+    )
+    client = _Client(parse_result=_Resp(parsed_output=v))
+    out = AnthropicModel(client=client).grade_sharper(
+        _exp(), "frame", "protect_the_core_lane", "push text", response
+    )
+    assert out.sharper is True
+    assert out.span_unverified is False
 
 
 # --- concierge_sitting_close: TWO learner surfaces, the situation blob and each segment turn -----

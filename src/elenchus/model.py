@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import unicodedata
 from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ValidationError
@@ -26,6 +28,8 @@ from .types import (
     TerritoryMap,
     TrapState,
 )
+
+_log = logging.getLogger("elenchus.model")
 
 
 class ModelError(RuntimeError):
@@ -561,6 +565,57 @@ def _require(resp):
     return resp.parsed_output
 
 
+# T2 REVIEW FIX: the confusable-punctuation classes `_normalize_for_span_match` folds before the
+# evidence-anchor substring check in `classify_response` and `grade_sharper` below. None of these
+# decompose under Unicode NFKC (they are canonical codepoints in their own right, not compatibility
+# forms of their ASCII look-alikes), which is why NFKC alone does not close this gap and an
+# explicit translate table is required on top of it.
+_CONFUSABLE_PUNCTUATION = str.maketrans(
+    {
+        "‘": "'",  # LEFT SINGLE QUOTATION MARK
+        "’": "'",  # RIGHT SINGLE QUOTATION MARK -- the one an iOS keyboard emits for "can't"
+        "ʼ": "'",  # MODIFIER LETTER APOSTROPHE
+        "“": '"',  # LEFT DOUBLE QUOTATION MARK
+        "”": '"',  # RIGHT DOUBLE QUOTATION MARK
+        "‐": "-",  # HYPHEN
+        "‑": "-",  # NON-BREAKING HYPHEN
+        "‒": "-",  # FIGURE DASH
+        "–": "-",  # EN DASH
+        "—": "-",  # EM DASH
+        "―": "-",  # HORIZONTAL BAR
+        "…": "...",  # HORIZONTAL ELLIPSIS
+    }
+)
+
+
+def _normalize_for_span_match(text: str) -> str:
+    """Fold cosmetic differences a learner's own keyboard/OS, or a model's own JSON encoder,
+    introduces before testing a claimed span as a substring of the reply it is supposed to quote
+    (`classify_response`'s and `grade_sharper`'s evidence-anchor checks, both below share this).
+
+    In order: Unicode NFKC (compatibility forms -- full-width variants, ligatures, and the like);
+    then `_CONFUSABLE_PUNCTUATION` (curly quotes/apostrophes, the non-ASCII dash forms, the
+    ellipsis glyph -- see that table's own comment for why NFKC does not already cover these);
+    then whitespace runs collapsed to one space and both sides stripped; then casefolded.
+
+    Casefolding is safe here specifically because this backs a SUBSTRING test, never an equality
+    test on arbitrary content: two spans differing only in case are the same words, and casefolding
+    two DIFFERENT words can never make them match -- it only ever merges case-variants of one
+    identical word. (T2 REVIEW FIX: an earlier version of the comment at both call sites below
+    claimed casefolding was unsafe here and left it out; that claim was wrong and is corrected at
+    each site.)
+
+    T2 REVIEW FIX: before this function existed, both call sites only collapsed whitespace, which
+    floors a genuine, verbatim closure on ordinary punctuation a learner does not choose the
+    encoding of -- an iOS contraction's curly apostrophe against a model-authored ASCII one (a
+    model emitting JSON writes ASCII), a typed em dash against a hyphen, curly quotes against
+    straight ones, or a model requoting a mid-sentence span with a capitalized first letter. That
+    fires on ordinary typing, not on an attacker; see each call site's own comment for what a
+    failed match costs there -- the two sites now differ."""
+    folded = unicodedata.normalize("NFKC", text).translate(_CONFUSABLE_PUNCTUATION)
+    return " ".join(folded.split()).casefold()
+
+
 class AnthropicModel:
     """Real adapter over Claude Opus 5. Doctrine lives in content/prompts/; this is plumbing.
 
@@ -822,11 +877,19 @@ class AnthropicModel:
         # removes the forgeable template; it does NOT stop a forged span that is genuinely a
         # substring of `response`, because the learner typed it. This closes a grader asserting
         # `mechanism_supplied=True` with no supporting span in the reply AT ALL -- the model
-        # claiming a mechanism where none exists in the text. Whitespace-normalized (runs of
-        # whitespace collapsed to one space, both sides stripped) so an honest citation that
-        # merely reflows the reply's own line breaks/spacing is not falsely floored; deliberately
-        # NOT casefolded, since that would let a span differing only in case pass as evidence for
-        # different words.
+        # claiming a mechanism where none exists in the text. Normalized via
+        # `_normalize_for_span_match` (its own docstring has the fold rules) before the substring
+        # test, on BOTH sides.
+        #
+        # T2 REVIEW FIX: the check used to only collapse whitespace, which floors an honest
+        # closure on ordinary punctuation a learner never controls the encoding of -- an iOS
+        # contraction's curly apostrophe against a model's ASCII one, a typed em dash against a
+        # hyphen, curly quotes against straight ones, a requoted span with a capitalized first
+        # letter. That is ordinary typing, not an attacker, and it fired on it. `casefold()` IS
+        # correct here (an earlier version of this comment claimed the opposite and was wrong):
+        # this backs a SUBSTRING test, never an equality test on arbitrary content, so two spans
+        # differing only in case are the same words -- casefolding two DIFFERENT words can never
+        # make them match, it only ever merges case-variants of one identical word.
         #
         # FLOOR, never raise: `assessment/judgment_loop.py:317` only raises the frame state on
         # `outcome == "closed" AND mechanism_supplied`, so flooring `mechanism_supplied` alone is
@@ -837,12 +900,23 @@ class AnthropicModel:
         # `orchestration.run_session`'s `store.save_state` runs only after `assess` returns), so
         # unwinding here would split the commit between the engine state and the sitting record --
         # the same split-commit failure `web/voice.py`'s `_STATIC_LAND` reasoning already fails
-        # closed against rather than raises through.
+        # closed against rather than raises through. This floor is UNCHANGED by the T2 review fix
+        # (only the normalization feeding it improved): it only withholds a state RAISE, which
+        # stays conservative -- unlike `grade_sharper`'s analogous check below, which no longer
+        # floors at all, because a floor there REVERTS state already credited (see its own
+        # comment). Logged (never silently indistinguishable from an honest False) so the floor
+        # rate is observable before anyone has to trust it.
         if resp.mechanism_supplied:
-            span = " ".join(resp.mechanism_span.split())
-            haystack = " ".join(response.split())
+            span = _normalize_for_span_match(resp.mechanism_span)
+            haystack = _normalize_for_span_match(response)
             if not span or span not in haystack:
                 resp.mechanism_supplied = False
+                _log.warning(
+                    "classify_response: mechanism_span failed the evidence-anchor check for "
+                    "%s/%s -- mechanism_supplied floored to False",
+                    kind,
+                    code,
+                )
         return resp
 
     def classify_entry(
@@ -1075,18 +1149,36 @@ class AnthropicModel:
             **_PARAMS,
         )
         # T2 CHANGE 2 (evidence anchor): the blind audit's analog of `classify_response`'s check
-        # above (see its own comment for the full reasoning) -- `sharper=True` with no supporting
-        # span in `response` floors to `sharper=False`, whitespace-normalized the same way, never
-        # casefolded. `assessment/sharper_grader.audit_sharper` reads `sharper` to decide whether
-        # an instructor's closure survives the blind audit; a floored verdict is treated exactly
-        # like a disputed call already is there (dropped from `frames_closed_under_pressure`,
-        # never a raised exception mid-audit), so flooring here needs no separate raise/no-raise
-        # argument of its own.
+        # above -- SAME normalization (`_normalize_for_span_match`), DIFFERENT consequence on
+        # failure, corrected by the T2 review fix. `assessment/sharper_grader.audit_sharper` reads
+        # `sharper` to decide whether an INSTRUCTOR'S ALREADY-CREDITED closure survives the blind
+        # audit: `sharper=False` drops the code from `frames_closed_under_pressure` and reverts its
+        # `FrameDelta` (sharper_grader.py:35-38). Flooring `sharper` here on a span-match failure
+        # alone used to do exactly that over an ordinary punctuation difference -- a learner's
+        # curly apostrophe, a typed em dash, a requoted capital -- REVERTING credit the instructor
+        # already gave for typing, not for an attack. That is a strictly worse failure than missing
+        # a fabricated span: this repo's own rule (`web/voice.py:49-53`, boundary-6 Fix 1) is that
+        # a check which cannot run means "not safe," routing to an existing fallback, never "kill
+        # the segment" -- and the existing fallback here is the instructor's own credited verdict,
+        # already banked before this audit ever runs. So `sharper` is left EXACTLY as the
+        # model returned it (the auditor's actual judgment, never floored by this check), and the
+        # span failure is recorded separately on `span_unverified` -- purely for observability;
+        # `sharper_grader.audit_sharper` copies it onto `SharperAuditItem` and never treats a
+        # span-only failure as a dispute. `classify_response`'s analogous floor above is UNCHANGED:
+        # it only withholds a state RAISE (conservative), never reverts one already banked, so it
+        # keeps flooring on the same failure this method now refuses to.
         if resp.sharper:
-            span = " ".join(resp.mechanism_span.split())
-            haystack = " ".join(response.split())
+            span = _normalize_for_span_match(resp.mechanism_span)
+            haystack = _normalize_for_span_match(response)
             if not span or span not in haystack:
-                resp.sharper = False
+                resp.span_unverified = True
+                _log.warning(
+                    "grade_sharper: mechanism_span failed the evidence-anchor check for %s/%s -- "
+                    "sharper left at %s, span_unverified set (not disputed)",
+                    kind,
+                    code,
+                    resp.sharper,
+                )
         return resp
 
     def generate_output(

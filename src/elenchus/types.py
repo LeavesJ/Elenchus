@@ -228,13 +228,21 @@ class SharperVerdict(BaseModel):
     reason: str
     # T2 CHANGE 2 (evidence anchor): `grade_sharper`'s analog of `ResponseClassification.
     # mechanism_span` (model.py) -- the verbatim span of the reply the grader claims supports
-    # `sharper`. `grade_sharper` checks it and floors `sharper` to False when the claim has no
-    # supporting span, the same way `classify_response` floors `mechanism_supplied`; see
-    # `AnthropicModel.grade_sharper`'s own comment. `audit_sharper`
+    # `sharper`. `grade_sharper` checks it against `response`; see `AnthropicModel.grade_sharper`'s
+    # own comment for the T2 review fix that changed what a failed check does here (it no longer
+    # floors `sharper` -- see `span_unverified` below). `audit_sharper`
     # (assessment/sharper_grader.py) reads `sharper` to decide whether an instructor's closure
     # survives the blind audit, so this field must exist here too, not only on
     # `ResponseClassification`, for that check to be possible at this site at all.
     mechanism_span: str = ""
+    # T2 REVIEW FIX: set by `AnthropicModel.grade_sharper` when `mechanism_span` fails the
+    # (normalized) substring check against `response` while `sharper` is True. Unlike
+    # `ResponseClassification.mechanism_supplied`, `sharper` is NEVER floored on a failed span
+    # check anymore -- reverting a learner's already-credited closure over a typographic mismatch
+    # is a strictly worse failure than missing a fabricated span (see `grade_sharper`'s own
+    # comment). `sharper_grader.audit_sharper` copies this straight onto
+    # `SharperAuditItem.span_unverified` and never treats a span-only failure as a dispute.
+    span_unverified: bool = False
 
 
 class SharperAuditItem(BaseModel):
@@ -244,6 +252,14 @@ class SharperAuditItem(BaseModel):
     grader_sharper: bool
     confirmed: bool
     grader_reason: str
+    # T2 REVIEW FIX: mirrors `SharperVerdict.span_unverified` (see its own comment) -- True when
+    # `grade_sharper`'s evidence-anchor check could not find `mechanism_span` inside `response`
+    # even after normalization, so the auditor's judgment could not be corroborated against a
+    # verbatim quote. This is NOT a disagreement: `grader_sharper`/`confirmed` above still carry
+    # the auditor's ACTUAL, unfloored verdict, and `audit_sharper` never adds a span-only failure
+    # to `disputed` (sharper_grader.py). Surfaced purely for observability, so the span-failure
+    # rate can be seen before it is trusted.
+    span_unverified: bool = False
 
 
 class Assessment(BaseModel):
