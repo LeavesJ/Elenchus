@@ -131,12 +131,28 @@ def update_state(
     # `gap_closed=True`. Nothing here detects that; only a grader that is not fooled does.
     for p in assessment.trajectory:
         if p.kind == "trap" and not p.gap_closed:
-            # A gallery of UNREPAIRED traps carrying `detail="closed"` reads as corruption, and
-            # the two cases have to separate on read rather than one being destroyed on write:
-            # an honest `unchanged`/`regressed` and a closure the loop refused are different
-            # facts about the learner. The classification rides out verbatim in every other case.
-            forged_closure = p.response_classification == "closed"
-            detail = "closed_no_mechanism" if forged_closure else p.response_classification
+            # A gallery of UNREPAIRED traps carrying `detail="closed"` reads as corruption, so a
+            # closure the loop declined to credit gets its own token. The classification rides
+            # out verbatim in every other case.
+            #
+            # The token says UNCREDITED and deliberately does not say WHY. An earlier version of
+            # this line wrote `closed_no_mechanism`, and a T2 review falsified it by execution:
+            # `not gap_closed` does not imply the mechanism was missing. `judgment_loop.assess`
+            # also withholds credit at the `hard_wrong` bounded-error break, which appends its
+            # `Push` before the credit branch is ever evaluated, so a reply classified
+            # `closed` with `mechanism_supplied=True` and a span that PASSED the evidence anchor
+            # landed a durable row asserting the mechanism was absent. Measured at 36 of 1728
+            # swept scenarios. That is the same write-time falsification this whole function was
+            # being fixed to stop, re-created one line over.
+            #
+            # `closed` + "the loop did not credit it" are both facts this function actually
+            # holds (`response_classification` and `gap_closed`). The REASON is a third fact it
+            # holds neither of, so it does not name one. If a reader ever needs to separate "no
+            # mechanism" from "a bounded-error violation ended the sitting", carry the loop's own
+            # reason out on the `Push` the way `gap_closed` is carried -- do not re-derive it
+            # here from fields that cannot distinguish them.
+            uncredited_closure = p.response_classification == "closed"
+            detail = "closed_uncredited" if uncredited_closure else p.response_classification
             state.trap_gallery.setdefault(p.target_code, []).append(
                 TrapOccurrence(experience_id=experience_id, occurred_at=now, detail=detail)
             )

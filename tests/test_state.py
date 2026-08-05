@@ -116,8 +116,9 @@ def test_uncredited_closed_still_records_the_trap():
     assert row.experience_id == "exp1"
     # NOT the bare "closed": a gallery of unrepaired traps carrying `detail="closed"` reads as
     # corruption, and the two cases must separate at READ time rather than one being destroyed
-    # at write time.
-    assert row.detail == "closed_no_mechanism"
+    # at write time. The token says UNCREDITED and not why -- see the real-path test in
+    # tests/test_judgment_loop.py for the cell that killed the earlier `closed_no_mechanism`.
+    assert row.detail == "closed_uncredited"
 
 
 def _casmt(pairs):

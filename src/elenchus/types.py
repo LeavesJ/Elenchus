@@ -215,17 +215,35 @@ class Push(BaseModel):
     text: str
     response_classification: str
     response: str = ""
-    # The loop's OWN credit decision for this push, and the only authority on whether anything
-    # was repaired. `response_classification` is the grader's raw `outcome` string and is NOT
-    # that: `assessment/judgment_loop.py` credits a push only on `outcome == "closed" AND
+    # The loop's OWN per-push credit decision, and it outranks `response_classification` on the
+    # question "did this push repair anything". That string is the grader's raw `outcome`:
+    # `assessment/judgment_loop.py` credits a push only on `outcome == "closed" AND
     # mechanism_supplied`, so a `closed` carrying no mechanism -- including one
     # `AnthropicModel.classify_response` FLOORED for a fabricated evidence span -- leaves
     # `response_classification == "closed"` while the loop correctly refuses the repair.
     # `state.update_state` used to re-derive "repaired" from that string alone, a second and
     # weaker copy of the predicate, which let an inflated `closed` on a trap delete the trap's
-    # durable gallery row. Downstream readers consult THIS field; the string stays for the
-    # detail it records. Defaults False because the fail-safe direction is to log the trap, not
-    # to suppress it.
+    # durable gallery row. Defaults False because the fail-safe direction is to log the trap,
+    # not to suppress it.
+    #
+    # TWO THINGS IT IS NOT, both found by a T2 review that ran them:
+    #
+    # 1. NOT a reason. `gap_closed=False` says credit was withheld, never why. The loop also
+    #    withholds it at the `hard_wrong` and `regressed` early breaks, which append their
+    #    `Push` before the credit branch is evaluated, so False is equally consistent with "no
+    #    mechanism was supplied" and with "a mechanism was supplied, verified against the
+    #    evidence anchor, and a bounded-error violation ended the sitting". Anything deriving a
+    #    cause from this field alone is wrong; `state.update_state` shipped exactly that bug.
+    #
+    # 2. NOT the last word on a FRAME. `judgment_loop.assess` returns
+    #    `sharper_grader.audit_sharper(...)`, and that blind audit revokes a disputed closure by
+    #    stripping the code from `frames_closed_under_pressure` and dropping its `FrameDelta` --
+    #    it never rewrites trajectory points, so a revoked frame push rides out still carrying
+    #    `gap_closed=True`. On a frame this field is the INSTRUCTOR's pre-audit call; the audited
+    #    answer is `frames_closed_under_pressure`, which is what `state.update_state` reads for
+    #    frames. Nothing reads `gap_closed` for a frame today (the trap-gallery loop gates on
+    #    `p.kind == "trap"`, and `audit_sharper` reads it strictly before it revokes anything),
+    #    and a future frame-side reader must take the audited list, not this.
     gap_closed: bool = False
 
 

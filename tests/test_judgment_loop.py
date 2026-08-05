@@ -174,6 +174,59 @@ def test_a_genuine_repair_is_carried_as_credited_on_the_trajectory():
     assert any(p.gap_closed is True for p in trap_points)
 
 
+def test_uncredited_trap_row_never_claims_the_mechanism_was_missing():
+    """The cell a T2 review used to falsify the first version of this fix, driven end to end.
+
+    `gap_closed=False` says credit was WITHHELD, never why. The `hard_wrong` bounded-error break
+    appends its `Push` before the credit branch is ever evaluated, so a reply the grader
+    classified `closed` with `mechanism_supplied=True` -- a mechanism that WAS supplied and whose
+    span would have passed the evidence anchor -- reaches `state.update_state` with
+    `gap_closed=False`. The row is correct (the trap was not repaired); labelling it
+    `closed_no_mechanism` was a false statement about the learner, which is the same write-time
+    falsification this arc exists to remove."""
+    from datetime import datetime, timezone
+
+    from elenchus.state import update_state
+    from elenchus.types import LearnerState
+
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.absent,
+            "protect_the_core_lane": FrameState.absent,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.tripped,
+        },
+    )
+    m = FakeModel(
+        intake,
+        _scripted_everywhere(
+            ResponseClassification(
+                outcome="closed",
+                mechanism_supplied=True,
+                mechanism_span="a special case forks the core invariant",
+                hard_wrong=True,
+            )
+        ),
+    )
+    a = judgment_loop.assess(
+        _exp(mode=Mode.bounded_error, binding="erode_core_for_one_customer"), _work(), m
+    )
+    assert a.stop_reason is StopReason.bounded_error_violation
+    trap_points = [p for p in a.trajectory if p.target_code == "erode_core_for_one_customer"]
+    assert trap_points and all(p.gap_closed is False for p in trap_points)
+
+    st = update_state(
+        LearnerState(), a, datetime(2026, 6, 22, tzinfo=timezone.utc), "exp1", "veldra:p1"
+    )
+    rows = st.trap_gallery["erode_core_for_one_customer"]
+    assert rows, "the unrepaired trap must still be recorded"
+    # The row exists (Invariant 4: never destroyed at write time) and says only what is true.
+    assert all(r.detail == "closed_uncredited" for r in rows)
+    assert all("no_mechanism" not in r.detail for r in rows)
+
+
 def test_budget_caps_unproductive_loop():
     intake = IntakeClassification(
         frame_states={

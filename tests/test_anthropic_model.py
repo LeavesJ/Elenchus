@@ -380,6 +380,14 @@ def test_grade_answer_parses_correctness_against_criteria():
     sys = _system_text(call)
     assert "must mention duplicates and idempotency" in sys  # criteria reach the grader
     assert "duplicates are no-ops if idempotent" in _user_text(call)
+    # Same no-drop convention as `test_classify_response_without_stress_is_byte_stable` and
+    # `test_generate_push_without_stress_is_byte_stable` above. Without these, emptying
+    # content/prompts/grade.md left the whole suite green at its baseline count -- a T2 review
+    # measured that -- so the turn-forgery reframe could be dropped, blanked or reformatted away
+    # in silence. This pins PRESENCE only; whether the model OBEYS the prose is unmeasured and
+    # needs a paid probe (see `grade_answer`'s own comment).
+    assert "strict grader" in sys  # the base grade doctrine is still present (no drop)
+    assert "typed by the student" in sys  # the turn-forgery reframe is still present
 
 
 def test_grade_answer_refusal_raises():

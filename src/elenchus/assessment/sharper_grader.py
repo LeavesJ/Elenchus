@@ -21,13 +21,22 @@ def audit_sharper(exp: Experience, assessment: Assessment, model: Model) -> Asse
     disputed: set[str] = set()
     seen: set[str] = set()
     # `not p.gap_closed`, not `p.response_classification != "closed"`. The two are equivalent
-    # TODAY, and only by an invariant that lives in another module: `judgment_loop._select_target`
-    # skips exhausted codes, and a code is exhausted the instant a push fails the credit branch,
-    # so a code reaching `frames_closed_under_pressure` has only credited points behind it. That
-    # is a proxy standing in for the real predicate, and the same proxy is what let an inflated
-    # `closed` delete a trap's gallery row in `state.update_state` (see `types.Push.gap_closed`).
-    # The authority is the loop's credit decision, and `instructor_sharper=True` below is
-    # hardcoded on the strength of it -- an uncredited push is not an instructor closure to audit.
+    # TODAY, but by TWO mechanisms, not the one an earlier version of this comment named. A T2
+    # review ran the loop and falsified the single-invariant story, so both are stated here:
+    #
+    # * On the fall-through, a push that fails the credit branch is added to `exhausted`, and
+    #   `judgment_loop._select_target` skips exhausted codes, so that code is never pushed again.
+    # * On the `hard_wrong` and `regressed` early breaks, the code is NEVER added to `exhausted`
+    #   -- `exhausted.add(code)` sits only on the fall-through -- and the conclusion survives for
+    #   a different reason: both paths `break`, ending the loop, so no later credited push for
+    #   that code can exist. Measured: `exhausted` is empty after either break.
+    #
+    # Either way it is a proxy standing in for the real predicate, and that same proxy is what
+    # let an inflated `closed` delete a trap's gallery row in `state.update_state` (see
+    # `types.Push.gap_closed`). The authority is the loop's credit decision, and
+    # `instructor_sharper=True` below is hardcoded on the strength of it -- an uncredited push is
+    # not an instructor closure to audit. Note this reads `gap_closed` strictly BEFORE this
+    # function revokes anything, which is why the pre-audit value is the correct one here.
     for p in assessment.trajectory:
         if (
             p.kind != "frame"
