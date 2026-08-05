@@ -26,10 +26,20 @@ def audit_sharper(exp: Experience, assessment: Assessment, model: Model) -> Asse
     #
     # * On the fall-through, a push that fails the credit branch is added to `exhausted`, and
     #   `judgment_loop._select_target` skips exhausted codes, so that code is never pushed again.
-    # * On the `hard_wrong` and `regressed` early breaks, the code is NEVER added to `exhausted`
-    #   -- `exhausted.add(code)` sits only on the fall-through -- and the conclusion survives for
-    #   a different reason: both paths `break`, ending the loop, so no later credited push for
-    #   that code can exist. Measured: `exhausted` is empty after either break.
+    # * On the `hard_wrong` and `regressed` early breaks, THIS code is never added to
+    #   `exhausted` -- `exhausted.add(code)` sits only on the fall-through -- and the conclusion
+    #   survives for a different reason: both paths `break`, ending the loop, so no later
+    #   credited push for that code can exist.
+    #
+    #   An earlier version of this bullet closed with `Measured: exhausted is empty after either
+    #   break`, which is false and was itself caught by a review that ran it. `exhausted` is a
+    #   loop-scoped accumulator over ALL codes, and neither break clears it, so any earlier push
+    #   that fell through uncredited leaves its own code in the set: executed, a sitting whose
+    #   first push falls through and whose second breaks reaches the break with `exhausted ==
+    #   {first_code}`. The measurement generalized a single-iteration run, and `Measured:` is
+    #   this repo's strongest confidence label, so a false one is worse than no label at all --
+    #   a later reader has no reason to re-run it. Only THIS code's absence is claimed, and the
+    #   break, not exhaustion, is what carries the argument.
     #
     # Either way it is a proxy standing in for the real predicate, and that same proxy is what
     # let an inflated `closed` delete a trap's gallery row in `state.update_state` (see

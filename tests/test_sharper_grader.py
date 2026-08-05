@@ -74,6 +74,26 @@ def _model(verdicts=None):
     )
 
 
+def test_audit_selects_on_the_loops_credit_decision_not_the_raw_outcome():
+    """The predicate switch itself, which nothing measured.
+
+    `audit_sharper` selects on `not p.gap_closed`. It used to select on
+    `p.response_classification != "closed"`. A mutation battery found that reverting the line --
+    or deleting the clause outright -- left the whole suite at its exact baseline, because the
+    only Push fixture in this file carries `response_classification="closed"` AND
+    `gap_closed=True`, so both predicates agree on it. The fixture edit that accompanied the
+    switch is precisely what removed the ability to measure the switch.
+
+    This is the cell where they disagree: an INFLATED closure -- the grader said `closed`, the
+    loop refused it for want of a mechanism -- must not be audited as an instructor closure,
+    because `instructor_sharper=True` is hardcoded on the item and there was no instructor
+    closure to audit."""
+    a = _closed_assessment()
+    a.trajectory[0].gap_closed = False  # loop refused the credit; the grader still said "closed"
+    audited = audit_sharper(_exp(), a, _model())
+    assert audited.sharper_audit == []  # the old predicate audited it; this one must not
+
+
 def test_grader_confirms_keeps_the_closed_call():
     audited = audit_sharper(_exp(), _closed_assessment(), _model())  # default agree
     assert audited.frames_closed_under_pressure == ["protect_the_core_lane"]

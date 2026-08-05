@@ -908,8 +908,15 @@ class AnthropicModel:
         # `mechanism_supplied` still left `"closed"` on the trajectory point and deleted the
         # trap's durable gallery row. The floor is sufficient now because the loop's own credit
         # decision rides out on `types.Push.gap_closed` and `state.update_state` reads that
-        # instead; it was never sufficient by itself. Anything downstream that keys off a bare
-        # `outcome == "closed"` reopens this hole -- grep `gap_closed` before adding one.
+        # instead; it was never sufficient by itself.
+        #
+        # The rule that follows is NARROWER than an earlier version of this line claimed. It said
+        # anything downstream keying off a bare `outcome == "closed"` reopens the hole, and a
+        # review falsified the universal by pointing at `state.update_state`, which reads exactly
+        # that to pick the trap-gallery row's detail token and provably does NOT reopen it -- the
+        # row is still written either way. The real rule: never key a REPAIR or CREDIT decision
+        # off the bare outcome; reading it to DESCRIBE what the grader said is fine. Grep
+        # `gap_closed` before adding a reader of the first kind.
         # Raising instead would
         # kill the door mid-sitting over a field-level evidence gap: state is already banked by
         # the time this runs (nothing in `judgment_loop.assess` persists mid-loop --

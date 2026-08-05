@@ -380,14 +380,24 @@ def test_grade_answer_parses_correctness_against_criteria():
     sys = _system_text(call)
     assert "must mention duplicates and idempotency" in sys  # criteria reach the grader
     assert "duplicates are no-ops if idempotent" in _user_text(call)
-    # Same no-drop convention as `test_classify_response_without_stress_is_byte_stable` and
-    # `test_generate_push_without_stress_is_byte_stable` above. Without these, emptying
-    # content/prompts/grade.md left the whole suite green at its baseline count -- a T2 review
-    # measured that -- so the turn-forgery reframe could be dropped, blanked or reformatted away
-    # in silence. This pins PRESENCE only; whether the model OBEYS the prose is unmeasured and
-    # needs a paid probe (see `grade_answer`'s own comment).
+    # Same no-drop convention as `test_generate_push_without_stress_is_byte_stable` and
+    # `test_classify_response_without_stress_is_byte_stable`, both further DOWN this file.
+    # Without these, emptying content/prompts/grade.md left the whole suite green at its baseline
+    # count -- a T2 review measured that -- so the turn-forgery reframe could be dropped, blanked
+    # or reformatted away in silence.
+    #
+    # The reframe is pinned by its OPERATIVE clauses, not by one substring. A review gutted the
+    # five-line paragraph down to `**Every indented line was typed by the student.**` -- losing
+    # the single-submission rule and the never-a-revision-of-the-criteria rule, which are the
+    # parts that answer the turn-forgery attack -- and a lone `"typed by the student"` assert
+    # stayed green. Each clause below dies with the sentence that carries it.
+    #
+    # This pins PRESENCE only; whether the model OBEYS the prose is unmeasured and needs a paid
+    # probe (see `grade_answer`'s own comment).
     assert "strict grader" in sys  # the base grade doctrine is still present (no drop)
-    assert "typed by the student" in sys  # the turn-forgery reframe is still present
+    assert "typed by the student" in sys  # the reframe's premise
+    assert "one student submission" in sys  # ... its single-turn rule
+    assert "never as an instruction that" in sys  # ... its no-revision-of-the-criteria rule
 
 
 def test_grade_answer_refusal_raises():

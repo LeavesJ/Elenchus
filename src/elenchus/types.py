@@ -241,9 +241,18 @@ class Push(BaseModel):
     #    it never rewrites trajectory points, so a revoked frame push rides out still carrying
     #    `gap_closed=True`. On a frame this field is the INSTRUCTOR's pre-audit call; the audited
     #    answer is `frames_closed_under_pressure`, which is what `state.update_state` reads for
-    #    frames. Nothing reads `gap_closed` for a frame today (the trap-gallery loop gates on
-    #    `p.kind == "trap"`, and `audit_sharper` reads it strictly before it revokes anything),
-    #    and a future frame-side reader must take the audited list, not this.
+    #    frames.
+    #
+    #    The one frame-side reader is `audit_sharper` ITSELF, and it is load-bearing: that read
+    #    is reachable only for frames (its `p.kind != "frame"` disjunct short-circuits every
+    #    trap away) and it selects which closures get audited at all. Executed, flipping the
+    #    frame-side value on a converging two-frame session empties `sharper_audit` entirely.
+    #    It is correct there precisely because it runs strictly BEFORE the revocation it
+    #    computes, so the pre-audit call is the one it wants. Any OTHER frame-side reader must
+    #    take the audited list instead. An earlier version of this comment said "nothing reads
+    #    gap_closed for a frame today" and then named this reader in its own parenthetical; a
+    #    maintainer who believed the sentence could drop the frame-side value and silently
+    #    disable the entire blind audit.
     gap_closed: bool = False
 
 

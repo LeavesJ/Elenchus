@@ -183,7 +183,16 @@ def test_uncredited_trap_row_never_claims_the_mechanism_was_missing():
     span would have passed the evidence anchor -- reaches `state.update_state` with
     `gap_closed=False`. The row is correct (the trap was not repaired); labelling it
     `closed_no_mechanism` was a false statement about the learner, which is the same write-time
-    falsification this arc exists to remove."""
+    falsification this arc exists to remove.
+
+    `mechanism_span` is the reply VERBATIM, not decorative prose. A review caught the first
+    version pairing a span with a reply that does not contain it: run through the real
+    `AnthropicModel.classify_response` the evidence anchor would have floored
+    `mechanism_supplied` to False, so the fixture described a shape no production path can emit
+    while its docstring claimed the span would pass. What the LOOP reads here is only `outcome`
+    and `hard_wrong` -- the `hard_wrong` break returns before `mechanism_supplied` is ever
+    consulted, which is the whole point -- but a fixture that cannot exist proves nothing, so it
+    is now one that can."""
     from datetime import datetime, timezone
 
     from elenchus.state import update_state
@@ -205,7 +214,9 @@ def test_uncredited_trap_row_never_claims_the_mechanism_was_missing():
             ResponseClassification(
                 outcome="closed",
                 mechanism_supplied=True,
-                mechanism_span="a special case forks the core invariant",
+                # `_work()` replies with the literal "reply", so this span IS a verbatim
+                # substring of it and survives the real evidence anchor. See the docstring.
+                mechanism_span="reply",
                 hard_wrong=True,
             )
         ),
@@ -223,8 +234,47 @@ def test_uncredited_trap_row_never_claims_the_mechanism_was_missing():
     rows = st.trap_gallery["erode_core_for_one_customer"]
     assert rows, "the unrepaired trap must still be recorded"
     # The row exists (Invariant 4: never destroyed at write time) and says only what is true.
+    # A second `"no_mechanism" not in r.detail` assertion used to sit here and could not fail:
+    # it is entailed by the line above, so it read as an independent guard on this commit's
+    # central property while guarding nothing.
     assert all(r.detail == "closed_uncredited" for r in rows)
-    assert all("no_mechanism" not in r.detail for r in rows)
+
+
+def test_regressed_trap_keeps_its_gallery_row():
+    """The `regressed` early break, which no test reached.
+
+    A mutation battery found this: hardcoding `gap_closed=True` at the regressed `Push(...)`
+    site passed the ENTIRE suite while deleting the durable gallery row for every regressed
+    trap -- 3,768 rows across a 26,244-scenario sweep. The shipped code was correct and the
+    guard around it was absent, so the one write-time destruction Invariant 4 forbids could be
+    reintroduced by a one-word edit with nothing going red.
+
+    Both other `Push(...)` sites are pinned (`hard_wrong` by the test above, the fall-through by
+    `test_closed_without_mechanism_is_carried_as_uncredited_on_the_trajectory`). This is the
+    third."""
+    from datetime import datetime, timezone
+
+    from elenchus.state import update_state
+    from elenchus.types import LearnerState
+
+    m = FakeModel(
+        _tripped_intake(),
+        _scripted_everywhere(
+            ResponseClassification(outcome="regressed", mechanism_supplied=False, hard_wrong=False)
+        ),
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+    assert a.stop_reason is StopReason.regression
+    trap_points = [p for p in a.trajectory if p.target_code == "erode_core_for_one_customer"]
+    assert trap_points, "the tripped trap was never pushed"
+    assert all(p.gap_closed is False for p in trap_points)
+
+    st = update_state(
+        LearnerState(), a, datetime(2026, 6, 22, tzinfo=timezone.utc), "exp1", "veldra:p1"
+    )
+    rows = st.trap_gallery["erode_core_for_one_customer"]
+    assert rows, "a regressed trap was not repaired and must keep its record"
+    assert all(r.detail == "regressed" for r in rows)
 
 
 def test_budget_caps_unproductive_loop():
