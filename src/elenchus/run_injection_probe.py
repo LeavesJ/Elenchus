@@ -63,6 +63,7 @@ from .injection_scoring import (
 )
 from .model import (
     _CLASSIFY_MAX_TOKENS,
+    _LEARNER_TEXT_REFUSAL_CAP,
     _PARAMS,
     ResponseClassification,
     _situation_block,
@@ -145,13 +146,27 @@ def _classify_system_for(p: Payload) -> str:
 
 def _new_user_for(text: str) -> str:
     """Reproduces `AnthropicModel.classify_response`'s user composition (model.py, the
-    `rendered = labelled(...); user = f"Push:\\n{push}\\n\\n{rendered}"` lines) exactly, using the
-    SAME building block that method calls (`prompt_text.labelled`), mirroring
-    `_classify_system_for`'s approach for the system half. Composes text only, never calls the
-    model: the admission gate (`_check_admission`) must run and raise BEFORE any network call is
-    even considered, so this cannot go through `classify` (which may be the real, paid-for
+    `rendered = labelled(...); user = f"Push:\\n{push}\\n\\n{rendered}"` lines), using the SAME
+    building block that method calls (`prompt_text.labelled`). Composes text only, never calls
+    the model: the admission gate (`_check_admission`) must run and raise BEFORE any network call
+    is even considered, so this cannot go through `classify` (which may be the real, paid-for
     `_classify` once wired) or `_build_model`. `push` is always `_PUSH` here, matching the fixed
-    push every cell in a run shares (this module's docstring)."""
+    push every cell in a run shares (this module's docstring).
+
+    IT IS A SECOND COPY, and two earlier claims about it were wrong. It said it mirrored
+    `_classify_system_for`, importing a guarantee it did not have: that function's reproduction is
+    cashed by a test comparing it against a system string captured off a REAL `classify_response`
+    call, and this one had no such pin -- patching `classify_response` to raise left every test
+    touching `_new_user_for` green. `test_new_user_for_matches_what_classify_response_actually_
+    sends` is that missing pin and now exists. It also said "exactly", scoped to the two model.py
+    lines it cites, silently skipping the `_LEARNER_TEXT_REFUSAL_CAP` raise BETWEEN them; the
+    sendability check in `_check_admission` covers that gap rather than this function acquiring a
+    raise it must not have.
+
+    The copy remains a copy (defect D1, structural half unfixed): the OLD arm passes ONE
+    `old_user_for` callable to both the gate and the sender, so what is screened IS what is sent,
+    by construction. The NEW arm cannot do that without calling the model, which the gate must
+    not do. Until a shared composer exists, the pinning test is what holds the two equal."""
     return f"Push:\n{_PUSH}\n\n{labelled('Student reply:', text)}"
 
 
@@ -177,6 +192,34 @@ def _check_admission(payloads: list[Payload], old_user_for, system_for) -> list[
         old = old_user_for(p, attack_text(p))
         new = _new_user_for(attack_text(p))
         baseline_new = _new_user_for(benign_text(p))
+        # SENDABILITY, checked here and not in `admits`. `admits` decides whether a payload
+        # creates the STRUCTURAL hazard under test, which is a property of the text; this is a
+        # property of the transport, and only this module knows about `model.py` at all.
+        #
+        # `classify_response` raises `ModelError` when its rendered user exceeds
+        # `_LEARNER_TEXT_REFUSAL_CAP` (model.py), and `_new_user_for` reproduces the composition
+        # WITHOUT that raise. A review executed the gap: a payload rendering to 21788 characters
+        # was admitted `(oversized, True, '')`, cleared `confirm`, and then burned every A_new and
+        # B_new draw as a refusal that `screen`'s rule 1 excluded downstream. Fail-safe for the
+        # verdict, pure waste for the wallet, and it defeats this function's own docstring below
+        # -- an UNSENDABLE corpus is exactly what must never reach the cost guard.
+        #
+        # The cap is imported, never restated: a second copy of a threshold is how the two
+        # compositions drifted apart in the first place.
+        rendered = max(len(new), len(baseline_new))
+        if rendered > _LEARNER_TEXT_REFUSAL_CAP:
+            results.append(
+                AdmissionResult(
+                    name=p.name,
+                    admitted=False,
+                    reason=(
+                        f"new-form rendering is {rendered} chars, over "
+                        f"_LEARNER_TEXT_REFUSAL_CAP ({_LEARNER_TEXT_REFUSAL_CAP}) -- "
+                        "classify_response would refuse to send it"
+                    ),
+                )
+            )
+            continue
         headings = derive_heading_tokens(system_for(p), baseline_new)
         results.append(
             admits(p, old_user=old, new_user=new, baseline_new_user=baseline_new, headings=headings)
@@ -188,9 +231,22 @@ def _raw_parse(model, *, system: str, user: str, output_format: type, max_tokens
     """The OLD arm's raw parse. Mirrors `run_prompt_shift_probe._raw_parse_classify`: reaches
     `model._parse_required` directly rather than through `classify_response`, which composes its
     OWN new, indented user message -- exactly what the old-form cells (`A_old`/`B_old`/`D_old`)
-    must not send. `_PARAMS` matches `classify_response`'s own reasoning-effort choice, so this arm
-    and the NEW arm below differ only in how the user message was built, never in call
-    parameters."""
+    must not send. `_PARAMS` matches `classify_response`'s own reasoning-effort choice, so the
+    two arms issue identical CALL PARAMETERS.
+
+    THEY DO NOT DIFFER ONLY IN THE USER MESSAGE, and an earlier version of this docstring said
+    they did. A review falsified it by execution: `classify_response` applies the evidence-anchor
+    floor (model.py, after `_parse_required` returns) and this function does not, so with
+    byte-identical user messages `_raw_parse` returns `mechanism_supplied=True` where
+    `classify_response` returns False. The floor is a NEW-ARM-ONLY post-parse defense.
+
+    That is defect D2 and it is UNFIXED here. It matters because the study's statistic is a
+    paired OLD-minus-NEW difference and the floor only ever LOWERS new-arm landings, so every
+    floor event is charged to the indent. The bias is one-signed: it cannot mask a real effect,
+    only fabricate one. Executed on a NULL-TRUTH corpus -- true effect exactly zero, the model
+    behaviourally identical in both arms -- the shipped scoring returned EFFECTIVE /
+    significant_and_total, k=12, p=0.000244. DO NOT RUN A FOUR-ARM STUDY ON THIS UNTIL D2 IS
+    FIXED. Nil impact on the completed 2026-08-04 run."""
     return model._parse_required(
         max_tokens=max_tokens,
         system=system,
