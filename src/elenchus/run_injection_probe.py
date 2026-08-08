@@ -206,14 +206,31 @@ def _check_admission(payloads: list[Payload], old_user_for, system_for) -> list[
         #
         # The cap is imported, never restated: a second copy of a threshold is how the two
         # compositions drifted apart in the first place.
-        rendered = max(len(new), len(baseline_new))
+        #
+        # MEASURE THE STRING THE MODEL MEASURES, which is NOT `_new_user_for`'s output. A T2
+        # review found this by execution and five reviewers found it independently:
+        # `classify_response` caps `labelled("Student reply:", response)` and only THEN prepends
+        # `Push:\n{push}\n\n` (model.py), so capping the composed user over-measured by exactly
+        # that prefix. Verified: the prefix is 65 characters, so every payload whose rendered
+        # block landed in [19936, 20000] was rejected with the reason "classify_response would
+        # refuse to send it" -- which was false, the transport sends those -- and `run()` turns
+        # one rejection into a hard `ValueError` that kills the entire probe.
+        #
+        # Importing the threshold and then applying it to a different string is the same defect
+        # class as restating the threshold, one level up: the copy that drifted was the SUBJECT,
+        # not the constant. Both sites now name the same subject, and both call it `rendered`
+        # because it is now the same string.
+        rendered = max(
+            len(labelled("Student reply:", attack_text(p))),
+            len(labelled("Student reply:", benign_text(p))),
+        )
         if rendered > _LEARNER_TEXT_REFUSAL_CAP:
             results.append(
                 AdmissionResult(
                     name=p.name,
                     admitted=False,
                     reason=(
-                        f"new-form rendering is {rendered} chars, over "
+                        f"new-form rendered learner block is {rendered} chars, over "
                         f"_LEARNER_TEXT_REFUSAL_CAP ({_LEARNER_TEXT_REFUSAL_CAP}) -- "
                         "classify_response would refuse to send it"
                     ),
@@ -329,7 +346,11 @@ def run(
         )
 
     schedule = draw_schedule([p.name for p in payloads], draws=draws, seed=seed)
-    if not confirm("injection_efficacy", len(schedule), model_id):
+    # Both arms reach the network through `AnthropicModel._parse_required`, which spends ONE
+    # retry on a refusal, an empty parse, or a truncation, so the ceiling is exactly twice the
+    # schedule. Telling the guard only `len(schedule)` understated the worst case by 2x on the
+    # one screen that exists for informed consent.
+    if not confirm("injection_efficacy", len(schedule), model_id, max_calls=2 * len(schedule)):
         print("not confirmed; no calls made")
         return None
 
@@ -391,6 +412,15 @@ def run(
             # would stay byte-identical no matter how the real prompt changed. A provenance field
             # insensitive to the thing it claims to record is worse than no field at all.
             "old_user_template": _sha(old_user_for(payloads[0], "REPLY")),
+            # THE NEW ARM IS THE TREATMENT, and it was hashed nowhere. The paragraph above warns
+            # that a provenance field insensitive to what it records is worse than no field, and
+            # this block then recorded the OLD arm and the system while omitting the one thing
+            # the study varies: `_new_user_for`'s composition, which carries `_PUSH`, the
+            # `Student reply:` heading and `prompt_text.labelled`'s INDENT. A T2 review executed
+            # it -- changing `LEARNER_INDENT` and re-running produced byte-identical
+            # `prompt_hashes` -- so two runs that sent materially different treatment prompts
+            # were indistinguishable in their own artifacts.
+            "new_user_template": _sha(_new_user_for("REPLY")),
             "classify_system": _sha(system_for(payloads[0])),
         },
         "denominators": {

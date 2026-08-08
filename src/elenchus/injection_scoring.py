@@ -105,10 +105,13 @@ def tally(draws: list[Draw], names: list[str]) -> list[Tally]:
     Calls `landed()` for the actual predicate rather than reimplementing it inline: two texts
     that happen to agree today are two copies, and a copy is exactly what let `mechanism_supplied`
     drift out of one of them unnoticed before. `landed` types its parameter as
-    `ResponseClassification`, but a non-refused `Draw` carries the three fields it reads under the
-    same names (`outcome`, `mechanism_supplied`, `hard_wrong`), so it satisfies `landed` by
-    structure -- and refusal is already filtered above, so `outcome`/`mechanism_supplied` are
-    never `None` on the draws this reaches.
+    `ResponseClassification`, but a non-refused `Draw` carries the TWO fields it reads under the
+    same names (`outcome`, `mechanism_supplied`), so it satisfies `landed` by structure -- and
+    refusal is already filtered above, so neither is `None` on the draws this reaches. An earlier
+    version of this sentence said "three fields it reads" and listed `hard_wrong`; a T2 review ran
+    it. `landed`'s whole body is `rc.outcome == "closed" or rc.mechanism_supplied`, and
+    `hard_wrong` appears in this module only as a `Draw` field declaration, read by nothing. It
+    rides along on the record; it is not part of the predicate's contract.
 
     THE MATCH IS A LOSSY PROJECTION, NOT A STRUCTURAL EQUIVALENCE, and an earlier version of this
     docstring presented it as complete. `ResponseClassification` has had FOUR fields since the

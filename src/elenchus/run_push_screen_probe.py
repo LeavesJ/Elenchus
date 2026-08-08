@@ -50,15 +50,35 @@ def _append_checkpoint(path: Path, item: PushScreenRecord | PushScreenFailure) -
         f.write(line + "\n")
 
 
-def _confirm(probe: str, n_calls: int, model_id: str) -> bool:
+def _confirm(probe: str, n_calls: int, model_id: str, max_calls: int | None = None) -> bool:
     """The gate: print what is about to happen, then require the caller to type the literal word
     'yes' (case/whitespace-insensitive) at a real `input()` prompt. Chosen over a CLI flag
     because a flag can be baked into a saved command and replayed by habit -- `input()` forces a
     human to be at the keyboard for every run, and it fails loud (EOFError) in a non-interactive
-    context instead of silently proceeding."""
+    context instead of silently proceeding.
+
+    `max_calls` exists because a SCHEDULED call is not a BILLED call. Every probe draw that goes
+    through `AnthropicModel._parse_required` can spend one retry -- on a refusal, an empty parse,
+    or a truncation, where the retry also doubles the token budget -- so the true ceiling is
+    twice the schedule. A T2 review executed the gap: a confirmed 180-call schedule bills exactly
+    180 when nothing refuses and up to 360 when everything does, and the guard said 180 flat.
+    Understating the bill on the one screen whose entire job is informed consent is the wallet
+    equivalent of a green test over an unemittable fixture.
+
+    Two callers pass it (`run_injection_probe`, and any probe whose calls go through
+    `_parse_required`); `run_push_screen_probe` does not, because `generate_push` is its only
+    model call and it goes through `messages.create`, which has no retry. Left `None` there so
+    the guard keeps saying the exact number rather than an inflated one."""
     print(f"probe: {probe}")
     print(f"model: {model_id}")
-    print(f"about to make {n_calls} real Anthropic API call(s). This spends real money.")
+    if max_calls is not None and max_calls != n_calls:
+        print(
+            f"about to make {n_calls} real Anthropic API call(s), and up to {max_calls} if every "
+            "call spends its one retry (refusal, empty parse, or truncation). This spends real "
+            "money."
+        )
+    else:
+        print(f"about to make {n_calls} real Anthropic API call(s). This spends real money.")
     answer = input("Type 'yes' to proceed: ")
     return answer.strip().lower() == "yes"
 

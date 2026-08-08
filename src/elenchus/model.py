@@ -940,8 +940,19 @@ class AnthropicModel:
         # the `injection_scoring.Draw` built from a floored verdict is byte-identical to one built
         # from an honest False, the probe's checkpoint writes only `row.model_dump()`, and its
         # artifact carries no floor field. So the floor rate is NOT recoverable from a completed
-        # probe run. Anything that needs to tell the two apart must record the distinction at the
-        # point it happens; reading the returned object cannot do it.
+        # probe run.
+        #
+        # THE RETURNED OBJECT, HOWEVER, DOES DISTINGUISH THEM, and the sentence that used to close
+        # this paragraph denied it ("reading the returned object cannot do it"). A T2 review
+        # falsified it by execution. The floor clears `mechanism_supplied` and never touches
+        # `mechanism_span`, so a floored verdict rides out still carrying the span that failed
+        # while an honest False carries the `""` default: measured, floored is
+        # `(supplied=False, span='A SPAN NOT IN THE REPLY')` against honest
+        # `(supplied=False, span='')`, and they are not byte-identical. The loss is `Draw`'s, not
+        # this object's. That matters for the FIX, not just the prose: the cheap repair for D3 is
+        # to widen `Draw` to carry `mechanism_span`, which the record already has here, rather
+        # than to add a new side channel at this site. The false universal argued against the
+        # cheaper correct fix.
         if resp.mechanism_supplied:
             span = _normalize_for_span_match(resp.mechanism_span)
             haystack = _normalize_for_span_match(response)

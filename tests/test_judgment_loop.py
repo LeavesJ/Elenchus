@@ -161,11 +161,25 @@ def test_closed_without_mechanism_is_carried_as_uncredited_on_the_trajectory():
 
 def test_a_genuine_repair_is_carried_as_credited_on_the_trajectory():
     """The positive control for the test above. Without it, `gap_closed = False` everywhere --
-    a constant that suppresses nothing and logs everything -- would pass that assertion."""
+    a constant that suppresses nothing and logs everything -- would pass that assertion.
+
+    `mechanism_span="reply"` is load-bearing and was missing. `_work()` answers every push with
+    the literal string `"reply"`, so this span is that reply VERBATIM. A T2 review found the
+    fixture without it: `AnthropicModel.classify_response`'s evidence anchor floors on
+    `not span`, so a scripted `(mechanism_supplied=True, mechanism_span="")` is a shape no
+    production path can emit, and this was the arc's only test asserting `gap_closed` becomes
+    True out of `assess`. Verified by driving the real `classify_response` over a scripted
+    client: that exact triple comes back `mechanism_supplied=False`. Same fixture-emittability
+    class the sibling test 40 lines down was added to remove, in the same commit."""
     m = FakeModel(
         _tripped_intake(),
         _scripted_everywhere(
-            ResponseClassification(outcome="closed", mechanism_supplied=True, hard_wrong=False)
+            ResponseClassification(
+                outcome="closed",
+                mechanism_supplied=True,
+                hard_wrong=False,
+                mechanism_span="reply",
+            )
         ),
     )
     a = judgment_loop.assess(_exp(), _work(), m)

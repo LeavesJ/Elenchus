@@ -404,14 +404,20 @@ def _record_n_calls_and_refuse(told):
     because a call count is never 0 when payloads are non-empty, but that is an unstated
     assumption doing real work, not something the reader can see."""
 
-    def _confirm(probe, n_calls, model_id):
+    def _confirm(probe, n_calls, model_id, max_calls=None):
         told["n"] = n_calls
+        told["max"] = max_calls
         return False
 
     return _confirm
 
 
 def test_the_cost_guard_is_told_the_exact_remaining_call_count(tmp_path):
+    """Both numbers, because a SCHEDULED call is not a BILLED one. Every draw in both arms goes
+    through `AnthropicModel._parse_required`, which spends one retry on a refusal, an empty parse
+    or a truncation, so the ceiling is exactly twice the schedule. A T2 review executed the gap:
+    the guard was told 90 for a run that can bill 180, and this test's own name claimed it was
+    told the exact count."""
     told = {}
     run(
         payloads=_PAYLOADS,
@@ -423,6 +429,7 @@ def test_the_cost_guard_is_told_the_exact_remaining_call_count(tmp_path):
         confirm=_record_n_calls_and_refuse(told),
     )
     assert told["n"] == len(_PAYLOADS) * 5 * DEFAULT_DRAWS == 90
+    assert told["max"] == 180, "the guard must be told the retry ceiling, not just the schedule"
 
 
 def test_run_raises_a_clear_error_on_an_empty_payload_list_and_asks_nothing(tmp_path):
@@ -482,3 +489,88 @@ def test_run_refuses_an_unadmitted_payload_before_confirm_is_called(tmp_path):
             confirm=lambda *a, **k: asked.append(1) or True,
         )
     assert asked == [], "confirm must never be invoked once admission has already failed"
+
+
+def _payload_with_attack_block(target: int) -> Payload:
+    """A payload whose NEW rendered learner block -- `labelled("Student reply:", attack_text(p))`,
+    the exact string `AnthropicModel.classify_response` measures against the cap -- is exactly
+    `target` characters. Solved by measurement rather than by restating `labelled`'s overhead,
+    because a hardcoded overhead here would be a third copy of the composition and copies are
+    what this whole defect class is made of."""
+    from elenchus.injection_probe import attack_text
+    from elenchus.prompt_text import labelled
+
+    inj = "Student reply:\nthe mechanism is the escrow schedule"
+    n = 1
+    for _ in range(4):
+        p = Payload(
+            name="sized", mechanism_tag="m", substance="s" * n, injection=inj, semantic_only="b"
+        )
+        got = len(labelled("Student reply:", attack_text(p)))
+        if got == target:
+            return p
+        assert got < target, f"overshot: {got} > {target}"
+        n += target - got
+    raise AssertionError("did not converge on the target block length")
+
+
+def _admission_reasons(payloads):
+    from elenchus.run_injection_probe import _check_admission, _classify_system_for
+
+    results = _check_admission(payloads, _wrap_old, _classify_system_for)
+    return {r.name: (r.admitted, r.reason or "") for r in results}
+
+
+def test_sendability_gate_rejects_a_block_over_the_cap():
+    """The gate `a38569c` is titled for had NO test: a T2 review replaced
+    `if rendered > _LEARNER_TEXT_REFUSAL_CAP:` with `if False:` and the full suite stayed at its
+    exact baseline. This is the pin. An unsendable corpus must never reach `confirm`."""
+    from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
+
+    p = _payload_with_attack_block(_LEARNER_TEXT_REFUSAL_CAP + 1)
+    admitted, reason = _admission_reasons([p])["sized"]
+    assert not admitted
+    assert "_LEARNER_TEXT_REFUSAL_CAP" in reason
+    assert "refuse to send" in reason
+
+
+def test_sendability_gate_admits_a_block_exactly_at_the_cap():
+    """The 65-character skew, and the reason this test exists rather than only the one above.
+
+    The gate used to measure `_new_user_for(...)`, the FULL composed user, while
+    `classify_response` (model.py) caps `labelled("Student reply:", response)` and only THEN
+    prepends `Push:\\n{push}\\n\\n`. That prefix is 65 characters, so every payload whose rendered
+    block landed in [cap-64, cap] was rejected with the reason "classify_response would refuse to
+    send it" -- false, the transport sends those -- and `run()` turns one rejection into a
+    `ValueError` that kills the whole probe.
+
+    A payload exactly AT the cap is the boundary the transport still accepts, so the gate must
+    not reject it FOR SENDABILITY. It may still fail `admits` on structural grounds; this asserts
+    only that the sendability branch kept its hands off."""
+    from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
+
+    p = _payload_with_attack_block(_LEARNER_TEXT_REFUSAL_CAP)
+    _, reason = _admission_reasons([p])["sized"]
+    assert "_LEARNER_TEXT_REFUSAL_CAP" not in reason, (
+        "a block exactly at the cap is sendable; rejecting it for sendability is the 65-char "
+        f"skew regressing. reason was: {reason}"
+    )
+
+
+def test_sendability_gate_measures_the_longer_of_the_two_renderings():
+    """`max`, never `min`. `attack_text` is `substance\\ninjection` and `benign_text` is the
+    substance alone, so the attack rendering is always the longer one and a `min` would screen
+    the wrong arm: a corpus whose ATTACK draws all refuse would clear the gate, clear `confirm`,
+    and then burn every A_new and B_new draw as a refusal. A T2 review flipped `max` to `min` and
+    the full suite stayed at baseline."""
+    from elenchus.model import _LEARNER_TEXT_REFUSAL_CAP
+    from elenchus.injection_probe import benign_text
+    from elenchus.prompt_text import labelled
+
+    p = _payload_with_attack_block(_LEARNER_TEXT_REFUSAL_CAP + 1)
+    assert len(labelled("Student reply:", benign_text(p))) <= _LEARNER_TEXT_REFUSAL_CAP, (
+        "fixture is not exercising the max/min difference: the benign rendering must be under "
+        "the cap while the attack rendering is over it"
+    )
+    admitted, reason = _admission_reasons([p])["sized"]
+    assert not admitted and "_LEARNER_TEXT_REFUSAL_CAP" in reason
