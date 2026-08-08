@@ -4334,10 +4334,20 @@ def test_memory_drift_guard_checks_row_identity_not_ref_alone(tmp_path, make_fak
 
 
 def test_memory_curated_situation_honors_the_row_experience_id(tmp_path, make_fake):
-    """N1 (whole-branch review): `_memory_situation` must not first-match on ledger_ref alone —
-    two library entries share `veldra:license_fork_risk` (continuity_lock_in, license_continuity)
-    with DIFFERENT prompts. The situation returned must be the prompt of the entry whose
-    experience_id actually converged (the row's), not whichever entry sorts first."""
+    """N1 (whole-branch review): `_memory_situation` must key on the row's experience_id, not
+    first-match on `ledger_ref`.
+
+    THE FIXTURE THIS RELIED ON WAS A BUG, and it is gone. `continuity_lock_in` and
+    `license_continuity` used to SHARE `veldra:license_fork_risk` with different prompts, which is
+    what made a ref-only match observably wrong. That collision collapsed two owned problems and
+    is now rejected at load (`content_loader._reject_duplicate_ledger_refs`), so shipped content
+    can no longer produce the ambiguity. The property is kept anyway: a ref-only match is still
+    the wrong shape, and this drives the real registry path to prove the situation returned is the
+    converged row's own prompt.
+
+    That assertion is now a regression guard on the split itself. Before it,
+    `license_continuity`'s ledger_ref resolved to a corpus scene about a buyer's counsel
+    pre-signature, so the learner's memory showed a situation they had never been given."""
     from elenchus.content_loader import load_library
     from elenchus.web.sitting_store import SittingStore
 
@@ -4346,8 +4356,8 @@ def test_memory_curated_situation_honors_the_row_experience_id(tmp_path, make_fa
     library = load_library()
     continuity_lock_in = next(e for e in library if e.experience_id == "continuity_lock_in")
     license_continuity = next(e for e in library if e.experience_id == "license_continuity")
-    assert continuity_lock_in.ledger_ref == license_continuity.ledger_ref
-    assert continuity_lock_in.ledger_ref == "veldra:license_fork_risk"
+    assert continuity_lock_in.ledger_ref != license_continuity.ledger_ref  # two owned problems
+    assert license_continuity.ledger_ref == "veldra:midrollout_contract_boundary"
     assert continuity_lock_in.prompt != license_continuity.prompt
 
     store = SittingStore(db)

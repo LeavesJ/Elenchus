@@ -67,6 +67,7 @@ def test_run_session_closes_one_cycle(tmp_path):
     store = Store(tmp_path / "t.db")
     for ref in (
         "veldra:license_fork_risk",
+        "veldra:midrollout_contract_boundary",
         "veldra:concentrated_market_pricing_power",
         "veldra:first_customer_proof_loop",
     ):
@@ -98,7 +99,7 @@ def test_run_session_closes_one_cycle(tmp_path):
     assert assessment.trajectory and state.frames
     assert any("license_continuity" in fs.last_evidence for fs in state.frames.values())
     rows = list(store._db.execute("SELECT * FROM selection_log"))
-    assert len(rows) == 1 and rows[0]["chosen_problem"] == "veldra:license_fork_risk"
+    assert len(rows) == 1 and rows[0]["chosen_problem"] == "veldra:midrollout_contract_boundary"
     assert store.queue_len() == 0  # open_ended path does not queue
 
 
@@ -106,6 +107,7 @@ def test_run_session_logs_selection_receipt(tmp_path):
     store = Store(tmp_path / "t2.db")
     for ref in (
         "veldra:license_fork_risk",
+        "veldra:midrollout_contract_boundary",
         "veldra:concentrated_market_pricing_power",
         "veldra:first_customer_proof_loop",
     ):

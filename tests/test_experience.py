@@ -8,6 +8,7 @@ SEED_REFS = (
     "veldra:concentrated_market_pricing_power",
     "veldra:first_customer_proof_loop",
     "veldra:embedded_anchor_lock_in",  # SP2 admit: irreversible_anchor experience
+    "veldra:midrollout_contract_boundary",  # license_continuity, split out of license_fork_risk
 )
 
 
