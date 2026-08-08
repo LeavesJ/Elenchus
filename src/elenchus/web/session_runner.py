@@ -502,6 +502,8 @@ _DOOR_FAILED_NUDGE = "That door hit an error — refresh to pick up where you le
 # The memory bubble (Spec-1 5b/5d): the click sends an INDEX into house_refs; an out-of-range or
 # non-int index (bool included — isinstance(True, int) is True in Python) is the honest refusal.
 _MEMORY_UNKNOWN_NUDGE = "That spot isn't one of your houses — try another."
+# Neutral and non-directive: it must not hint that a particular KIND of answer was wanted.
+_EXPECTATION_UNAVAILABLE_NUDGE = "That one is already recorded."
 
 # Worker failures log the traceback SERVER-side (the only durable copy — founder dogfood
 # 2026-07-03: the wire's repr(e) rendered as one transient muted line and the refresh the
@@ -669,6 +671,13 @@ class SessionRegistry:
         self._last_record: dict[str, dict] = {}
         self._sitting_done: dict[str, set[str]] = {}
         self._next_pick: dict[str, str | None] = {}
+        # The convergence row awaiting its forecast: (sitting_id, ref, converged_at). Set the
+        # instant `log_converged` writes, cleared once an expectation lands. IN-MEMORY on purpose,
+        # like `continued` above: it identifies a row written in THIS process for THIS session, so
+        # no index or drift guard is needed at all. A restart between the landing and the answer
+        # simply drops the ask, which loses a forecast and corrupts nothing -- the fail-safe
+        # direction for a record whose only value is that it was made before the outcome.
+        self._pending_expectation: dict[str, tuple[str, str, str]] = {}
         # Durable sittings (spec 2026-07-01 late): the write-through store and its bookkeeping.
         # The `continued` idempotency flag stays IN-MEMORY only (rec dict) — it guards "in flight
         # in this process"; persisting it would brick Continue after a restart (spec §2a).
@@ -1816,6 +1825,14 @@ class SessionRegistry:
                         ch.record["exp"].experience_id,
                         position=self._last_you_turn(sit),
                     )
+                    # The forecast is asked HERE, after the reasoning and before reality, and
+                    # nowhere else. Not at intake and not during the exercise: asking what someone
+                    # expects, or what would disconfirm them, BEFORE they reason hands over one of
+                    # the hidden moves the rubrics test and corrupts `reasoned_unprompted`. Not at
+                    # the 14-day outcome ask either: by then they have watched reality and the
+                    # answer is a reconstruction, which is worth no calibration at all.
+                    self._pending_expectation[session_id] = (sit, rec_ref, now.isoformat())
+                    data["ask_expectation"] = True
             # Houses are convergences (Model A, plan Task 2): compose the cumulative village HERE
             # — beside the frozen terrain, from the SAME post-session state — so the close
             # payload's terrain and houses can never disagree (the log is read AFTER the
@@ -2412,6 +2429,32 @@ class SessionRegistry:
             datetime.now(timezone.utc),
         )
         return self.memory(session_id, index)
+
+    def record_expectation(self, session_id: str, text: str):
+        """Freeze the learner's forecast against the convergence they just landed.
+
+        No index and no drift guard, unlike `record_outcome`, and that is not an oversight: this
+        targets the row THIS process wrote for THIS session moments ago, held in
+        `_pending_expectation`. There is no stale-index failure mode to guard because the caller
+        never names a row.
+
+        Idempotent by construction at both layers: the pending entry is popped here, and
+        `SittingStore.record_expectation` is write-once in SQL. A replayed POST cannot overwrite a
+        forecast with a later, hindsight-shaped one.
+
+        No model call. These are the learner's own words, stored verbatim and never scored -- a
+        calibration score is a correctness grade on the conclusion with a lag, so nothing may read
+        this into `state.py` (invariant 5)."""
+        pending = self._pending_expectation.get(session_id)
+        text = (text or "").strip()
+        if pending is None or not text:
+            return ("nudge", {"message": _EXPECTATION_UNAVAILABLE_NUDGE})
+        sit, ref, at = pending
+        wrote = self._store.record_expectation(
+            sit, ref, datetime.fromisoformat(at), text, datetime.now(timezone.utc)
+        )
+        self._pending_expectation.pop(session_id, None)
+        return ("expectation", {"recorded": bool(wrote)})
 
     def _memory_situation(self, ref: str, experience_id: str = "") -> str | None:
         """The situation text for a convergence ref: the SERVED forged scenario for a gen: ref;

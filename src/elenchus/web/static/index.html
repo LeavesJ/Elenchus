@@ -203,6 +203,36 @@ function outcomeBlock(m){
     + FATES.map(([v,l])=>'<button class="mem-fate" onclick="recordOutcome(\''+v+'\')">'+l+'</button>').join('')
     + '</div>';
 }
+// The forecast, asked ONCE at the landing. The copy is deliberately the flattest question that
+// can be asked: "What do you expect will happen?" and nothing else. NOT "what would change your
+// mind", NOT "what would falsify this", NOT "what metric will prove it", NOT "why do you expect
+// that" -- each of those performs a reasoning move on the learner's behalf, and naming your own
+// disconfirming signal is one of the moves the rubrics exist to test unprompted. No confidence
+// slider either: v0 is establishing whether people give interpretable predictions at all.
+function askExpectation(){
+  const d = document.createElement('div');
+  d.className = 'muted';
+  d.innerHTML = '<div class="mem-label">Before you go</div>'
+    + '<div class="mem-ask">What do you expect will happen?</div>'
+    + '<textarea id="exp-box" class="mem-outcome" rows="3"></textarea>'
+    + '<div class="mem-fates"><button class="mem-fate" onclick="recordExpectation()">Record it</button>'
+    + '<button class="mem-fate" onclick="skipExpectation()">Skip</button></div>';
+  thread.appendChild(d); thread.scrollTop = thread.scrollHeight;
+  expBlock = d;
+}
+let expBlock = null;
+function skipExpectation(){ if(expBlock){ expBlock.remove(); expBlock = null; } }
+function recordExpectation(){
+  const box = document.getElementById('exp-box');
+  const text = box ? box.value.trim() : '';
+  if(!text){ if(box) box.focus(); return; }
+  post('/api/session/single/expectation',{text:text}).then(r=>{
+    skipExpectation();
+    // Echo the learner's own words back, never a paraphrase and never a judgement of them.
+    if(r.kind==='expectation') muted('Recorded. You will be asked what actually happened later.');
+    else if(r.kind==='nudge') muted(r.message||'');
+  }).catch(()=>{});
+}
 function recordOutcome(kind){
   const box = document.getElementById('mem-outcome');
   const text = box ? box.value.trim() : '';
@@ -337,7 +367,7 @@ function advance(r){
     // re-rendering so a captured steer shows "press what you raised" (user-steered chapters §2c)
     if('next_kind' in r){ nextTitle=r.next_title||''; nextDesc=r.next_desc||''; nextKind=r.next_kind||'pressure'; }
     if(mode==='converse') renderContinue(nextTitle); return; }
-  if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); nextTitle=r.next_title||''; nextDesc=r.next_desc||''; nextKind=r.next_kind||'pressure'; renderContinue(nextTitle); return; }
+  if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); nextTitle=r.next_title||''; nextDesc=r.next_desc||''; nextKind=r.next_kind||'pressure'; if(r.ask_expectation) askExpectation(); renderContinue(nextTitle); return; }
   if(r.kind==='close'){ renderClose(r); return; }
   if(r.kind==='nudge'){ muted(r.message); showComposer(true); return; }
   muted('error: '+(r.message||'')); showComposer(true);

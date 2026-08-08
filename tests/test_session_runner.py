@@ -4652,3 +4652,105 @@ def test_house_slot_reads_the_filtered_terrain_row_not_the_original_index_compon
     assert rec["houses"] == [{"region": 0, "bucket": None, "slot": 0}]
     # The general invariant the review names: every house's slot equals its own terrain row's slot.
     assert all(h["slot"] == rec["terrain"][h["region"]]["slot"] for h in rec["houses"])
+
+
+# ---- The forecast frozen at convergence (calibration, prospective half) -----------------------
+
+
+def _converge(reg, sid, make_fake):
+    """Drive a real sitting to a genuine convergence through the registry, never a hand-built
+    record: the ask must be proven to ride the landing the engine actually emits."""
+    tag, _ = reg.start(sid, now=datetime(2026, 8, 8, 10, 0, tzinfo=timezone.utc))
+    assert tag == "say"
+    tag, _ = reg.step(sid, reg.menu_index(sid, _ANCHOR))
+    tag, data = reg.step(sid, "an opening that already holds the move")
+    while tag == "say":
+        tag, data = reg.step(sid, "because the mechanism is the escrow schedule")
+    return tag, data
+
+
+def test_the_landing_asks_for_a_forecast_on_a_genuine_convergence(tmp_path, make_fake):
+    """After the reasoning, before reality. The flag rides the `done` payload the engine emits,
+    so it cannot be attached to a plateau, an error, or a stale flow."""
+    reg = SessionRegistry(
+        str(tmp_path / "e.db"), model_factory=lambda: _agnostic(make_fake, "closed")
+    )
+    tag, data = _converge(reg, "s1", make_fake)
+    assert tag == "done"
+    assert data.get("ask_expectation") is True
+
+
+def test_the_forecast_lands_on_the_row_that_just_converged(tmp_path, make_fake):
+    """No index crosses the wire: the server writes to the convergence it logged for this session
+    moments ago, so a stale-index failure mode does not exist. `expectation_at` must precede any
+    later `outcome_at`, which is what makes prospectivity auditable per row."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "e.db")
+    reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
+    _converge(reg, "s1", make_fake)
+
+    tag, out = reg.record_expectation("s1", "  churn stays under 8 percent  ")
+    assert (tag, out) == ("expectation", {"recorded": True})
+
+    row = SittingStore(db).converged_log()[-1]
+    assert row["expectation"] == "churn stays under 8 percent"  # stored verbatim, stripped
+    assert row["expectation_at"] and row["expectation_at"] >= row["converged_at"]
+    assert row["outcome"] is None  # the forecast never fills the outcome half
+
+
+def test_a_replayed_forecast_cannot_overwrite_the_first_one(tmp_path, make_fake):
+    """An editable forecast is not a forecast. Guarded twice: the pending entry is popped here and
+    the store's UPDATE carries `AND expectation IS NULL`, so neither a double-click nor a POST
+    replayed after the outcome is known can replace a prospective answer."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "e.db")
+    reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
+    _converge(reg, "s1", make_fake)
+    reg.record_expectation("s1", "churn stays under 8 percent")
+
+    tag, _ = reg.record_expectation("s1", "I knew all along it would spike")
+    assert tag == "nudge"
+    assert SittingStore(db).converged_log()[-1]["expectation"] == "churn stays under 8 percent"
+
+
+def test_no_forecast_is_recorded_without_a_convergence(tmp_path, make_fake):
+    """A session that never converged has no row to freeze against, and an empty answer is not a
+    forecast. Both refuse rather than writing somewhere plausible."""
+    reg = SessionRegistry(
+        str(tmp_path / "e.db"), model_factory=lambda: _agnostic(make_fake, "closed")
+    )
+    reg.start("s1", now=datetime(2026, 8, 8, 10, 0, tzinfo=timezone.utc))
+    assert reg.record_expectation("s1", "something")[0] == "nudge"
+
+    _converge(reg, "s2", make_fake)
+    assert reg.record_expectation("s2", "   ")[0] == "nudge"  # whitespace is not an answer
+
+
+def test_the_forecast_question_performs_no_reasoning_move():
+    """Invariant 3 at the copy layer. The ask is the flattest question that can be asked. Anything
+    that names a falsifier, a disconfirming signal, a metric, or asks for a justification hands the
+    learner one of the moves the rubrics exist to test unprompted -- and a standing form field
+    would do it for every learner, on every problem, for free."""
+    from pathlib import Path
+
+    page = Path("src/elenchus/web/static/index.html").read_text()
+    # Only the RENDERED copy, not the comment above it -- that comment names the forbidden
+    # phrasings in order to forbid them, and scanning it would make this test unpassable by
+    # construction. Slice the three functions that compose and send the ask.
+    start = page.index("function askExpectation(){")
+    copy = page[start : page.index("function recordOutcome(", start)]
+
+    assert "What do you expect will happen?" in copy
+    for leak in (
+        "change your mind",
+        "falsif",
+        "disconfirm",
+        "prove",
+        "why do you expect",
+        "confidence",
+        "assumption",
+        "evidence",
+    ):
+        assert leak not in copy.lower(), f"the forecast ask leaks a reasoning move: {leak!r}"
