@@ -13,6 +13,7 @@ and transfer treat a ref as a problem, so a collision under-counts transfer and 
 The shipped rubrics share no frame, which is exactly why that one had to be tested synthetically.
 """
 
+import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
@@ -179,105 +180,222 @@ def test_distinct_refs_count_as_distinct_problems_for_transfer_and_the_strong_ba
 
 # ----------------------------------------------------------------------- the migration ------
 
+# ----------------------------------------------------------------------- the migration ------
+#
+# THE PRODUCTION SCHEMA, NEVER A HAND-ROLLED ONE. The first version of these tests built
+# `CREATE TABLE selection_log (experience_id TEXT, problem TEXT)` -- two of thirteen columns, a
+# shape no production path can emit -- so a migration that rewrote only `problem` and left
+# `chosen_problem` on the old ref passed green, and the commit message's row count was measured
+# with the same one-sided predicate. The real db then ended up holding an `outcome='accepted'` row
+# whose two halves named different owned problems. A fixture narrower than production cannot see
+# the columns production has.
 
-def _seed(path):
+
+def _production_db(path):
+    """A database with the REAL schema, built by the real writers, in its PRE-split state."""
+    from elenchus.persistence import Store
+    from elenchus.web.sitting_store import SittingStore
+
+    Store(path)  # engine tables
+    SittingStore(path)  # web tables, same file
     c = sqlite3.connect(path)
-    c.executescript(
-        "CREATE TABLE frames (frame_code TEXT PRIMARY KEY, breadth_json TEXT, "
-        "unprompted_breadth_json TEXT);"
-        "CREATE TABLE selection_log (experience_id TEXT, problem TEXT);"
-        "CREATE TABLE queue (experience_id TEXT, ledger_ref TEXT);"
-        "CREATE TABLE corpus (ledger_ref TEXT PRIMARY KEY, domain TEXT, why_owned TEXT, "
-        "unlabeled TEXT, provenance TEXT, corpus_pointers_json TEXT, scene_json TEXT);"
+    c.execute(
+        "INSERT OR REPLACE INTO corpus (ledger_ref, domain, why_owned, unlabeled, provenance,"
+        " corpus_pointers_json, scene_json) VALUES (?,?,?,?,?,?,?)",
+        (OLD_REF, "founder_ceo", "stakes", "unlabeled", "prov", "[]", None),
     )
-    c.executemany(
-        "INSERT INTO frames VALUES (?,?,?)",
-        [
-            ("protect_the_core_lane", f'["gen:x", "{OLD_REF}"]', f'["{OLD_REF}"]'),
-            ("lead_with_what_you_refuse_to_do", f'["{OLD_REF}"]', "[]"),
-            ("commit_under_the_deadline", f'["{OLD_REF}"]', "[]"),
-            # continuity_lock_in's own frame: must NOT move
-            ("embed_credentials_as_a_list", f'["veldra:other", "{OLD_REF}"]', "[]"),
-        ],
+    c.execute(
+        "INSERT OR REPLACE INTO ledger (id, owned_problem, links_json) VALUES (?,?,?)",
+        (OLD_REF, "the license fork problem", "[]"),
     )
-    c.executemany(
-        "INSERT INTO selection_log VALUES (?,?)",
-        [
-            ("license_continuity", OLD_REF),
-            ("license_continuity", OLD_REF),
-            ("continuity_lock_in", OLD_REF),
-        ],
+    for code in sorted(MOVED_FRAMES) + ["embed_credentials_as_a_list"]:
+        c.execute(
+            "INSERT OR REPLACE INTO frames (frame_code, strength, last_seen, due, last_evidence,"
+            " evidence_count, breadth_json, unprompted_breadth_json) VALUES (?,?,?,?,?,?,?,?)",
+            (
+                code,
+                "forming",
+                NOW.isoformat(),
+                NOW.isoformat(),
+                "x",
+                1,
+                f'["{OLD_REF}"]',
+                f'["{OLD_REF}"]',
+            ),
+        )
+    # ADVERSARIAL ROW 1: an ACCEPTED selection carrying all four identity columns. The one-sided
+    # migration turned this into a row naming two different owned problems.
+    c.execute(
+        "INSERT INTO selection_log (created_at, frame, problem, experience_id, drive, scores_json,"
+        " runner_up_drive, margin, content_gaps_json, outcome, chosen_frame, chosen_problem,"
+        " chosen_experience_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            NOW.isoformat(),
+            "protect_the_core_lane",
+            OLD_REF,
+            "license_continuity",
+            "deploy",
+            "{}",
+            None,
+            0.0,
+            "[]",
+            "accepted",
+            "protect_the_core_lane",
+            OLD_REF,
+            "license_continuity",
+        ),
     )
-    c.execute("INSERT INTO queue VALUES (?,?)", ("license_continuity", OLD_REF))
+    # ADVERSARIAL ROW 2: continuity_lock_in's own row. Must NOT move, either side.
+    c.execute(
+        "INSERT INTO selection_log (created_at, frame, problem, experience_id, drive, scores_json,"
+        " runner_up_drive, margin, content_gaps_json, outcome, chosen_frame, chosen_problem,"
+        " chosen_experience_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            NOW.isoformat(),
+            "embed_credentials_as_a_list",
+            OLD_REF,
+            "continuity_lock_in",
+            "deploy",
+            "{}",
+            None,
+            0.0,
+            "[]",
+            "accepted",
+            "embed_credentials_as_a_list",
+            OLD_REF,
+            "continuity_lock_in",
+        ),
+    )
+    # ADVERSARIAL ROW 3: a PRE-EXISTING convergence. The first migration forgot the web tables
+    # entirely, and this row is the one whose memory then recalled the other problem's situation.
+    c.execute(
+        "INSERT INTO web_converged (sitting_id, ref, converged_at, experience_id, position)"
+        " VALUES (?,?,?,?,?)",
+        ("sit1", OLD_REF, NOW.isoformat(), "license_continuity", "my call"),
+    )
     c.commit()
     c.close()
+    return path
 
 
-def test_migration_moves_exactly_the_rows_that_belong_to_the_new_problem(tmp_path):
-    """Exact attribution by identifier, never heuristics by title or domain. The two rubrics share
-    no frame code, so every row is assignable without guessing."""
-    db = str(tmp_path / "m.db")
-    _seed(db)
+def test_migration_moves_every_identity_surface_on_the_production_schema(tmp_path):
+    db = _production_db(str(tmp_path / "prod.db"))
     counts = migrate(db)
-    assert counts == {
-        "frames_breadth": 3,
-        "frames_unprompted": 1,
-        "selection_log": 2,
-        "queue": 1,
-        "corpus": 1,
-    }
 
-    # the new ref gets ownership metadata the load gate requires, and NO scene: `_attach_scene`
-    # must leave license_continuity's own authored prompt in place
-    row = (
-        sqlite3.connect(db)
-        .execute(
-            "SELECT why_owned, unlabeled, scene_json FROM corpus WHERE ledger_ref=?", (NEW_REF,)
-        )
-        .fetchone()
-    )
-    assert row[0].strip() and row[1].strip(), "the gate hard-rejects on either being empty"
-    assert row[2] is None, "a migration must not fabricate a scene"
+    assert counts["selection_log_problem"] == 1
+    assert counts["selection_log_chosen"] == 1, "the chosen_* pair is a second identity surface"
+    assert counts["web_converged"] == 1, "the web tables live in the SAME file"
+    assert counts["corpus"] == 1 and counts["ledger"] == 1
+    assert counts["frames_breadth"] == 3 and counts["frames_unprompted"] == 3
 
     c = sqlite3.connect(db)
     c.row_factory = sqlite3.Row
-    rows = {r["frame_code"]: dict(r) for r in c.execute("SELECT * FROM frames")}
-    for code in MOVED_FRAMES:
-        assert OLD_REF not in rows[code]["breadth_json"]
-        assert NEW_REF in rows[code]["breadth_json"]
-    # continuity_lock_in's frame is untouched, and unrelated refs in a moved row survive
-    assert rows["embed_credentials_as_a_list"]["breadth_json"] == f'["veldra:other", "{OLD_REF}"]'
-    assert "gen:x" in rows["protect_the_core_lane"]["breadth_json"]
-    # the other experience's selection_log rows keep the old ref
-    kept = c.execute(
-        "SELECT COUNT(*) FROM selection_log WHERE experience_id='continuity_lock_in' AND problem=?",
-        (OLD_REF,),
-    ).fetchone()[0]
-    assert kept == 1
+    rows = [dict(r) for r in c.execute("SELECT * FROM selection_log")]
+    mine = [r for r in rows if r["experience_id"] == "license_continuity"][0]
+    theirs = [r for r in rows if r["experience_id"] == "continuity_lock_in"][0]
+
+    # SEMANTIC consistency, not row counts: each identity pair must agree with itself.
+    assert mine["problem"] == NEW_REF and mine["chosen_problem"] == NEW_REF
+    assert theirs["problem"] == OLD_REF and theirs["chosen_problem"] == OLD_REF
+    assert mine["problem"] == mine["chosen_problem"], (
+        "an accepted row whose halves name different owned problems is the one-sided migration"
+    )
+    assert c.execute("SELECT ref FROM web_converged").fetchone()[0] == NEW_REF
+    # continuity_lock_in's own frame never moves
+    assert (
+        OLD_REF
+        in c.execute(
+            "SELECT breadth_json FROM frames WHERE frame_code='embed_credentials_as_a_list'"
+        ).fetchone()[0]
+    )
     c.close()
 
 
-def test_migration_is_idempotent(tmp_path):
-    """A migration that cannot be re-run safely is a migration nobody dares re-run. The second
-    pass must find nothing and change nothing."""
-    db = str(tmp_path / "m.db")
-    _seed(db)
-    first = migrate(db)
-    assert sum(first.values()) > 0
+def test_the_repaired_memory_recalls_the_experience_actually_worked(tmp_path):
+    """The regression the first migration CAUSED: a pre-existing convergence kept the old ref, and
+    because only continuity_lock_in resolves for it now, `_memory_situation`'s experience_id
+    disambiguation could no longer match and fell back to the other problem's prompt."""
+    db = _production_db(str(tmp_path / "prod.db"))
+    migrate(db)
 
     c = sqlite3.connect(db)
-    before = c.execute("SELECT * FROM frames ORDER BY frame_code").fetchall()
+    ref, eid = c.execute("SELECT ref, experience_id FROM web_converged").fetchone()
+    c.close()
+    lib = {e.experience_id: e for e in load_library()}
+    entries = [e for e in load_library() if e.ledger_ref == ref]
+    match = [e for e in entries if e.experience_id == eid]
+    served = (match or entries)[0]
+    assert served.experience_id == "license_continuity"
+    assert served.prompt == lib["license_continuity"].prompt
+
+
+def test_migration_is_idempotent_on_the_production_schema(tmp_path):
+    db = _production_db(str(tmp_path / "prod.db"))
+    first = migrate(db)
+    assert sum(v for k, v in first.items() if k != "next_pick_ref_left") > 0
+
+    c = sqlite3.connect(db)
+    before = c.execute("SELECT * FROM selection_log ORDER BY rowid").fetchall()
     c.close()
 
     second = migrate(db)
-    assert second == {
-        "frames_breadth": 0,
-        "frames_unprompted": 0,
-        "selection_log": 0,
-        "queue": 0,
-        "corpus": 0,
-    }
-
+    assert all(v == 0 for k, v in second.items() if k != "next_pick_ref_left")
     c = sqlite3.connect(db)
-    assert c.execute("SELECT * FROM frames ORDER BY frame_code").fetchall() == before
+    assert c.execute("SELECT * FROM selection_log ORDER BY rowid").fetchall() == before
     c.close()
+
+
+def test_migration_upgrades_a_build_store_placeholder_instead_of_no_opping(tmp_path):
+    """Booting the app before migrating makes `cli.build_store` author a placeholder corpus/ledger
+    row for the new ref. A bare INSERT OR IGNORE would then be a permanent no-op reporting
+    `corpus: 0` -- byte-indistinguishable from a clean idempotent re-run, while the fields
+    `anti_label_gate` grades on stay machine text forever."""
+    from elenchus.cli import build_store
+
+    db = _production_db(str(tmp_path / "prod.db"))
+    build_store(db)  # the boot that shipped before the operator ran the migration
+    counts = migrate(db)
+
+    assert counts["corpus"] == 1 and counts["ledger"] == 1, "the placeholder must be upgraded"
+    c = sqlite3.connect(db)
+    why = c.execute("SELECT why_owned FROM corpus WHERE ledger_ref=?", (NEW_REF,)).fetchone()[0]
+    owned = c.execute("SELECT owned_problem FROM ledger WHERE id=?", (NEW_REF,)).fetchone()[0]
+    c.close()
+    assert "seed stakes" not in why and "Abstracted seed" not in owned
+
+
+def test_migration_survives_degenerate_databases(tmp_path):
+    """Empty, schema-only, and already-migrated. A migration nobody dares re-run is a migration
+    that will be run twice by accident anyway."""
+    empty = str(tmp_path / "empty.db")
+    sqlite3.connect(empty).close()
+    assert all(v == 0 for v in migrate(empty).values())
+
+    db = _production_db(str(tmp_path / "p2.db"))
+    migrate(db)
+    assert all(v == 0 for k, v in migrate(db).items() if k != "next_pick_ref_left")
+
+
+def test_breadth_never_stores_the_same_problem_twice(tmp_path):
+    """Between the content change shipping and the operator migrating, a live sitting writes the
+    NEW ref into breadth, so a row can hold both. Mapping without de-duplication stores the same
+    identifier twice -- a durable row lying about what happened, even though `load_state`'s set()
+    hides it from every reader."""
+    db = _production_db(str(tmp_path / "prod.db"))
+    c = sqlite3.connect(db)
+    c.execute(
+        "UPDATE frames SET breadth_json=? WHERE frame_code='protect_the_core_lane'",
+        (json.dumps([OLD_REF, NEW_REF]),),
+    )
+    c.commit()
+    c.close()
+
+    migrate(db)
+    c = sqlite3.connect(db)
+    stored = json.loads(
+        c.execute(
+            "SELECT breadth_json FROM frames WHERE frame_code='protect_the_core_lane'"
+        ).fetchone()[0]
+    )
+    c.close()
+    assert stored == [NEW_REF], f"duplicate identifier persisted: {stored}"

@@ -50,6 +50,10 @@ class _Expectation(BaseModel):
     the server targets the convergence it just wrote for this session."""
 
     text: str
+    # Echoes the token the landing handed out. It names WHICH convergence this forecast is for, so
+    # a stale box left in the append-only thread can only ever address its own (already answered,
+    # therefore refused) row instead of whatever the server happens to be holding.
+    token: str = ""
 
 
 class _Outcome(BaseModel):
@@ -159,6 +163,9 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
         # forecast is neither a leaked reasoning move nor a hindsight reconstruction.
         if data.get("ask_expectation"):
             out["ask_expectation"] = True
+            # Opaque per-convergence id. NOT a ref: an internal identifier must never reach the
+            # client (L-13), and this one carries no problem identity at all.
+            out["expectation_token"] = data.get("expectation_token", "")
         if data.get("confluence"):  # transient (Spec-2 §5): attach-only-when-present, two ints
             out["confluence"] = {
                 "from_slot": data["confluence"]["from_slot"],
@@ -287,6 +294,6 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
         # No index: the server writes to the convergence it just logged for this session, so a
         # stale-index failure mode does not exist here. Write-once in the store, so a replayed
         # POST cannot overwrite a forecast after the outcome is known.
-        return _emit(reg, *reg.record_expectation(_SID, body.text))
+        return _emit(reg, *reg.record_expectation(_SID, body.text, body.token))
 
     return app

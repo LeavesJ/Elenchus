@@ -4688,9 +4688,11 @@ def test_the_forecast_lands_on_the_row_that_just_converged(tmp_path, make_fake):
 
     db = str(tmp_path / "e.db")
     reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
-    _converge(reg, "s1", make_fake)
+    _, data = _converge(reg, "s1", make_fake)
 
-    tag, out = reg.record_expectation("s1", "  churn stays under 8 percent  ")
+    tag, out = reg.record_expectation(
+        "s1", "  churn stays under 8 percent  ", data["expectation_token"]
+    )
     assert (tag, out) == ("expectation", {"recorded": True})
 
     row = SittingStore(db).converged_log()[-1]
@@ -4707,10 +4709,11 @@ def test_a_replayed_forecast_cannot_overwrite_the_first_one(tmp_path, make_fake)
 
     db = str(tmp_path / "e.db")
     reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
-    _converge(reg, "s1", make_fake)
-    reg.record_expectation("s1", "churn stays under 8 percent")
+    _, data = _converge(reg, "s1", make_fake)
+    tok = data["expectation_token"]
+    reg.record_expectation("s1", "churn stays under 8 percent", tok)
 
-    tag, _ = reg.record_expectation("s1", "I knew all along it would spike")
+    tag, _ = reg.record_expectation("s1", "I knew all along it would spike", tok)
     assert tag == "nudge"
     assert SittingStore(db).converged_log()[-1]["expectation"] == "churn stays under 8 percent"
 
@@ -4722,10 +4725,11 @@ def test_no_forecast_is_recorded_without_a_convergence(tmp_path, make_fake):
         str(tmp_path / "e.db"), model_factory=lambda: _agnostic(make_fake, "closed")
     )
     reg.start("s1", now=datetime(2026, 8, 8, 10, 0, tzinfo=timezone.utc))
-    assert reg.record_expectation("s1", "something")[0] == "nudge"
+    assert reg.record_expectation("s1", "something", "no-such-token")[0] == "nudge"
 
-    _converge(reg, "s2", make_fake)
-    assert reg.record_expectation("s2", "   ")[0] == "nudge"  # whitespace is not an answer
+    _, data = _converge(reg, "s2", make_fake)
+    tok = data["expectation_token"]
+    assert reg.record_expectation("s2", "   ", tok)[0] == "nudge"  # whitespace is not an answer
 
 
 def test_the_forecast_question_performs_no_reasoning_move():
@@ -4739,7 +4743,7 @@ def test_the_forecast_question_performs_no_reasoning_move():
     # Only the RENDERED copy, not the comment above it -- that comment names the forbidden
     # phrasings in order to forbid them, and scanning it would make this test unpassable by
     # construction. Slice the three functions that compose and send the ask.
-    start = page.index("function askExpectation(){")
+    start = page.index("function askExpectation(")
     copy = page[start : page.index("function recordOutcome(", start)]
 
     assert "What do you expect will happen?" in copy

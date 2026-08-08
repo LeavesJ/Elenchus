@@ -620,6 +620,14 @@ class SittingStore:
         """Freeze what the learner expects to happen, AT convergence, before reality resolves.
         Returns True if this call wrote it, False if it was already frozen.
 
+        TWO guards, and the second was missing until a review executed the gap. `expectation IS
+        NULL` makes it write-once. `outcome IS NULL` makes it PROSPECTIVE: without it, recording
+        the outcome first and the forecast second succeeded and stamped `expectation_at` AFTER
+        `outcome_at`, producing a row that this function's own docstring classifies as a hindsight
+        reconstruction, indistinguishable from an honest one. The property was asserted here as
+        checkable and nothing enforced it. Now the ordering is refused at the write, so a row that
+        exists is a row that was prospective.
+
         WRITE-ONCE, and that is the entire mechanism, not a nicety. `record_outcome` deliberately
         overwrites, because a decision's fate is not final the first time you ask. This is the
         opposite: a forecast that can be edited after the outcome is known is not a forecast. The
@@ -650,7 +658,8 @@ class SittingStore:
         with self._conn() as c:
             cur = c.execute(
                 "UPDATE web_converged SET expectation=?, expectation_at=? "
-                "WHERE sitting_id=? AND ref=? AND converged_at=? AND expectation IS NULL",
+                "WHERE sitting_id=? AND ref=? AND converged_at=? "
+                "AND expectation IS NULL AND outcome IS NULL",
                 (expectation, now.isoformat(), sitting_id, ref, converged_at.isoformat()),
             )
             return cur.rowcount > 0

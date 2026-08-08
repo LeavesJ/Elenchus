@@ -209,28 +209,39 @@ function outcomeBlock(m){
 // that" -- each of those performs a reasoning move on the learner's behalf, and naming your own
 // disconfirming signal is one of the moves the rubrics exist to test unprompted. No confidence
 // slider either: v0 is establishing whether people give interpretable predictions at all.
-function askExpectation(){
+// EVERY ask carries its own token, and every element it creates is keyed by that token. The
+// thread is append-only, so a learner who lands twice without answering has two asks on screen.
+// With a fixed id, getElementById returned the FIRST (stale) textarea while the server wrote to
+// whatever convergence it was currently holding: problem A's half-typed words frozen onto problem
+// B's durable row, write-once and uncorrectable. Now each box addresses only its own convergence.
+function askExpectation(token){
   const d = document.createElement('div');
   d.className = 'muted';
+  d.dataset.expToken = token;
   d.innerHTML = '<div class="mem-label">Before you go</div>'
     + '<div class="mem-ask">What do you expect will happen?</div>'
-    + '<textarea id="exp-box" class="mem-outcome" rows="3"></textarea>'
-    + '<div class="mem-fates"><button class="mem-fate" onclick="recordExpectation()">Record it</button>'
-    + '<button class="mem-fate" onclick="skipExpectation()">Skip</button></div>';
+    + '<textarea id="exp-box-'+esc(token)+'" class="mem-outcome" rows="3"></textarea>'
+    + '<div class="mem-fates">'
+    + '<button class="mem-fate" onclick="recordExpectation(\''+esc(token)+'\')">Record it</button>'
+    + '<button class="mem-fate" onclick="skipExpectation(\''+esc(token)+'\')">Skip</button></div>';
   thread.appendChild(d); thread.scrollTop = thread.scrollHeight;
-  expBlock = d;
 }
-let expBlock = null;
-function skipExpectation(){ if(expBlock){ expBlock.remove(); expBlock = null; } }
-function recordExpectation(){
-  const box = document.getElementById('exp-box');
+function expBlockFor(token){
+  const boxes = thread.querySelectorAll('[data-exp-token]');
+  for(const b of boxes) if(b.dataset.expToken === token) return b;
+  return null;
+}
+function skipExpectation(token){ const b = expBlockFor(token); if(b) b.remove(); }
+function recordExpectation(token){
+  const box = document.getElementById('exp-box-'+token);
   const text = box ? box.value.trim() : '';
   if(!text){ if(box) box.focus(); return; }
-  post('/api/session/single/expectation',{text:text}).then(r=>{
-    skipExpectation();
-    // Echo the learner's own words back, never a paraphrase and never a judgement of them.
-    if(r.kind==='expectation') muted('Recorded. You will be asked what actually happened later.');
+  post('/api/session/single/expectation',{text:text,token:token}).then(r=>{
+    skipExpectation(token);
+    // Report what the SERVER did, never what we hoped it did: a refusal must not read as a record.
+    if(r.kind==='expectation' && r.recorded) muted('Recorded. You will be asked what actually happened later.');
     else if(r.kind==='nudge') muted(r.message||'');
+    else muted('That one could not be recorded.');
   }).catch(()=>{});
 }
 function recordOutcome(kind){
@@ -367,7 +378,7 @@ function advance(r){
     // re-rendering so a captured steer shows "press what you raised" (user-steered chapters §2c)
     if('next_kind' in r){ nextTitle=r.next_title||''; nextDesc=r.next_desc||''; nextKind=r.next_kind||'pressure'; }
     if(mode==='converse') renderContinue(nextTitle); return; }
-  if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); nextTitle=r.next_title||''; nextDesc=r.next_desc||''; nextKind=r.next_kind||'pressure'; if(r.ask_expectation) askExpectation(); renderContinue(nextTitle); return; }
+  if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); nextTitle=r.next_title||''; nextDesc=r.next_desc||''; nextKind=r.next_kind||'pressure'; if(r.ask_expectation) askExpectation(r.expectation_token||''); renderContinue(nextTitle); return; }
   if(r.kind==='close'){ renderClose(r); return; }
   if(r.kind==='nudge'){ muted(r.message); showComposer(true); return; }
   muted('error: '+(r.message||'')); showComposer(true);

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import secrets
 import re
 import threading
 from collections.abc import Callable
@@ -502,8 +503,13 @@ _DOOR_FAILED_NUDGE = "That door hit an error — refresh to pick up where you le
 # The memory bubble (Spec-1 5b/5d): the click sends an INDEX into house_refs; an out-of-range or
 # non-int index (bool included — isinstance(True, int) is True in Python) is the honest refusal.
 _MEMORY_UNKNOWN_NUDGE = "That spot isn't one of your houses — try another."
-# Neutral and non-directive: it must not hint that a particular KIND of answer was wanted.
-_EXPECTATION_UNAVAILABLE_NUDGE = "That one is already recorded."
+# Neutral and non-directive: neither may hint that a particular KIND of answer was wanted.
+# The old single constant said "That one is already recorded." on EVERY refusal, including
+# the ones where nothing was ever recorded -- a dropped pending entry after a restart, an
+# unwritable db, whitespace. A learner told their forecast was stored, when it was not, will
+# never re-enter it, and the calibration record loses the row silently. Two honest messages.
+_EXPECTATION_UNAVAILABLE_NUDGE = "That one could not be recorded."
+_EXPECTATION_EMPTY_NUDGE = "Nothing was written down."
 
 # Worker failures log the traceback SERVER-side (the only durable copy — founder dogfood
 # 2026-07-03: the wire's repr(e) rendered as one transient muted line and the refresh the
@@ -671,12 +677,20 @@ class SessionRegistry:
         self._last_record: dict[str, dict] = {}
         self._sitting_done: dict[str, set[str]] = {}
         self._next_pick: dict[str, str | None] = {}
-        # The convergence row awaiting its forecast: (sitting_id, ref, converged_at). Set the
-        # instant `log_converged` writes, cleared once an expectation lands. IN-MEMORY on purpose,
-        # like `continued` above: it identifies a row written in THIS process for THIS session, so
-        # no index or drift guard is needed at all. A restart between the landing and the answer
-        # simply drops the ask, which loses a forecast and corrupts nothing -- the fail-safe
-        # direction for a record whose only value is that it was made before the outcome.
+        # Convergence rows awaiting a forecast, keyed by an OPAQUE PER-CONVERGENCE TOKEN ->
+        # (sitting_id, ref, converged_at).
+        #
+        # This was keyed by session_id, which is one slot -- and `web/app.py` pins every request to
+        # the constant `_SID = "single"`, so the whole server had exactly ONE. A second convergence
+        # overwrote the first's entry while the first's ask was still on screen (the client thread
+        # is append-only), so answering the older box wrote problem A's forecast onto problem B's
+        # durable row, write-once and therefore uncorrectable. A review executed it.
+        #
+        # The token is minted per convergence and echoed back by the client, so a stale UI element
+        # can only ever address ITS OWN convergence -- which is already answered, and refused by
+        # the store's write-once guard. It is opaque because a ref must never reach the client
+        # (L-13). Still in-memory on purpose: a restart drops the ask, which loses a forecast and
+        # corrupts nothing, the fail-safe direction for a record whose only value is being early.
         self._pending_expectation: dict[str, tuple[str, str, str]] = {}
         # Durable sittings (spec 2026-07-01 late): the write-through store and its bookkeeping.
         # The `continued` idempotency flag stays IN-MEMORY only (rec dict) — it guards "in flight
@@ -1831,8 +1845,10 @@ class SessionRegistry:
                     # the hidden moves the rubrics test and corrupts `reasoned_unprompted`. Not at
                     # the 14-day outcome ask either: by then they have watched reality and the
                     # answer is a reconstruction, which is worth no calibration at all.
-                    self._pending_expectation[session_id] = (sit, rec_ref, now.isoformat())
+                    token = secrets.token_urlsafe(9)
+                    self._pending_expectation[token] = (sit, rec_ref, now.isoformat())
                     data["ask_expectation"] = True
+                    data["expectation_token"] = token
             # Houses are convergences (Model A, plan Task 2): compose the cumulative village HERE
             # — beside the frozen terrain, from the SAME post-session state — so the close
             # payload's terrain and houses can never disagree (the log is read AFTER the
@@ -2430,7 +2446,7 @@ class SessionRegistry:
         )
         return self.memory(session_id, index)
 
-    def record_expectation(self, session_id: str, text: str):
+    def record_expectation(self, session_id: str, text: str, token: str = ""):
         """Freeze the learner's forecast against the convergence they just landed.
 
         No index and no drift guard, unlike `record_outcome`, and that is not an oversight: this
@@ -2445,16 +2461,23 @@ class SessionRegistry:
         No model call. These are the learner's own words, stored verbatim and never scored -- a
         calibration score is a correctness grade on the conclusion with a lag, so nothing may read
         this into `state.py` (invariant 5)."""
-        pending = self._pending_expectation.get(session_id)
         text = (text or "").strip()
-        if pending is None or not text:
+        if not text:
+            return ("nudge", {"message": _EXPECTATION_EMPTY_NUDGE})
+        pending = self._pending_expectation.get(token or "")
+        if pending is None:
             return ("nudge", {"message": _EXPECTATION_UNAVAILABLE_NUDGE})
         sit, ref, at = pending
         wrote = self._store.record_expectation(
             sit, ref, datetime.fromisoformat(at), text, datetime.now(timezone.utc)
         )
-        self._pending_expectation.pop(session_id, None)
-        return ("expectation", {"recorded": bool(wrote)})
+        self._pending_expectation.pop(token, None)
+        # `recorded` is the STORE's answer, not this function's hope: an inert or unwritable db,
+        # or an outcome already on the row, all return False, and the client must not claim a
+        # record that does not exist.
+        if not wrote:
+            return ("nudge", {"message": _EXPECTATION_UNAVAILABLE_NUDGE})
+        return ("expectation", {"recorded": True})
 
     def _memory_situation(self, ref: str, experience_id: str = "") -> str | None:
         """The situation text for a convergence ref: the SERVED forged scenario for a gen: ref;
