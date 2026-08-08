@@ -399,3 +399,40 @@ def test_breadth_never_stores_the_same_problem_twice(tmp_path):
     )
     c.close()
     assert stored == [NEW_REF], f"duplicate identifier persisted: {stored}"
+
+
+def test_next_pick_residuals_cannot_reach_a_learner(tmp_path):
+    """`next_pick_ref` is the one identity surface with NO discriminator (a bare ref, no companion
+    experience_id), so the migration reports it as `next_pick_ref_left` rather than guessing. That
+    is only acceptable if such a row cannot be consumed, and this proves it can't.
+
+    `SessionRegistry` restores a persisted pick into `_next_pick` and can drive a selection from
+    it -- but only for the LIVE sitting. `SittingStore.live_sitting` selects `WHERE status='live'`,
+    `web_sitting.status` has exactly two writers (INSERT 'live' for a NEW id, UPDATE to 'closed'),
+    nothing reopens a closed sitting, and a unique index allows at most one live row. So a stale
+    pick on a closed sitting is dead transient state."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "pick.db")
+    st = SittingStore(db)
+    sid = st.create_sitting(NOW)
+    st.write_state(sid, next_pick=(OLD_REF, "a stale door"), now=NOW)
+    assert st.read_state(sid)["next_pick"] == (OLD_REF, "a stale door")
+
+    st.close_sitting(sid)
+    assert st.live_sitting() is None, "a closed sitting must not resume"
+
+    # a new sitting is a NEW id and carries none of the closed one's pick
+    sid2 = st.create_sitting(NOW + timedelta(hours=1))
+    assert sid2 != sid
+    assert st.read_state(sid2)["next_pick"] is None
+    assert st.live_sitting()["id"] == sid2
+
+    c = sqlite3.connect(db)
+    stale = c.execute(
+        "SELECT COUNT(*) FROM web_sitting_state s JOIN web_sitting w ON w.id=s.sitting_id "
+        "WHERE s.next_pick_ref=? AND w.status='live'",
+        (OLD_REF,),
+    ).fetchone()[0]
+    c.close()
+    assert stale == 0, "a stale pick survives on a LIVE sitting; reporting it is not enough"

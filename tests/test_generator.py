@@ -537,18 +537,35 @@ def test_seed_ledger_refs_resolve_in_the_real_corpus():
     reason="real seeded corpus (gitignored data/) not present",
 )
 def test_seeded_license_scene_clears_the_moat():
-    """The authored (gitignored) license_continuity scene the student actually sees must clear the
-    same anti-label bar as the abstract prompt — the moat holds over the concrete scene + situation."""
-    from elenchus.content_loader import load_denylist, load_experience
+    """The authored (gitignored) scene the student actually sees must clear the same anti-label bar
+    as the abstract prompt — the moat holds over the concrete scene + situation.
+
+    SCENE AND RUBRIC ARE RESOLVED THROUGH ONE `ledger_ref`, never named independently. This test
+    used to read `veldra:license_fork_risk`'s scene and validate it against `license_continuity`'s
+    rubric. Those were one problem when it was written; after the ledger_ref split the ref belongs
+    to `continuity_lock_in`, so the pairing became one problem's scene against another's rubric and
+    a green result meant nothing. `_attach_scene` resolves a scene BY REF, so the only pairing that
+    can ever reach a learner is scene-and-rubric under the same ref, and that is what this checks."""
+    from elenchus.content_loader import load_denylist, load_library
     from elenchus.generator import validate_scene
     from elenchus.persistence import Store
 
     store = Store("data/elenchus.db")
     try:
-        entry = store.get_corpus("veldra:license_fork_risk")
-        if entry is None or entry.scene is None:
-            pytest.skip("license_fork_risk scene not authored in this data/")
-        rubric = load_experience("license_continuity").rubric
+        owner = next(
+            (
+                e
+                for e in load_library()
+                if e.rubric
+                and store.get_corpus(e.ledger_ref) is not None
+                and store.get_corpus(e.ledger_ref).scene is not None
+            ),
+            None,
+        )
+        if owner is None:
+            pytest.skip("no authored scene in this data/")
+        entry = store.get_corpus(owner.ledger_ref)
+        rubric = owner.rubric
         validate_scene(  # must not raise — a leaking authored scene would be a moat breach
             entry.scene,
             rubric,

@@ -831,7 +831,9 @@ class SessionRegistry:
                         # Honest selection_log: the chosen spec carries the instance ref (the
                         # gen: seam key) + the base id; the receipt is the base's scored
                         # candidate when the policy ranked it (candidates, not the deduped
-                        # menu — two territories can share a curated ledger_ref), else the top.
+                        # menu -- two territories can share a curated ledger_ref via distinct
+                        # gen: instance refs over one base; two AUTHORED entries cannot, that is
+                        # refused at load), else the top.
                         spec_src, receipt = next(
                             ((s, r) for s, r in proposal.candidates if s.experience_id == eid),
                             (top_spec, top_rcpt),
@@ -2485,10 +2487,23 @@ class SessionRegistry:
         forged opening serves verbatim, session_runner.py:543) — NEVER load_territory_text (S3:
         territory text names the decision CATEGORY, an L-6 leak) and NEVER the model-voiced
         opening (voice.opening is a MODEL call, unreproducible; review SF1).
-        N1: a curated ledger_ref is not unique to one library entry — two rubrics can share a
-        ref with different prompts (`veldra:license_fork_risk`: continuity_lock_in vs
-        license_continuity). Prefer the entry matching BOTH ref and the row's experience_id
-        (which converged); fall back to ref-first-match for legacy rows (experience_id='')."""
+        THE INVARIANT NOW: a curated ledger_ref identifies exactly ONE owned problem.
+        `content_loader._reject_duplicate_ledger_refs` refuses a duplicate at the chokepoint every
+        serving path loads through, so current authored content cannot present two entries for one
+        ref. `experience_id` therefore disambiguates HISTORICAL rows only -- records written when a
+        ref could still resolve to more than one experience -- and the ref-first-match fallback
+        exists for legacy rows carrying `experience_id=''`. Neither may be relied on by current
+        content.
+
+        AN EARLIER VERSION OF THIS NOTE DESCRIBED THE COLLISION AS A LIVE PROPERTY, naming
+        `veldra:license_fork_risk` (continuity_lock_in vs license_continuity) as an example. That
+        collision was a defect, not a design: it destroyed one display title, made one problem
+        unofferable, and served one problem's scene under the other's rubric. It is split. The note
+        mattered because it made the fallback read as a deliberate accommodation of a normal state,
+        and a migration that left a stranded row behind then resolved through that fallback and
+        recalled the WRONG problem's situation -- exactly the outcome the comment made look
+        intentional. A stale comment beside fallback logic is how incorrect behaviour gets
+        inherited."""
         row = self._store.read_generated_problem(ref)
         if row is not None:
             return row["scenario"]

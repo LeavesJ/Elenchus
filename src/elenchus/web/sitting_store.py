@@ -658,11 +658,27 @@ class SittingStore:
         with self._conn() as c:
             cur = c.execute(
                 "UPDATE web_converged SET expectation=?, expectation_at=? "
-                "WHERE sitting_id=? AND ref=? AND converged_at=? "
-                "AND expectation IS NULL AND outcome IS NULL",
+                "WHERE rowid = (SELECT rowid FROM web_converged "
+                "               WHERE sitting_id=? AND ref=? AND converged_at=? "
+                "               AND expectation IS NULL AND outcome IS NULL)",
                 (expectation, now.isoformat(), sitting_id, ref, converged_at.isoformat()),
             )
-            return cur.rowcount > 0
+            # EXACTLY ONE ROW, and the cardinality is part of the guarantee. A write-once forecast
+            # is worth having because its provenance is strong; an unbounded UPDATE weakens exactly
+            # that. `log_converged` is a plain INSERT with no unique constraint on
+            # (sitting_id, ref, converged_at), so two rows CAN share the tuple -- a coarsened
+            # timestamp, a replayed log, an import -- and an unbounded write would then stamp one
+            # learner's forecast onto two distinct memories, each later scored against its own
+            # outcome, while still reporting success. The rowid subquery makes the write address at
+            # most one row; more than one match is an invariant violation and fails loud rather than
+            # silently duplicating a forecast.
+            if cur.rowcount > 1:  # pragma: no cover - unreachable via the rowid subquery
+                raise RuntimeError(
+                    f"record_expectation matched {cur.rowcount} rows for one convergence "
+                    f"({sitting_id}, {ref}, {converged_at.isoformat()}); a forecast identifies "
+                    "exactly one durable row"
+                )
+            return cur.rowcount == 1
 
     def record_outcome(
         self,

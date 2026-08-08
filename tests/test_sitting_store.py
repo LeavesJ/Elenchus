@@ -756,3 +756,45 @@ def test_expectation_survives_the_migration_on_a_legacy_db(tmp_path):
     assert row["expectation"] is None and row["expectation_at"] is None
     assert st2.record_expectation(sid, "veldra:a", NOW, "Churn stays under 8%.", NOW) is True
     assert st2.converged_log()[0]["expectation"] == "Churn stays under 8%."
+
+
+def test_expectation_writes_exactly_one_row_even_when_two_share_the_key(tmp_path):
+    """Cardinality is part of the guarantee, not an incidental property.
+
+    `log_converged` is a plain INSERT with no unique constraint on (sitting_id, ref,
+    converged_at), so two rows CAN share the tuple: a coarsened timestamp, a replayed log, an
+    import. An unbounded UPDATE would then stamp one learner's forecast onto two distinct
+    memories -- each later scored against its own outcome -- and still report success. A
+    write-once forecast is worth having because its provenance is strong."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p1")
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p2")
+
+    assert st.record_expectation(sid, "veldra:a", NOW, "churn stays under 8%", NOW) is True
+    rows = [r for r in st.converged_log() if r["ref"] == "veldra:a"]
+    assert len(rows) == 2
+    written = [r for r in rows if r["expectation"] is not None]
+    assert len(written) == 1, f"the forecast landed on {len(written)} rows, not exactly one"
+
+    # the second row is still writable, and it is a DIFFERENT durable record
+    assert st.record_expectation(sid, "veldra:a", NOW, "a second, separate forecast", LATER) is True
+    assert sorted(r["expectation"] for r in st.converged_log() if r["ref"] == "veldra:a") == [
+        "a second, separate forecast",
+        "churn stays under 8%",
+    ]
+
+
+def test_a_forecast_is_refused_once_the_outcome_is_known(tmp_path):
+    """`expectation IS NULL` alone made the ordering merely conventional: recording the outcome
+    first and the forecast second succeeded and stamped expectation_at AFTER outcome_at, producing
+    a row the audit predicate classifies as a hindsight reconstruction. The write now refuses it,
+    so a row that exists is a row that was prospective."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p")
+    st.record_outcome(sid, "veldra:a", NOW, "churn hit 14%", "reversed", LATER)
+
+    assert st.record_expectation(sid, "veldra:a", NOW, "I knew it would spike", LATER) is False
+    row = st.converged_log()[0]
+    assert row["expectation"] is None and row["expectation_at"] is None
