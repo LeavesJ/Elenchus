@@ -73,9 +73,22 @@ OLD_REF = "veldra:license_fork_risk"
 NEW_REF = "veldra:midrollout_contract_boundary"
 
 MOVED_EXPERIENCE = "license_continuity"
-# `license_continuity`'s frames, and only those. `embed_credentials_as_a_list` belongs to
-# `continuity_lock_in` (and to `irreversible_anchor`) and must NOT move. Hardcoded rather than
-# derived from live content: a migration describes the world as it was when the rows were written.
+# The frames whose OLD_REF breadth entry can only have come from a `license_continuity` sitting.
+#
+# NOT "license_continuity's frames, and only those", which an earlier version of this comment said
+# and which is FALSE: `lead_with_what_you_refuse_to_do` is also in `decision_under_stakes` and
+# `protect_the_core_lane` is also in `proof_before_promise`. The migration is still correct, but for
+# a different reason than that sentence gave, and the reason is what a future maintainer needs:
+# `state.update_state` adds only the SERVED experience's OWN ledger_ref to a frame's breadth, so a
+# sitting on `decision_under_stakes` writes ITS ref, never OLD_REF. Of the experiences carrying these
+# three codes, only `license_continuity` ever carried OLD_REF, so an OLD_REF entry on any of them is
+# necessarily its own. `embed_credentials_as_a_list` is excluded because it belongs to
+# `continuity_lock_in`, which KEEPS the old ref.
+#
+# The distinction matters if this file is ever reused as a template: swapping by frame_code is safe
+# only after re-deriving that no OTHER experience sharing the code also carried the ref being split.
+# Hardcoded rather than derived from live content: a migration describes the world as it was when
+# the rows were written, not whatever the rubrics say the day it happens to run.
 MOVED_FRAMES = frozenset(
     {"lead_with_what_you_refuse_to_do", "protect_the_core_lane", "commit_under_the_deadline"}
 )
