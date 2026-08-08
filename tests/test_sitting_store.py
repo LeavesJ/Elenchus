@@ -681,3 +681,78 @@ def test_gate_rejection_table_is_additive_on_an_existing_db(tmp_path):
 
     second = SittingStore(db)  # re-open: CREATE TABLE IF NOT EXISTS runs again
     assert second.read_world(sit) == "her situation"
+
+
+def test_expectation_is_frozen_at_convergence_and_round_trips(tmp_path):
+    """The prospective half of the calibration record. Frozen AT convergence, before reality
+    resolves, so it is a forecast rather than a reconstruction."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="I sign.")
+    row = st.converged_log()[0]
+    assert row["expectation"] is None and row["expectation_at"] is None
+
+    assert st.record_expectation(sid, "veldra:a", NOW, "Churn stays under 8%.", NOW) is True
+    row = st.converged_log()[0]
+    assert row["expectation"] == "Churn stays under 8%."
+    assert row["expectation_at"] == NOW.isoformat()
+    # annotates, never rewrites: the memory the learner committed to is untouched
+    assert row["position"] == "I sign." and row["converged_at"] == NOW.isoformat()
+
+
+def test_expectation_is_write_once_because_an_editable_forecast_is_not_a_forecast(tmp_path):
+    """The freeze is the whole mechanism, and it is enforced in SQL (`AND expectation IS NULL`)
+    rather than by convention.
+
+    `record_outcome` deliberately overwrites: a decision's fate is not final the first time you
+    ask. This is the exact opposite. A second write arriving AFTER the learner has watched
+    reality unfold would replace a prospective answer with a hindsight-shaped one, and the
+    calibration corpus would silently become worthless while still looking full."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="I sign.")
+    assert st.record_expectation(sid, "veldra:a", NOW, "Churn stays under 8%.", NOW) is True
+
+    # reality has since arrived; a second attempt must not land
+    assert st.record_expectation(sid, "veldra:a", NOW, "I knew it would spike.", LATER) is False
+    row = st.converged_log()[0]
+    assert row["expectation"] == "Churn stays under 8%."
+    assert row["expectation_at"] == NOW.isoformat()
+
+
+def test_expectation_precedes_the_outcome_so_prospectivity_is_auditable(tmp_path):
+    """`expectation_at` exists so that "this was a forecast, not a reconstruction" is CHECKABLE
+    on every row rather than assumed from where the call site happens to sit today. A row whose
+    expectation_at is not strictly before its outcome_at is a reconstructed answer."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="I sign.")
+    st.record_expectation(sid, "veldra:a", NOW, "Churn stays under 8%.", NOW)
+    st.record_outcome(sid, "veldra:a", NOW, "Churn hit 14%.", "reversed", LATER)
+
+    row = st.converged_log()[0]
+    assert row["expectation_at"] < row["outcome_at"]
+    # both halves survive together: the forecast is not overwritten by the outcome
+    assert row["expectation"] == "Churn stays under 8%."
+    assert row["outcome"] == "Churn hit 14%." and row["outcome_kind"] == "reversed"
+
+
+def test_expectation_survives_the_migration_on_a_legacy_db(tmp_path):
+    """Dbs created before this column must gain it without losing rows, matching the `position`
+    and `outcome` migrations directly above it in the schema block."""
+    path = str(tmp_path / "legacy.db")
+    st = _store(tmp_path, "legacy.db")
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="I sign.")
+
+    # simulate a db that predates the column
+    with sqlite3.connect(path) as c:
+        c.execute("ALTER TABLE web_converged DROP COLUMN expectation")
+        c.execute("ALTER TABLE web_converged DROP COLUMN expectation_at")
+
+    st2 = SittingStore(path)  # migration runs on open
+    row = st2.converged_log()[0]
+    assert row["position"] == "I sign."  # the legacy row survived
+    assert row["expectation"] is None and row["expectation_at"] is None
+    assert st2.record_expectation(sid, "veldra:a", NOW, "Churn stays under 8%.", NOW) is True
+    assert st2.converged_log()[0]["expectation"] == "Churn stays under 8%."

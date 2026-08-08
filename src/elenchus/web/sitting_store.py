@@ -140,7 +140,8 @@ CREATE TABLE IF NOT EXISTS web_sitting_state (
 CREATE TABLE IF NOT EXISTS web_converged (
   sitting_id TEXT NOT NULL, ref TEXT NOT NULL, converged_at TEXT NOT NULL,
   experience_id TEXT NOT NULL DEFAULT '', position TEXT,
-  outcome TEXT, outcome_kind TEXT, outcome_at TEXT);
+  outcome TEXT, outcome_kind TEXT, outcome_at TEXT,
+  expectation TEXT, expectation_at TEXT);
 CREATE TABLE IF NOT EXISTS web_world (
   sitting_id TEXT PRIMARY KEY, situation TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS web_generated_problem (
@@ -227,6 +228,20 @@ class SittingStore:
                 # not a broken memory (unlike `position`, there is nothing to backfill: the
                 # information does not exist anywhere in the record, only in the person).
                 for _col in ("outcome TEXT", "outcome_kind TEXT", "outcome_at TEXT"):
+                    try:
+                        c.execute(f"ALTER TABLE web_converged ADD COLUMN {_col}")
+                    except sqlite3.OperationalError:
+                        pass
+                # Same pattern again, and the ORDER of these two relative to `outcome` is the
+                # whole point. `expectation` is frozen AT convergence, before reality resolves;
+                # `outcome` arrives weeks later. Asking "what did you expect" at outcome time
+                # instead would be retrospective reconstruction contaminated by hindsight, which
+                # is worth no calibration data at all. `expectation_at` exists so that
+                # prospectivity is AUDITABLE rather than assumed: expectation_at < outcome_at is
+                # checkable on every row, and a row that violates it is a reconstructed answer.
+                # Nothing to backfill: like `outcome`, the information exists only in the person,
+                # and for legacy rows the moment to have asked has passed.
+                for _col in ("expectation TEXT", "expectation_at TEXT"):
                     try:
                         c.execute(f"ALTER TABLE web_converged ADD COLUMN {_col}")
                     except sqlite3.OperationalError:
@@ -594,6 +609,52 @@ class SittingStore:
                 (sitting_id, ref, now.isoformat(), experience_id, position),
             )
 
+    def record_expectation(
+        self,
+        sitting_id: str,
+        ref: str,
+        converged_at: datetime,
+        expectation: str,
+        now: datetime,
+    ) -> bool:
+        """Freeze what the learner expects to happen, AT convergence, before reality resolves.
+        Returns True if this call wrote it, False if it was already frozen.
+
+        WRITE-ONCE, and that is the entire mechanism, not a nicety. `record_outcome` deliberately
+        overwrites, because a decision's fate is not final the first time you ask. This is the
+        opposite: a forecast that can be edited after the outcome is known is not a forecast. The
+        `AND expectation IS NULL` clause makes the freeze atomic in SQL rather than a convention a
+        caller has to remember, so a second call cannot quietly replace a prospective answer with
+        a hindsight-shaped one.
+
+        WHY AT CONVERGENCE AND NOT AT THE 14-DAY OUTCOME ASK. Asking "what had you expected"
+        after the learner has watched reality unfold is retrospective reconstruction, and the
+        answer is contaminated by what happened. Only a frozen forecast supports calibration.
+        `expectation_at` is stored so prospectivity is auditable rather than assumed: on an honest
+        row `expectation_at` is at convergence and strictly precedes `outcome_at`.
+
+        WHY NOT BEFORE THE REASONING. Asking for an expectation, a confidence, or a disconfirming
+        signal BEFORE the exercise would hand the learner a reasoning move for free -- naming the
+        falsifier is itself one of the hidden moves the rubrics test -- and would corrupt
+        `reasoned_unprompted`, which feeds the strong tier in `state.py`. After the reasoning,
+        before reality, is the only window that costs nothing and leaks nothing.
+
+        NOTHING READS THIS INTO LEARNER STATE, and nothing may. A calibration score is a
+        correctness grade on the conclusion with a lag; the moment it reaches `state.py` it
+        breaks invariant 5. This is a record beside the memory, exactly as `outcome` is.
+
+        Keyed on (sitting_id, ref, converged_at) for the same reason `record_outcome` is: a
+        curated ref can reconverge, so a ref string is not a row identity."""
+        if self._inert:
+            return False
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE web_converged SET expectation=?, expectation_at=? "
+                "WHERE sitting_id=? AND ref=? AND converged_at=? AND expectation IS NULL",
+                (expectation, now.isoformat(), sitting_id, ref, converged_at.isoformat()),
+            )
+            return cur.rowcount > 0
+
     def record_outcome(
         self,
         sitting_id: str,
@@ -659,8 +720,8 @@ class SittingStore:
         with self._conn() as c:
             rows = c.execute(
                 "SELECT sitting_id, ref, converged_at, experience_id, position, "
-                "outcome, outcome_kind, outcome_at FROM web_converged "
-                "ORDER BY converged_at, rowid"
+                "outcome, outcome_kind, outcome_at, expectation, expectation_at "
+                "FROM web_converged ORDER BY converged_at, rowid"
             ).fetchall()
         return [
             {
@@ -672,8 +733,21 @@ class SittingStore:
                 "outcome": outcome,
                 "outcome_kind": outcome_kind,
                 "outcome_at": outcome_at,
+                "expectation": expectation,
+                "expectation_at": expectation_at,
             }
-            for s, r, at, eid, position, outcome, outcome_kind, outcome_at in rows
+            for (
+                s,
+                r,
+                at,
+                eid,
+                position,
+                outcome,
+                outcome_kind,
+                outcome_at,
+                expectation,
+                expectation_at,
+            ) in rows
         ]
 
     def domain_slots(self) -> list[dict]:
