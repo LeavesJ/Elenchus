@@ -917,7 +917,11 @@ class AnthropicModel:
         # row is still written either way. The real rule: never key a REPAIR or CREDIT decision
         # off the bare outcome; reading it to DESCRIBE what the grader said is fine. Grep
         # `gap_closed` before adding a reader of the first kind.
-        # Raising instead would
+        #
+        # BACK TO THE FLOOR ITSELF. The two corrections above were inserted between the
+        # `FLOOR, never raise` line and the sentence that answers it, orphaning the fragment that
+        # used to follow directly. Restated so it reads with its own subject: RAISING instead of
+        # flooring would
         # kill the door mid-sitting over a field-level evidence gap: state is already banked by
         # the time this runs (nothing in `judgment_loop.assess` persists mid-loop --
         # `orchestration.run_session`'s `store.save_state` runs only after `assess` returns), so

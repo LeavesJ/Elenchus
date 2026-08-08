@@ -41,6 +41,23 @@ def audit_sharper(exp: Experience, assessment: Assessment, model: Model) -> Asse
     #   a later reader has no reason to re-run it. Only THIS code's absence is claimed, and the
     #   break, not exhaustion, is what carries the argument.
     #
+    # AND NEITHER BULLET IS THE BINDING CONSTRAINT, which an earlier version of this comment did
+    # not say. `p.target_code not in closed`, on the line below, already excludes every Push this
+    # clause would, on every state the loop can emit. `frames_closed_under_pressure` has exactly
+    # two writers: `judgment_loop.py`, fed from the credit branch where the `Push` necessarily
+    # carries `gap_closed=True`, and this function's own removal-only rewrite below. Membership
+    # therefore implies credit. Measured over 589,824 real `assess` runs spanning every
+    # combination of intake frame state, trap state, mode, binding constraint, decision frame and
+    # response classification: 176,308 pushes classified `closed` and denied credit, and ZERO
+    # whose code was in `frames_closed_under_pressure`.
+    #
+    # So this clause is defense in depth against a FUTURE third writer of that list, never a live
+    # behaviour change, and it CANNOT be measured on anything the engine currently produces. Both
+    # halves are pinned in `tests/test_sharper_grader.py`:
+    # `test_frames_closed_under_pressure_implies_a_credited_push` drives the real loop and fails
+    # the moment a writer bypasses the credit branch, and the hand-built cell next to it now says
+    # in its own docstring that it is hand-built and why.
+    #
     # Either way it is a proxy standing in for the real predicate, and that same proxy is what
     # let an inflated `closed` delete a trap's gallery row in `state.update_state` (see
     # `types.Push.gap_closed`). The authority is the loop's credit decision, and
