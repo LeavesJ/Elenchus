@@ -637,3 +637,88 @@ def test_an_ambiguous_house_entry_is_left_and_counted_never_guessed(tmp_path):
     c.close()
     assert rec["house_refs"] == [OLD_REF], "an undecidable entry was guessed"
     assert counts["house_refs_undiscriminated"] == 1, "and it must be reported, never silent"
+
+
+# ------------------------------------------------------------- the migration doctrine ------
+#
+# NEVER INFER OWNERSHIP FROM MEMBERSHIP IN AN AGGREGATE UNLESS EVERY MEMBER OF THAT AGGREGATE IS
+# CAPABLE OF PRODUCING THE VALUE BEING MIGRATED.
+#
+# That single sentence is the conceptual error behind three consecutive adversarial rounds:
+#   round 1: four of eleven identity columns migrated, keyed on the old ref alone.
+#   round 2: `house_refs` guarded at the RECORD grain when it is a cumulative cross-experience
+#            array; `web_domain_slot` gated on convergence when its data comes from engagement.
+#   round 3: `keeps_old = frames - MOVED_FRAMES` -- membership in a component union treated as
+#            evidence of authorship, when most members cannot author the value at all.
+#
+# The example-based tests above each pinned one instance. This section pins the PROPERTY, which is
+# what would have caught round three on the day it shipped.
+
+_UNRELATED_FRAMES = [
+    "choose_the_failure_default_deliberately",  # decision_under_stakes / proof / irreversible
+    "some_future_frame_nobody_has_written_yet",
+]
+
+
+def _slot_refs_after_migration(tmp_path, name, frames, refs=(OLD_REF,)):
+    db = _production_db(str(tmp_path / f"{name}.db"))
+    c = sqlite3.connect(db)
+    c.execute(
+        "INSERT INTO web_domain_slot (slot, first_touch_at, member_refs_json, member_frames_json,"
+        " status) VALUES (?,?,?,?,?)",
+        (0, NOW.isoformat(), json.dumps(list(refs)), json.dumps(sorted(frames)), "live"),
+    )
+    c.commit()
+    c.close()
+    migrate(db)
+    c = sqlite3.connect(db)
+    out = json.loads(
+        c.execute("SELECT member_refs_json FROM web_domain_slot WHERE slot=0").fetchone()[0]
+    )
+    c.close()
+    return out
+
+
+def test_an_unrelated_frame_cannot_change_how_the_old_ref_is_treated(tmp_path):
+    """THE PROPERTY, not an example.
+
+    A frame that could never have authored OLD_REF must not change the migration's treatment of
+    OLD_REF -- not whether it moves, not whether it is retained, not whether it is ambiguous. This
+    is the invariant `keeps_old = frames - MOVED_FRAMES` violated: every unrelated frame flipped
+    the answer, because membership was being read as authorship."""
+    from elenchus.ledger_ref_migration import KEPT_FRAMES
+
+    bases = {
+        "only_kept": set(KEPT_FRAMES),
+        "only_moved": set(MOVED_FRAMES),
+        "kept_and_moved": set(KEPT_FRAMES) | set(MOVED_FRAMES),
+        "neither": {"protect_the_core_lane"} ^ {"protect_the_core_lane"},  # empty
+    }
+    for label, base in bases.items():
+        alone = _slot_refs_after_migration(tmp_path, f"{label}_alone", base)
+        for i, extra in enumerate(_UNRELATED_FRAMES):
+            widened = _slot_refs_after_migration(tmp_path, f"{label}_{i}", base | {extra})
+            assert widened == alone, (
+                f"adding {extra!r} to a {label} slot changed the treatment of the old ref: "
+                f"{alone} -> {widened}. Membership is being read as authorship."
+            )
+
+
+def test_the_four_authorship_cases_each_get_the_right_treatment(tmp_path):
+    """The property above says an unrelated frame changes nothing. This says what the ANSWER is
+    for each authorship case, so "changes nothing" cannot be satisfied by doing nothing."""
+    from elenchus.ledger_ref_migration import KEPT_FRAMES
+
+    only_kept = _slot_refs_after_migration(tmp_path, "k", set(KEPT_FRAMES))
+    assert only_kept == [OLD_REF], "only continuity_lock_in's frame: the old ref stays, alone"
+
+    only_moved = _slot_refs_after_migration(tmp_path, "m", set(MOVED_FRAMES))
+    assert only_moved == [NEW_REF], "only moved frames: the old ref cannot have come from here"
+
+    both = _slot_refs_after_migration(tmp_path, "b", set(KEPT_FRAMES) | set(MOVED_FRAMES))
+    assert both == [OLD_REF, NEW_REF], "both authors present: the slot draws on both problems"
+
+    neither = _slot_refs_after_migration(tmp_path, "n", {_UNRELATED_FRAMES[0]})
+    assert neither == [OLD_REF], (
+        "no frame here could have authored the old ref, so the migration must not touch it"
+    )
