@@ -853,3 +853,27 @@ def test_the_outcome_write_is_bounded_to_one_row(tmp_path):
     written = [r for r in st.converged_log() if r["outcome"] is not None]
     assert len(written) == 1, "re-recording spread the outcome onto a second memory"
     assert written[0]["outcome"] == "then it reversed" and written[0]["position"] == "p1"
+
+
+def test_a_blank_outcome_cannot_destroy_a_recorded_one(tmp_path):
+    """DURABLE-STATE CORRECTNESS, not a papercut. `record_outcome` overwrites in place by design,
+    so a whitespace-only write replaced a real recorded outcome with "   " and flipped its fate
+    tag. Measured before the fix: 'the buyer walked and we lost the quarter' -> '   ' / 'held'.
+    Rejected before any write, so the existing record is preserved rather than repaired after."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p")
+    st.record_outcome(sid, "veldra:a", NOW, "the buyer walked", "reversed", LATER)
+
+    for blank in ("", "   ", "\n\t "):
+        assert st.record_outcome(sid, "veldra:a", NOW, blank, "held", LATER) is False
+    row = st.converged_log()[0]
+    assert row["outcome"] == "the buyer walked" and row["outcome_kind"] == "reversed"
+
+
+def test_an_outcome_is_stored_stripped_like_the_forecast(tmp_path):
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p")
+    assert st.record_outcome(sid, "veldra:a", NOW, "  it held  ", "held", LATER) is True
+    assert st.converged_log()[0]["outcome"] == "it held"

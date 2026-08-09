@@ -236,13 +236,26 @@ function recordExpectation(token){
   const box = document.getElementById('exp-box-'+token);
   const text = box ? box.value.trim() : '';
   if(!text){ if(box) box.focus(); return; }
+  const block = expBlockFor(token);
+  // ONE ACTION, ONE OUTCOME. A second click while the first request was in flight used to send a
+  // second POST, and the two answers rendered together: the first "Recorded", the second refused
+  // by the write-once guard. Guard on the block itself, so a stale handler cannot re-enter.
+  if(block){ if(block.dataset.sending === '1') return; block.dataset.sending = '1'; }
+  const btns = block ? block.querySelectorAll('button') : [];
+  btns.forEach(b => { b.disabled = true; });
+  const release = () => { if(block) block.dataset.sending = ''; btns.forEach(b => { b.disabled = false; }); };
   post('/api/session/single/expectation',{text:text,token:token}).then(r=>{
-    skipExpectation(token);
-    // Report what the SERVER did, never what we hoped it did: a refusal must not read as a record.
-    if(r.kind==='expectation' && r.recorded) muted('Recorded. You will be asked what actually happened later.');
-    else if(r.kind==='nudge') muted(r.message||'');
-    else muted('That one could not be recorded.');
-  }).catch(()=>{});
+    // The block is removed ONLY on a confirmed write. On a refusal or an expiry the learner's own
+    // words stay on screen with the real reason beside them -- destroying what someone typed and
+    // then telling them it did not save is the worst of both.
+    if(r.kind==='expectation' && r.recorded){
+      skipExpectation(token);
+      muted('Recorded. You will be asked what actually happened later.');
+      return;
+    }
+    release();
+    muted((r.kind==='nudge' && r.message) ? r.message : 'That one could not be recorded.');
+  }).catch(()=>{ release(); muted('connection lost — your words are still here, try again.'); });
 }
 function recordOutcome(kind){
   const box = document.getElementById('mem-outcome');

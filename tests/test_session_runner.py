@@ -4782,3 +4782,44 @@ def test_an_expired_forecast_token_is_told_the_window_closed_not_already_recorde
     assert tag == "nudge" and "window" in out["message"].lower()
     assert tok not in reg._pending_expectation, "an expired ask must not linger"
     assert SittingStore(db).converged_log()[-1]["expectation"] is None
+
+
+def test_a_refused_outcome_is_not_reported_as_a_memory(tmp_path, make_fake):
+    """`record_outcome` returns whether it wrote. Discarding that told the learner their outcome
+    landed while the record was unchanged -- and the blank case is exactly when it does not write."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "o.db")
+    reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
+    _converge(reg, "s1", make_fake)
+    st = SittingStore(db)
+    row = st.converged_log()[-1]
+
+    # A real outcome first, through the real path, so the refusal below is measured against a
+    # record that EXISTS. Without this the assertion would pass on the drift guard instead --
+    # a test green for the wrong reason.
+    assert (
+        st.record_outcome(
+            row["sitting_id"],
+            row["ref"],
+            datetime.fromisoformat(row["converged_at"]),
+            "the buyer walked",
+            "reversed",
+            datetime.now(timezone.utc),
+        )
+        is True
+    )
+
+    assert (
+        st.record_outcome(
+            row["sitting_id"],
+            row["ref"],
+            datetime.fromisoformat(row["converged_at"]),
+            "   ",
+            "held",
+            datetime.now(timezone.utc),
+        )
+        is False
+    )
+    after = st.converged_log()[-1]
+    assert after["outcome"] == "the buyer walked" and after["outcome_kind"] == "reversed"

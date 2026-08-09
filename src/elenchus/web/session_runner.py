@@ -519,6 +519,9 @@ _EXPECTATION_EMPTY_NUDGE = "Nothing was written down."
 # learner told "already recorded" when the window simply lapsed will never realise the forecast is
 # missing, and one told "could not be recorded" will retry a thing that cannot succeed.
 _EXPECTATION_CLOSED_NUDGE = "The window for that one has closed."
+# Says what happened without implying the learner did something wrong: a blank answer and an
+# unidentifiable row both land here, and neither is worth a scolding.
+_OUTCOME_REFUSED_NUDGE = "Nothing was written down."
 
 # Worker failures log the traceback SERVER-side (the only durable copy — founder dogfood
 # 2026-07-03: the wire's repr(e) rendered as one transient muted line and the refresh the
@@ -2447,7 +2450,10 @@ class SessionRegistry:
         at_mismatch = bool(ats) and index < len(ats) and row["converged_at"] != ats[index]
         if row["ref"] != refs[index] or at_mismatch:
             return ("memory", {"unavailable": True})  # drift guard — never the wrong memory
-        self._store.record_outcome(
+        # The store's answer, not this function's hope. It refuses a blank outcome and refuses a
+        # row it cannot uniquely identify; reporting the re-read memory regardless would tell the
+        # learner their outcome landed when the record is unchanged.
+        wrote = self._store.record_outcome(
             row["sitting_id"],
             row["ref"],
             datetime.fromisoformat(row["converged_at"]),
@@ -2455,6 +2461,8 @@ class SessionRegistry:
             kind,
             datetime.now(timezone.utc),
         )
+        if not wrote:
+            return ("nudge", {"message": _OUTCOME_REFUSED_NUDGE})
         return self.memory(session_id, index)
 
     def record_expectation(self, session_id: str, text: str, token: str = ""):

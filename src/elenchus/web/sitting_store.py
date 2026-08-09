@@ -729,6 +729,14 @@ class SittingStore:
                 f"outcome_kind must be one of {sorted(OUTCOME_KINDS)}, got {outcome_kind!r} — "
                 f"the tag records what became of the decision, never whether it was right"
             )
+        # BLANK IS NOT AN ANSWER, and letting it through destroyed learner history: a
+        # whitespace-only write replaced a real recorded outcome with "   " and flipped its fate
+        # tag, because this function overwrites in place by design. Rejected BEFORE any write, so
+        # the existing outcome is preserved unchanged rather than repaired afterwards. Stored
+        # stripped, like the forecast.
+        outcome = (outcome or "").strip()
+        if not outcome:
+            return False
         if self._inert:
             return False
         with self._conn() as c:
