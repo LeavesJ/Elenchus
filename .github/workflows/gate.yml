@@ -1,0 +1,65 @@
+name: gate
+
+# The gate itself lives in the private Felix repo, not here. This file is only
+# the wiring that lets GitHub run it, which is why it is the single addition to
+# this repo's tracked set. Everything it enforces is defined elsewhere.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# CI reads code and reports a status. It never writes to the repo.
+permissions:
+  contents: read
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      # Two sibling checkouts rather than nesting Felix inside the tree being
+      # gated. A harness sitting in the working tree would show up in the very
+      # checks it is running: ruff would descend into it and git status would
+      # report it.
+      - name: Check out Elenchus
+        uses: actions/checkout@v4
+        with:
+          path: repo
+
+      - name: Check out Felix
+        uses: actions/checkout@v4
+        with:
+          repository: LeavesJ/felix
+          ssh-key: ${{ secrets.FELIX_DEPLOY_KEY }}
+          path: felix
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      # Pinned to the versions the gate was authored against. pyproject allows
+      # ruff>=0.6, and its own comment records that a ruff bump once turned a
+      # green tree red across ~40 untouched sites. A gate whose verdict depends
+      # on which ruff CI happened to resolve that morning is not a gate.
+      - name: Install dependencies
+        working-directory: repo
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,web]" "ruff==0.16.0" "pytest==9.1.1"
+
+      # Fails the job if Felix cannot tell which project this is, so a broken
+      # binding surfaces here rather than silently gating nothing.
+      - name: Confirm the governing project
+        working-directory: repo
+        run: ../felix/harness/felix which
+
+      # No ANTHROPIC_API_KEY is provided on purpose. The @live tests skip
+      # without one, so CI stays free and never bills a pull request.
+      - name: Run the gate
+        working-directory: repo
+        run: ../felix/harness/felix gate
