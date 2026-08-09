@@ -32,6 +32,14 @@ OUTCOME_KINDS = frozenset({"held", "reversed", "overtaken", "too_early"})
 # (one caller, one value — a knob nobody turns is a false promise of flexibility); a named
 # constant so the guard and the bubble read the same number.
 OUTCOME_ASK_AFTER_DAYS = 14
+# The forecast belongs to the immediate post-convergence state, not to a later recollection. After
+# this window the ask is closed: a textarea left open in a tab for an hour is no longer capturing
+# what the learner expected AT the decision, and a record that merely predates the outcome is a
+# weaker claim than one made while the reasoning was still in front of them. Enforced against the
+# PERSISTED `converged_at`, never a browser timer or an in-memory stamp, so a replayed or scripted
+# POST cannot widen it. Imported by `web/session_runner.py` to tell a closed window from a taken
+# one; a second copy of a threshold is how two compositions drift apart.
+EXPECTATION_TTL = timedelta(minutes=15)
 
 
 def _backfill_positions(c: sqlite3.Connection) -> int:
@@ -660,8 +668,16 @@ class SittingStore:
                 "UPDATE web_converged SET expectation=?, expectation_at=? "
                 "WHERE rowid = (SELECT rowid FROM web_converged "
                 "               WHERE sitting_id=? AND ref=? AND converged_at=? "
-                "               AND expectation IS NULL AND outcome IS NULL)",
-                (expectation, now.isoformat(), sitting_id, ref, converged_at.isoformat()),
+                "               AND expectation IS NULL AND outcome IS NULL "
+                "               AND converged_at >= ?)",
+                (
+                    expectation,
+                    now.isoformat(),
+                    sitting_id,
+                    ref,
+                    converged_at.isoformat(),
+                    (now - EXPECTATION_TTL).isoformat(),
+                ),
             )
             # EXACTLY ONE ROW, and the cardinality is part of the guarantee. A write-once forecast
             # is worth having because its provenance is strong; an unbounded UPDATE weakens exactly
@@ -688,7 +704,7 @@ class SittingStore:
         outcome: str,
         outcome_kind: str,
         now: datetime,
-    ) -> None:
+    ) -> bool:
         """Attach what HAPPENED to one convergence's decision. Annotates, never rewrites: the
         situation, the position and `converged_at` are untouched, so the memory the learner
         committed to stays exactly as they left it (L-4 — recalled, never regraded).
@@ -714,13 +730,29 @@ class SittingStore:
                 f"the tag records what became of the decision, never whether it was right"
             )
         if self._inert:
-            return
+            return False
         with self._conn() as c:
-            c.execute(
+            # ONE ROW, the same standard `record_expectation` holds to and for the same reason.
+            # `log_converged` is a plain INSERT with no unique constraint on
+            # (sitting_id, ref, converged_at), so two rows CAN share the tuple and a broad UPDATE
+            # would stamp one fate onto two distinct memories -- each of which the learner
+            # committed to separately, and one of which would then carry an outcome that belongs to
+            # the other. An unbounded write against learner history is exactly what the forecast
+            # side was just bounded against; leaving its twin unbounded made the guarantee
+            # one-sided.
+            cur = c.execute(
                 "UPDATE web_converged SET outcome=?, outcome_kind=?, outcome_at=? "
-                "WHERE sitting_id=? AND ref=? AND converged_at=?",
+                "WHERE rowid = (SELECT rowid FROM web_converged "
+                "               WHERE sitting_id=? AND ref=? AND converged_at=?)",
                 (outcome, outcome_kind, now.isoformat(), sitting_id, ref, converged_at.isoformat()),
             )
+            if cur.rowcount > 1:  # pragma: no cover - unreachable via the rowid subquery
+                raise RuntimeError(
+                    f"record_outcome matched {cur.rowcount} rows for one convergence "
+                    f"({sitting_id}, {ref}, {converged_at.isoformat()}); an outcome belongs to "
+                    "exactly one durable row"
+                )
+            return cur.rowcount == 1
 
     def converged_within(self, now: datetime, hours: int = 24) -> set[str]:
         """Refs converged within the rolling window — across sittings and processes. A rolling

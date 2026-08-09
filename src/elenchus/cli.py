@@ -36,6 +36,9 @@ def build_store(db_path: str | Path = DEFAULT_DB) -> Store:
     an invisible mutation is the part that actually caused harm."""
     store = Store(db_path)
     existing_ledger = {e.id for e in store.load_ledger()}
+    # "Fresh" means the store had no owned problems at all when it was opened. Distinguishing that
+    # from "populated but missing one" is the whole point of the log below.
+    fresh = not existing_ledger
     authored: list[str] = []
     for exp in load_library():
         if exp.regime is not Regime.open_ended:
@@ -60,13 +63,26 @@ def build_store(db_path: str | Path = DEFAULT_DB) -> Store:
                 )
             )
     if authored:
-        _log.warning(
-            "build_store authored %d placeholder row(s) at open: %s. A ref with no canonical row "
-            "is a content or migration defect, not a healthy boot -- run the ingest or the "
-            "relevant migration rather than leaving machine text as the owned-problem record.",
-            len(authored),
-            ", ".join(authored),
-        )
+        # A FRESH store is not defective. Bootstrapping an empty database is the documented
+        # first-run path and the state of every worktree and CI run, so warning there cries wolf on
+        # exactly the case that is fine. What is worth flagging is a POPULATED store that is
+        # missing canonical ownership for some ref: that is a content or migration gap, and it is
+        # the shape that let a half-run migration disguise itself as a healthy boot.
+        if fresh:
+            _log.info(
+                "build_store bootstrapped %d placeholder row(s) on a fresh database: %s",
+                len(authored),
+                ", ".join(authored),
+            )
+        else:
+            _log.warning(
+                "build_store authored %d placeholder row(s) into a POPULATED store: %s. An "
+                "existing store missing canonical ownership for a ref is a content or migration "
+                "gap -- run the ingest or the relevant migration rather than leaving machine text "
+                "as the owned-problem record.",
+                len(authored),
+                ", ".join(authored),
+            )
     return store
 
 

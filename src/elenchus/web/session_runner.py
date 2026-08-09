@@ -20,7 +20,12 @@ from ..scheduler import propose_open_ended
 from ..terrain import compose_houses, convergence_order, project_terrain
 from ..types import EntryClass, Outcome, Regime, Selection, Work
 from . import voice
-from .sitting_store import OUTCOME_ASK_AFTER_DAYS, OUTCOME_KINDS, SittingStore
+from .sitting_store import (
+    EXPECTATION_TTL,
+    OUTCOME_ASK_AFTER_DAYS,
+    OUTCOME_KINDS,
+    SittingStore,
+)
 from .slots import resolve_slots
 from .vessels import vessel_count
 
@@ -510,6 +515,10 @@ _MEMORY_UNKNOWN_NUDGE = "That spot isn't one of your houses — try another."
 # never re-enter it, and the calibration record loses the row silently. Two honest messages.
 _EXPECTATION_UNAVAILABLE_NUDGE = "That one could not be recorded."
 _EXPECTATION_EMPTY_NUDGE = "Nothing was written down."
+# A closed window is not a failure and not a duplicate: it is the design. Say which, because a
+# learner told "already recorded" when the window simply lapsed will never realise the forecast is
+# missing, and one told "could not be recorded" will retry a thing that cannot succeed.
+_EXPECTATION_CLOSED_NUDGE = "The window for that one has closed."
 
 # Worker failures log the traceback SERVER-side (the only durable copy — founder dogfood
 # 2026-07-03: the wire's repr(e) rendered as one transient muted line and the refresh the
@@ -2451,10 +2460,12 @@ class SessionRegistry:
     def record_expectation(self, session_id: str, text: str, token: str = ""):
         """Freeze the learner's forecast against the convergence they just landed.
 
-        No index and no drift guard, unlike `record_outcome`, and that is not an oversight: this
-        targets the row THIS process wrote for THIS session moments ago, held in
-        `_pending_expectation`. There is no stale-index failure mode to guard because the caller
-        never names a row.
+        No index and no drift guard: the TOKEN names the row, minted at the convergence and held
+        in `_pending_expectation`. `session_id` is accepted for call-site symmetry with
+        `record_outcome` and is deliberately NOT read -- an earlier version of this docstring said
+        the write was scoped to "THIS session", which was never true once the token became the key,
+        and `web/app.py` pins every request to one `_SID` anyway. The token is the whole scope, and
+        it is unguessable, single-use, and time-boxed by `EXPECTATION_TTL`.
 
         Idempotent by construction at both layers: the pending entry is popped here, and
         `SittingStore.record_expectation` is write-once in SQL. A replayed POST cannot overwrite a
@@ -2470,6 +2481,12 @@ class SessionRegistry:
         if pending is None:
             return ("nudge", {"message": _EXPECTATION_UNAVAILABLE_NUDGE})
         sit, ref, at = pending
+        # The window is the STORE's rule, enforced there against the persisted `converged_at`.
+        # This read exists only to say WHICH refusal happened, and imports the same constant
+        # rather than restating the number.
+        if datetime.now(timezone.utc) - datetime.fromisoformat(at) > EXPECTATION_TTL:
+            self._pending_expectation.pop(token, None)
+            return ("nudge", {"message": _EXPECTATION_CLOSED_NUDGE})
         wrote = self._store.record_expectation(
             sit, ref, datetime.fromisoformat(at), text, datetime.now(timezone.utc)
         )

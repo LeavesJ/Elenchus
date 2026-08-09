@@ -4758,3 +4758,27 @@ def test_the_forecast_question_performs_no_reasoning_move():
         "evidence",
     ):
         assert leak not in copy.lower(), f"the forecast ask leaks a reasoning move: {leak!r}"
+
+
+def test_an_expired_forecast_token_is_told_the_window_closed_not_already_recorded(
+    tmp_path, make_fake
+):
+    """Three refusals, three honest messages. A learner told "already recorded" when the window
+    simply lapsed will never realise the forecast is missing; one told "could not be recorded"
+    will retry a thing that cannot succeed. The window is the STORE's rule, enforced against the
+    persisted converged_at; the registry reads the same constant only to say WHICH refusal it is."""
+    from elenchus.web.sitting_store import EXPECTATION_TTL, SittingStore
+
+    db = str(tmp_path / "ttl.db")
+    reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
+    _, data = _converge(reg, "s1", make_fake)
+    tok = data["expectation_token"]
+
+    sit, ref, at = reg._pending_expectation[tok]
+    aged = (datetime.fromisoformat(at) - EXPECTATION_TTL - timedelta(seconds=1)).isoformat()
+    reg._pending_expectation[tok] = (sit, ref, aged)
+
+    tag, out = reg.record_expectation("s1", "from memory, much later", tok)
+    assert tag == "nudge" and "window" in out["message"].lower()
+    assert tok not in reg._pending_expectation, "an expired ask must not linger"
+    assert SittingStore(db).converged_log()[-1]["expectation"] is None

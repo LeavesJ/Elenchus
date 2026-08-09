@@ -9,7 +9,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from elenchus.web.sitting_store import SittingStore
+from elenchus.web.sitting_store import EXPECTATION_TTL, SittingStore
 
 NOW = datetime(2026, 7, 1, 21, 0, 0, tzinfo=timezone.utc)
 LATER = NOW + timedelta(hours=1)
@@ -777,8 +777,13 @@ def test_expectation_writes_exactly_one_row_even_when_two_share_the_key(tmp_path
     written = [r for r in rows if r["expectation"] is not None]
     assert len(written) == 1, f"the forecast landed on {len(written)} rows, not exactly one"
 
-    # the second row is still writable, and it is a DIFFERENT durable record
-    assert st.record_expectation(sid, "veldra:a", NOW, "a second, separate forecast", LATER) is True
+    # the second row is still writable, and it is a DIFFERENT durable record (inside the window)
+    assert (
+        st.record_expectation(
+            sid, "veldra:a", NOW, "a second, separate forecast", NOW + timedelta(minutes=5)
+        )
+        is True
+    )
     assert sorted(r["expectation"] for r in st.converged_log() if r["ref"] == "veldra:a") == [
         "a second, separate forecast",
         "churn stays under 8%",
@@ -798,3 +803,53 @@ def test_a_forecast_is_refused_once_the_outcome_is_known(tmp_path):
     assert st.record_expectation(sid, "veldra:a", NOW, "I knew it would spike", LATER) is False
     row = st.converged_log()[0]
     assert row["expectation"] is None and row["expectation_at"] is None
+
+
+def test_the_forecast_window_closes_fifteen_minutes_after_the_convergence(tmp_path):
+    """The forecast belongs to the immediate post-convergence state. A textarea left open in a tab
+    for an hour is no longer capturing what the learner expected AT the decision, and a record that
+    merely predates the outcome is a weaker claim than one made while the reasoning was still in
+    front of them. Enforced against the PERSISTED converged_at, so a replayed or scripted POST
+    cannot widen it."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p")
+
+    just_inside = NOW + EXPECTATION_TTL - timedelta(seconds=1)
+    assert st.record_expectation(sid, "veldra:a", NOW, "inside the window", just_inside) is True
+    assert st.converged_log()[0]["expectation"] == "inside the window"
+
+
+def test_a_forecast_after_the_window_is_refused_and_writes_nothing(tmp_path):
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p")
+
+    just_outside = NOW + EXPECTATION_TTL + timedelta(seconds=1)
+    assert (
+        st.record_expectation(sid, "veldra:a", NOW, "an hour later, from memory", just_outside)
+        is False
+    )
+    row = st.converged_log()[0]
+    assert row["expectation"] is None and row["expectation_at"] is None
+
+
+def test_the_outcome_write_is_bounded_to_one_row(tmp_path):
+    """The twin of the forecast bound. Two rows can share (sitting_id, ref, converged_at), and a
+    broad UPDATE would stamp one fate onto two memories the learner committed to separately."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p1")
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p2")
+
+    assert st.record_outcome(sid, "veldra:a", NOW, "it held", "held", LATER) is True
+    written = [r for r in st.converged_log() if r["outcome"] is not None]
+    assert len(written) == 1, f"one outcome landed on {len(written)} rows"
+
+    # Re-recording OVERWRITES IN PLACE, which is deliberate for outcomes (a decision's fate is not
+    # final the first time you ask) and is the opposite of the forecast's write-once rule. It must
+    # still touch exactly one row, and the same one.
+    assert st.record_outcome(sid, "veldra:a", NOW, "then it reversed", "reversed", LATER) is True
+    written = [r for r in st.converged_log() if r["outcome"] is not None]
+    assert len(written) == 1, "re-recording spread the outcome onto a second memory"
+    assert written[0]["outcome"] == "then it reversed" and written[0]["position"] == "p1"
