@@ -530,3 +530,110 @@ def test_a_stale_pick_on_a_LIVE_sitting_is_cleared_not_left(tmp_path):
     counts = migrate(db)
     assert counts["next_pick_ref_cleared_live"] == 1
     assert st.read_state(live)["next_pick"] is None, "a live sitting still serves the stale pick"
+
+
+def test_a_slot_does_not_keep_the_old_ref_for_a_frame_that_could_not_have_written_it(tmp_path):
+    """The third wrong-grain defect, and the fixture that could not see it.
+
+    `member_frames_json` is a connected-COMPONENT union across experiences, so frames belonging to
+    `decision_under_stakes` / `proof_before_promise` / `irreversible_anchor` sit in essentially
+    every real slot. Those write their OWN ref and can never have contributed OLD_REF. Asking
+    `frames - MOVED_FRAMES` therefore kept OLD_REF almost always, on evidence of a frame that could
+    not have produced it -- and the earlier test only exercised a slot whose extra frame WAS
+    `embed_credentials_as_a_list`, the single case where the wrong predicate gives the right
+    answer."""
+    db = _production_db(str(tmp_path / "slotgrain.db"))
+    c = sqlite3.connect(db)
+    # a real component shape: license_continuity's frames unioned with decision_under_stakes'.
+    # continuity_lock_in was never engaged, so nothing here can have written OLD_REF but the
+    # moved frames.
+    c.execute(
+        "INSERT INTO web_domain_slot (slot, first_touch_at, member_refs_json, member_frames_json,"
+        " status) VALUES (?,?,?,?,?)",
+        (
+            0,
+            NOW.isoformat(),
+            json.dumps([OLD_REF, "veldra:concentrated_market_pricing_power"]),
+            json.dumps(sorted(MOVED_FRAMES) + ["choose_the_failure_default_deliberately"]),
+            "live",
+        ),
+    )
+    c.commit()
+    c.close()
+
+    migrate(db)
+    c = sqlite3.connect(db)
+    refs = json.loads(
+        c.execute("SELECT member_refs_json FROM web_domain_slot WHERE slot=0").fetchone()[0]
+    )
+    c.close()
+    assert OLD_REF not in refs, (
+        "the slot kept an owned problem no member frame could have engaged; a later "
+        "continuity_lock_in component then matches this slot by ref and never earns its own bearing"
+    )
+    assert NEW_REF in refs and "veldra:concentrated_market_pricing_power" in refs
+
+
+def test_house_refs_without_house_at_falls_back_to_the_aggregate_when_unambiguous(tmp_path):
+    """A record written before `house_at` existed has no per-index key. "Leave it" is not the safe
+    default it looks like: `web_converged.ref` moves, so a left-behind OLD_REF makes `memory`
+    compare a moved live ref against a frozen stale one and return `unavailable` -- the exact drift
+    the per-index discriminator exists to prevent."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = _production_db(str(tmp_path / "noat.db"))
+    st = SittingStore(db)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, OLD_REF, NOW, experience_id="license_continuity", position="p")
+    st.write_state(
+        sid,
+        record={
+            "experience_id": "license_continuity",
+            "ledger_ref": OLD_REF,
+            "house_refs": [OLD_REF],
+        },  # no house_at at all
+        now=NOW,
+    )
+    counts = migrate(db)
+    c = sqlite3.connect(db)
+    rec = json.loads(
+        c.execute(
+            "SELECT record_json FROM web_sitting_state WHERE sitting_id=?", (sid,)
+        ).fetchone()[0]
+    )
+    c.close()
+    assert rec["house_refs"] == [NEW_REF]
+    assert counts["house_refs_undiscriminated"] == 0
+
+
+def test_an_ambiguous_house_entry_is_left_and_counted_never_guessed(tmp_path):
+    """`(ref, converged_at)` has no unique constraint -- this module says so itself about the
+    forecast write. Two rows sharing it with DIFFERENT owners make the per-index lookup undecidable,
+    and a plain dict would silently keep the last writer."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = _production_db(str(tmp_path / "amb.db"))
+    st = SittingStore(db)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, OLD_REF, NOW, experience_id="license_continuity", position="a")
+    st.log_converged(sid, OLD_REF, NOW, experience_id="continuity_lock_in", position="b")
+    st.write_state(
+        sid,
+        record={
+            "experience_id": "license_continuity",
+            "ledger_ref": OLD_REF,
+            "house_refs": [OLD_REF],
+            "house_at": [NOW.isoformat()],
+        },
+        now=NOW,
+    )
+    counts = migrate(db)
+    c = sqlite3.connect(db)
+    rec = json.loads(
+        c.execute(
+            "SELECT record_json FROM web_sitting_state WHERE sitting_id=?", (sid,)
+        ).fetchone()[0]
+    )
+    c.close()
+    assert rec["house_refs"] == [OLD_REF], "an undecidable entry was guessed"
+    assert counts["house_refs_undiscriminated"] == 1, "and it must be reported, never silent"

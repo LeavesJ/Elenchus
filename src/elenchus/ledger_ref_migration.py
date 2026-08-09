@@ -43,7 +43,8 @@ DISCRIMINATOR PER SURFACE, all verified against the real database before this wa
 | record_json.ledger_ref                | experience_id INSIDE the json (its own identity) |
 | record_json.house_refs                | PER INDEX: (house_refs[i], house_at[i]) ->       |
 |                                       | web_converged.experience_id                      |
-| web_domain_slot.member_refs_json      | member_frames_json intersected with MOVED_FRAMES |
+| web_domain_slot.member_refs_json      | member_frames_json: MOVED_FRAMES decides the new |
+|                                       | ref, KEPT_FRAMES decides whether the old survives|
 | web_sitting_state.next_pick_ref       | none; cleared on LIVE, left+counted on closed    |
 
 A SECOND ADVERSARIAL PASS FOUND THREE MORE, ALL THE SAME ROOT ERROR ONE LEVEL DOWN: a discriminator
@@ -109,6 +110,19 @@ MOVED_EXPERIENCE = "license_continuity"
 MOVED_FRAMES = frozenset(
     {"lead_with_what_you_refuse_to_do", "protect_the_core_lane", "commit_under_the_deadline"}
 )
+# `continuity_lock_in`'s OWN rubric frames -- the only frames that can have put OLD_REF into a
+# domain slot on the kept side. Its rubric is exactly one frame.
+#
+# THE MIRROR OF MOVED_FRAMES, and its absence was the third wrong-grain defect in a row. The slot
+# rewrite asked `frames - MOVED_FRAMES` -- "is any other frame present?" -- but `member_frames_json`
+# is a connected-COMPONENT union across experiences (`terrain._components` links frames by a shared
+# breadth ref), so frames of `decision_under_stakes`, `proof_before_promise` and
+# `irreversible_anchor` are present in essentially every real slot. Those write THEIR OWN ref and
+# can never have contributed OLD_REF, so the predicate was almost always true and kept OLD_REF on
+# evidence of a frame that could not have produced it. The same reasoning the module already spells
+# out for the moved side (`update_state` adds only the SERVED experience's own ref) applies in
+# mirror here, and was not applied.
+KEPT_FRAMES = frozenset({"embed_credentials_as_a_list"})
 
 NEW_CORPUS = {
     "domain": "founder_ceo",
@@ -179,6 +193,7 @@ def migrate(db_path: str) -> dict[str, int]:
         "web_sitting_inflight": 0,
         "web_sitting_record": 0,
         "web_domain_slot": 0,
+        "house_refs_undiscriminated": 0,
         "next_pick_ref_cleared_live": 0,
         "next_pick_ref_left_closed": 0,
     }
@@ -193,13 +208,23 @@ def migrate(db_path: str) -> dict[str, int]:
             # (ref, converged_at) -> experience_id, for EVERY convergence on the old ref. This is
             # the discriminator `record_json.house_refs` needs, and it must be read before
             # `web_converged` is rewritten below.
-            converged_owner: dict[tuple[str, str], str] = {}
+            # A value of None means AMBIGUOUS: two rows share the key with different owners.
+            # `(sitting_id, ref, converged_at)` has no unique constraint -- this module says so
+            # itself about the forecast write -- so `(ref, converged_at)` certainly does not, and a
+            # plain dict would silently keep the last writer. Ambiguity must be detectable.
+            converged_owner: dict[tuple[str, str], str | None] = {}
+            old_ref_owners: set[str] = set()
             if _has_table(conn, "web_converged"):
                 for r in conn.execute(
                     "SELECT ref, converged_at, experience_id FROM web_converged WHERE ref=?",
                     (OLD_REF,),
                 ):
-                    converged_owner[(r[0], r[1])] = r[2]
+                    key = (r[0], r[1])
+                    if key in converged_owner and converged_owner[key] != r[2]:
+                        converged_owner[key] = None  # two owners, one key: undecidable
+                    else:
+                        converged_owner.setdefault(key, r[2])
+                    old_ref_owners.add(r[2])
 
             # -- the owned-problem rows the load gate and the vessel count require ----------
             if _has_table(conn, "corpus"):
@@ -338,13 +363,34 @@ def migrate(db_path: str) -> dict[str, int]:
                         houses = d.get("house_refs")
                         ats = d.get("house_at")
                         if isinstance(houses, list) and OLD_REF in houses:
+                            # `house_at` is the per-index key. Present and unambiguous, it
+                            # decides. MISSING (a record predating the column) or SHORT, there is
+                            # no per-index key -- and "leave it" is not the safe default it looks
+                            # like: `web_converged.ref` moves below, so a left-behind OLD_REF makes
+                            # `memory` compare a moved live ref against a frozen stale one and
+                            # return `unavailable`, the exact drift this discriminator exists to
+                            # prevent. Fall back to the AGGREGATE, but only when it is unambiguous.
+                            # Otherwise leave it and COUNT it: a silent skip reported as zero is how
+                            # the first version of this file went wrong.
+                            aggregate_safe = old_ref_owners == {MOVED_EXPERIENCE}
                             out = []
                             for i, h in enumerate(houses):
+                                if h != OLD_REF:
+                                    out.append(h)
+                                    continue
                                 at = ats[i] if isinstance(ats, list) and i < len(ats) else None
-                                owner = converged_owner.get((h, at)) if at else None
-                                out.append(
-                                    NEW_REF if h == OLD_REF and owner == MOVED_EXPERIENCE else h
-                                )
+                                if at is not None and (h, at) in converged_owner:
+                                    owner = converged_owner[(h, at)]
+                                    if owner is None:  # two owners share the key
+                                        c["house_refs_undiscriminated"] += 1
+                                        out.append(h)
+                                    else:
+                                        out.append(NEW_REF if owner == MOVED_EXPERIENCE else h)
+                                elif aggregate_safe:
+                                    out.append(NEW_REF)
+                                else:
+                                    c["house_refs_undiscriminated"] += 1
+                                    out.append(h)
                             if out != houses:
                                 d["house_refs"] = out
                                 changed = True
@@ -400,7 +446,10 @@ def migrate(db_path: str) -> dict[str, int]:
                     frames = set(json.loads(row["member_frames_json"] or "[]"))
                     if not (frames & MOVED_FRAMES):
                         continue  # no moved frame contributed this ref
-                    keeps_old = bool(frames - MOVED_FRAMES)
+                    # Not `frames - MOVED_FRAMES`: see KEPT_FRAMES. The question is whether a
+                    # frame that could have WRITTEN the old ref is in this slot, not whether any
+                    # other frame is.
+                    keeps_old = bool(frames & KEPT_FRAMES)
                     out: list[str] = []
                     for r in refs:
                         if r == OLD_REF:
