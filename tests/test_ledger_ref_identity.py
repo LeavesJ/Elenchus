@@ -332,14 +332,14 @@ def test_the_repaired_memory_recalls_the_experience_actually_worked(tmp_path):
 def test_migration_is_idempotent_on_the_production_schema(tmp_path):
     db = _production_db(str(tmp_path / "prod.db"))
     first = migrate(db)
-    assert sum(v for k, v in first.items() if k != "next_pick_ref_left") > 0
+    assert sum(v for k, v in first.items() if not k.startswith("next_pick_ref")) > 0
 
     c = sqlite3.connect(db)
     before = c.execute("SELECT * FROM selection_log ORDER BY rowid").fetchall()
     c.close()
 
     second = migrate(db)
-    assert all(v == 0 for k, v in second.items() if k != "next_pick_ref_left")
+    assert all(v == 0 for k, v in second.items() if not k.startswith("next_pick_ref"))
     c = sqlite3.connect(db)
     assert c.execute("SELECT * FROM selection_log ORDER BY rowid").fetchall() == before
     c.close()
@@ -373,7 +373,7 @@ def test_migration_survives_degenerate_databases(tmp_path):
 
     db = _production_db(str(tmp_path / "p2.db"))
     migrate(db)
-    assert all(v == 0 for k, v in migrate(db).items() if k != "next_pick_ref_left")
+    assert all(v == 0 for k, v in migrate(db).items() if not k.startswith("next_pick_ref"))
 
 
 def test_breadth_never_stores_the_same_problem_twice(tmp_path):
@@ -436,3 +436,97 @@ def test_next_pick_residuals_cannot_reach_a_learner(tmp_path):
     ).fetchone()[0]
     c.close()
     assert stale == 0, "a stale pick survives on a LIVE sitting; reporting it is not enough"
+
+
+def test_house_refs_are_discriminated_per_index_not_per_record(tmp_path):
+    """`house_refs` is the cumulative CROSS-EXPERIENCE convergence order, not the record's own
+    refs. Guarding it by the record's experience_id and then rewriting every element moves houses
+    owned by `continuity_lock_in`; `session_runner.memory` compares the live `web_converged.ref`
+    against this frozen list and returns `unavailable` for a memory that opened a moment earlier."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = _production_db(str(tmp_path / "h.db"))
+    st = SittingStore(db)
+    sid = st.create_sitting(NOW)
+    later = NOW + timedelta(minutes=5)
+    # two convergences on the OLD ref, one per problem -- the case the record grain cannot see
+    st.log_converged(sid, OLD_REF, NOW, experience_id="continuity_lock_in", position="a")
+    st.log_converged(sid, OLD_REF, later, experience_id="license_continuity", position="b")
+    st.write_state(
+        sid,
+        record={
+            "experience_id": "license_continuity",
+            "ledger_ref": OLD_REF,
+            "house_refs": [OLD_REF, OLD_REF],
+            "house_at": [NOW.isoformat(), later.isoformat()],
+        },
+        now=later,
+    )
+
+    migrate(db)
+    c = sqlite3.connect(db)
+    rec = json.loads(
+        c.execute(
+            "SELECT record_json FROM web_sitting_state WHERE sitting_id=?", (sid,)
+        ).fetchone()[0]
+    )
+    c.close()
+    assert rec["house_refs"] == [OLD_REF, NEW_REF], (
+        "continuity_lock_in's house was rewritten; the discriminator is per INDEX, not per record"
+    )
+    assert rec["ledger_ref"] == NEW_REF  # the record's OWN identity still moves
+
+
+def test_domain_slot_keeps_the_old_ref_when_a_non_moved_frame_owns_it(tmp_path):
+    """`member_refs` is built from breadth (ENGAGEMENT), not from convergence, so gating on
+    `web_converged` read the wrong table. The discriminator is `member_frames_json`, and a slot
+    whose members include frames from BOTH problems legitimately draws on both after the split."""
+    db = _production_db(str(tmp_path / "s.db"))
+    c = sqlite3.connect(db)
+    c.execute(
+        "INSERT INTO web_domain_slot (slot, first_touch_at, member_refs_json, member_frames_json,"
+        " status) VALUES (?,?,?,?,?)",
+        (
+            0,
+            NOW.isoformat(),
+            json.dumps([OLD_REF]),
+            json.dumps(sorted(MOVED_FRAMES) + ["embed_credentials_as_a_list"]),
+            "live",
+        ),
+    )
+    # a slot owned ONLY by moved frames: the old ref should not survive there
+    c.execute(
+        "INSERT INTO web_domain_slot (slot, first_touch_at, member_refs_json, member_frames_json,"
+        " status) VALUES (?,?,?,?,?)",
+        (1, NOW.isoformat(), json.dumps([OLD_REF]), json.dumps(sorted(MOVED_FRAMES)), "live"),
+    )
+    c.commit()
+    c.close()
+
+    migrate(db)
+    c = sqlite3.connect(db)
+    mixed = json.loads(
+        c.execute("SELECT member_refs_json FROM web_domain_slot WHERE slot=0").fetchone()[0]
+    )
+    pure = json.loads(
+        c.execute("SELECT member_refs_json FROM web_domain_slot WHERE slot=1").fetchone()[0]
+    )
+    c.close()
+    assert mixed == [OLD_REF, NEW_REF], f"a mixed slot must draw on both problems, got {mixed}"
+    assert pure == [NEW_REF], f"a slot owned only by moved frames must move, got {pure}"
+
+
+def test_a_stale_pick_on_a_LIVE_sitting_is_cleared_not_left(tmp_path):
+    """The earlier claim that these rows are always on closed sittings was true of one database and
+    false in general. On a live sitting the pick is restored into `_next_pick` and can be offered
+    to the learner under an identity that now means the other problem."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = _production_db(str(tmp_path / "p.db"))
+    st = SittingStore(db)
+    live = st.create_sitting(NOW)
+    st.write_state(live, next_pick=(OLD_REF, "a stale door"), now=NOW)
+
+    counts = migrate(db)
+    assert counts["next_pick_ref_cleared_live"] == 1
+    assert st.read_state(live)["next_pick"] is None, "a live sitting still serves the stale pick"

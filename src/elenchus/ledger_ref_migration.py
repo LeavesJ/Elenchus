@@ -40,15 +40,32 @@ DISCRIMINATOR PER SURFACE, all verified against the real database before this wa
 | queue.ledger_ref                      | experience_id                                    |
 | web_converged.ref                     | experience_id                                    |
 | web_sitting_state.inflight_json       | experience_id INSIDE the json                    |
-| web_sitting_state.record_json         | experience_id INSIDE the json                    |
-| web_domain_slot.member_refs_json      | derived: only if web_converged proves the old ref|
-|                                       | was converged solely by MOVED_EXPERIENCE         |
-| web_sitting_state.next_pick_ref       | NONE AVAILABLE -- deliberately left alone, below |
+| record_json.ledger_ref                | experience_id INSIDE the json (its own identity) |
+| record_json.house_refs                | PER INDEX: (house_refs[i], house_at[i]) ->       |
+|                                       | web_converged.experience_id                      |
+| web_domain_slot.member_refs_json      | member_frames_json intersected with MOVED_FRAMES |
+| web_sitting_state.next_pick_ref       | none; cleared on LIVE, left+counted on closed    |
 
-`next_pick_ref` is a bare ref with no companion experience_id, on sittings that are closed. There is
-no discriminator, so rewriting it would be guessing which problem a dead sitting intended to serve
-next. Left as-is and reported in the counts as `next_pick_ref_left`, because a silent skip is how
-the first version of this file went wrong.
+A SECOND ADVERSARIAL PASS FOUND THREE MORE, ALL THE SAME ROOT ERROR ONE LEVEL DOWN: a discriminator
+at the wrong GRAIN, or read from the wrong TABLE.
+
+* `record_json.house_refs` was guarded by the RECORD's experience_id. It is not the record's own
+  list: it is `convergence_order(converged_log())`, the cumulative cross-experience order of every
+  convergence ever logged, and each element belongs to a different convergence. Rewriting all of
+  them moved houses owned by `continuity_lock_in`, and `session_runner.memory` -- which compares the
+  live `web_converged.ref` against this frozen list -- then returned `unavailable` for a memory that
+  had opened correctly moments before, with `record_outcome` at that index refused by the same
+  guard. Now discriminated per index against `house_at`.
+* `web_domain_slot` was gated on who CONVERGED the ref. `member_refs` comes from
+  `state.frames[c].breadth`, written on ENGAGEMENT, so a plateaued or CLI sitting puts the ref in a
+  slot with no `web_converged` row at all and the gate passed on the wrong evidence. The
+  discriminator is `member_frames_json`, and the rewrite ADDS rather than replaces: a slot whose
+  members include frames from both problems legitimately draws on both after the split.
+* `next_pick_ref` was left everywhere on the argument that such rows sit on CLOSED sittings. That
+  was true of one particular database and false as a general claim. On a live sitting the pick is
+  restored into `_next_pick` and can be offered to the learner under an identity that now means the
+  other problem, so it is CLEARED there (transient state the next selection recomputes) and left,
+  counted, on closed sittings where it is genuinely dead.
 
 `license_continuity` gets a corpus row with NO SCENE. `experience._attach_scene` returns the
 experience unchanged when no entry resolves, so it serves its own authored prompt, which is the
@@ -162,7 +179,8 @@ def migrate(db_path: str) -> dict[str, int]:
         "web_sitting_inflight": 0,
         "web_sitting_record": 0,
         "web_domain_slot": 0,
-        "next_pick_ref_left": 0,
+        "next_pick_ref_cleared_live": 0,
+        "next_pick_ref_left_closed": 0,
     }
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -172,14 +190,16 @@ def migrate(db_path: str) -> dict[str, int]:
             # the old ref", read out of `web_converged` -- and `web_converged` is rewritten below,
             # after which the query returns the empty set and the slot rewrite would silently skip.
             # Reading it here is the difference between migrating that surface and quietly not.
-            slot_owners: set[str] = set()
+            # (ref, converged_at) -> experience_id, for EVERY convergence on the old ref. This is
+            # the discriminator `record_json.house_refs` needs, and it must be read before
+            # `web_converged` is rewritten below.
+            converged_owner: dict[tuple[str, str], str] = {}
             if _has_table(conn, "web_converged"):
-                slot_owners = {
-                    r[0]
-                    for r in conn.execute(
-                        "SELECT DISTINCT experience_id FROM web_converged WHERE ref=?", (OLD_REF,)
-                    )
-                }
+                for r in conn.execute(
+                    "SELECT ref, converged_at, experience_id FROM web_converged WHERE ref=?",
+                    (OLD_REF,),
+                ):
+                    converged_owner[(r[0], r[1])] = r[2]
 
             # -- the owned-problem rows the load gate and the vessel count require ----------
             if _has_table(conn, "corpus"):
@@ -295,43 +315,111 @@ def migrate(db_path: str) -> dict[str, int]:
                     record = row["record_json"]
                     if record and OLD_REF in record:
                         d = json.loads(record)
-                        if d.get("experience_id") != MOVED_EXPERIENCE:
-                            continue  # not this problem's record; never guess from the ref alone
                         changed = False
-                        if d.get("ledger_ref") == OLD_REF:
+                        # `ledger_ref` IS this record's own identity, so the record's own
+                        # experience_id is the right discriminator for it.
+                        if (
+                            d.get("experience_id") == MOVED_EXPERIENCE
+                            and d.get("ledger_ref") == OLD_REF
+                        ):
                             d["ledger_ref"] = NEW_REF
                             changed = True
+                        # `house_refs` IS NOT. It is `convergence_order(converged_log())`, the
+                        # cumulative CROSS-EXPERIENCE list of every convergence ever logged, and
+                        # `house_at` is its index-parallel timestamp list. Each element belongs to a
+                        # DIFFERENT convergence with its own experience_id, so the record-grain
+                        # discriminator is wrong by a whole grain here: an earlier version guarded
+                        # the record and then rewrote every element, which moved houses belonging to
+                        # `continuity_lock_in`. `session_runner.memory` then compares the live
+                        # `web_converged.ref` against this frozen list and returns `unavailable` for
+                        # a memory that opened correctly a moment earlier -- and `record_outcome` at
+                        # that index is refused by the same guard. Discriminate PER INDEX, via
+                        # (house_refs[i], house_at[i]) -> web_converged.experience_id.
                         houses = d.get("house_refs")
+                        ats = d.get("house_at")
                         if isinstance(houses, list) and OLD_REF in houses:
-                            d["house_refs"] = [NEW_REF if h == OLD_REF else h for h in houses]
-                            changed = True
+                            out = []
+                            for i, h in enumerate(houses):
+                                at = ats[i] if isinstance(ats, list) and i < len(ats) else None
+                                owner = converged_owner.get((h, at)) if at else None
+                                out.append(
+                                    NEW_REF if h == OLD_REF and owner == MOVED_EXPERIENCE else h
+                                )
+                            if out != houses:
+                                d["house_refs"] = out
+                                changed = True
                         if changed:
                             conn.execute(
                                 "UPDATE web_sitting_state SET record_json=? WHERE sitting_id=?",
                                 (json.dumps(d), row["sitting_id"]),
                             )
                             c["web_sitting_record"] += 1
-                # No discriminator exists for next_pick_ref (a bare ref, no companion
-                # experience_id). Counted, never guessed.
-                c["next_pick_ref_left"] = conn.execute(
+                # `next_pick_ref` is a bare ref with no companion experience_id, so it cannot be
+                # discriminated. On a CLOSED sitting that is dead transient state: a persisted pick
+                # is restored only for the live sitting, and closed is terminal. On a LIVE sitting
+                # it is not -- it is restored into `_next_pick` and can be offered to the learner,
+                # now naming the OTHER owned problem. An earlier version counted both together and
+                # called the whole thing harmless, which was true of one particular database and
+                # false as a general claim.
+                #
+                # The live one is CLEARED rather than guessed at. A next pick is transient
+                # scheduling state that the next selection recomputes, so dropping it loses nothing
+                # durable, whereas leaving it serves a door under an identity that no longer means
+                # what it meant when it was written.
+                if _has_table(conn, "web_sitting"):
+                    c["next_pick_ref_cleared_live"] = conn.execute(
+                        "UPDATE web_sitting_state SET next_pick_ref=NULL, next_pick_title='' "
+                        "WHERE next_pick_ref=? AND sitting_id IN "
+                        "(SELECT id FROM web_sitting WHERE status='live')",
+                        (OLD_REF,),
+                    ).rowcount
+                c["next_pick_ref_left_closed"] = conn.execute(
                     "SELECT COUNT(*) FROM web_sitting_state WHERE next_pick_ref=?", (OLD_REF,)
                 ).fetchone()[0]
 
             # -- domain slots: derived discriminator, and it refuses to guess --------------
             if _has_table(conn, "web_domain_slot"):
-                # Only safe when the old ref's convergences are ALL this experience's; otherwise a
-                # slot entry could belong to either problem and there is nothing to tell them apart.
-                if slot_owners == {MOVED_EXPERIENCE}:
-                    for row in conn.execute(
-                        "SELECT slot, member_refs_json FROM web_domain_slot"
-                    ).fetchall():
-                        swapped, changed = _swap_list(row["member_refs_json"])
-                        if changed:
-                            conn.execute(
-                                "UPDATE web_domain_slot SET member_refs_json=? WHERE slot=?",
-                                (swapped, row["slot"]),
-                            )
-                            c["web_domain_slot"] += 1
+                # THE DISCRIMINATOR IS `member_frames_json`, NOT `web_converged`. An earlier version
+                # gated this on who CONVERGED the old ref, but `member_refs` is built from
+                # `state.frames[c].breadth`, which is written on ENGAGEMENT -- `breadth.add(ref)`
+                # runs for any frame closed under pressure or reasoned unprompted, while
+                # `log_converged` fires only on a genuine convergence. A plateaued sitting, or any
+                # CLI run, puts the ref in a slot with no `web_converged` row at all, so the
+                # convergence-derived gate passed while the slot's ref actually came from the frame
+                # that does NOT move. The row then named a problem its own frames contradict, and a
+                # RETIRED slot can never self-heal (`slots.resolve_slots` re-unions live rows only).
+                #
+                # ADD, never replace: a slot whose members include frames from BOTH problems
+                # legitimately draws on both owned problems after the split.
+                for row in conn.execute(
+                    "SELECT slot, member_refs_json, member_frames_json FROM web_domain_slot"
+                ).fetchall():
+                    refs = json.loads(row["member_refs_json"] or "[]")
+                    if OLD_REF not in refs:
+                        continue
+                    frames = set(json.loads(row["member_frames_json"] or "[]"))
+                    if not (frames & MOVED_FRAMES):
+                        continue  # no moved frame contributed this ref
+                    keeps_old = bool(frames - MOVED_FRAMES)
+                    out: list[str] = []
+                    for r in refs:
+                        if r == OLD_REF:
+                            if keeps_old and OLD_REF not in out:
+                                out.append(OLD_REF)
+                            if NEW_REF not in out:
+                                out.append(NEW_REF)
+                        elif r not in out:
+                            out.append(r)
+                    if out != refs:
+                        swapped, changed = json.dumps(out), True
+                    else:
+                        swapped, changed = row["member_refs_json"], False
+                    if changed:
+                        conn.execute(
+                            "UPDATE web_domain_slot SET member_refs_json=? WHERE slot=?",
+                            (swapped, row["slot"]),
+                        )
+                        c["web_domain_slot"] += 1
     finally:
         conn.close()
     return c
