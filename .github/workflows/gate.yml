@@ -56,10 +56,10 @@ jobs:
       # binding surfaces here rather than silently gating nothing.
       - name: Confirm the governing project
         working-directory: repo
-        run: ../felix/harness/felix which
+        run: ../felix/engine/harness/felix which
 
       # No ANTHROPIC_API_KEY is provided on purpose. The @live tests skip
       # without one, so CI stays free and never bills a pull request.
       - name: Run the gate
         working-directory: repo
-        run: ../felix/harness/felix gate
+        run: ../felix/engine/harness/felix gate
