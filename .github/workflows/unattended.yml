@@ -1,0 +1,101 @@
+name: unattended repair
+
+# Wired, and off.
+#
+# Every guard below runs whether or not the switch is on, so the path is
+# exercised rather than theoretical. Nothing invokes a model until the repository
+# variable FELIX_UNATTENDED is set to "true", which is a deliberate act by a
+# person who has watched the risk rules judge some real changes first.
+#
+# The rules deciding what is in scope were written in one sitting and have never
+# been tested against a real failure. Turning this on before they have is trusting
+# a boundary nobody has walked into.
+#
+#   gh variable set FELIX_UNATTENDED --body true --repo OWNER/REPO     enable
+#   gh variable delete FELIX_UNATTENDED --repo OWNER/REPO              disable
+
+on:
+  workflow_run:
+    workflows: [gate]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# One at a time. A loop that can fan out is not bounded by an attempt ceiling,
+# because each branch of the fan has its own.
+concurrency:
+  group: unattended-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+          fetch-depth: 0
+          path: repo
+
+      - uses: actions/checkout@v4
+        with:
+          repository: LeavesJ/felix
+          ssh-key: ${{ secrets.FELIX_DEPLOY_KEY }}
+          path: felix
+
+      # Scope first, before anything reads the failing log. Handing a model the
+      # diagnostics and then telling it what it may not touch is the wrong order.
+      - name: Scope and attempt budget
+        id: guard
+        working-directory: repo
+        run: |
+          set -uo pipefail
+          ../felix/engine/harness/felix repair | tee /tmp/brief.txt
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" = "3" ]; then
+            echo "out of scope; escalating" >&2
+            gh pr edit --add-label needs-founder 2>/dev/null || true
+            echo "proceed=no" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if ! ../felix/engine/harness/felix budget --record --why "ci repair"; then
+            echo "proceed=no" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "proceed=yes" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # The switch. Everything above ran regardless; nothing below runs until a
+      # person turns this on.
+      - name: Attempt a repair
+        if: steps.guard.outputs.proceed == 'yes' && vars.FELIX_UNATTENDED == 'true'
+        working-directory: repo
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -uo pipefail
+          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1 || true
+          claude -p "$(cat /tmp/brief.txt)
+
+          Repair this failure on the current branch. Run the gate before pushing.
+          Do not touch any path the brief did not name. If the fix requires
+          changing a file outside that set, stop and explain instead." \
+            --allowedTools "Read,Edit,Bash(git *),Bash(../felix/engine/harness/felix *)" \
+            || echo "repair attempt did not complete"
+
+      - name: Report
+        if: always()
+        working-directory: repo
+        run: |
+          if [ "${{ steps.guard.outputs.proceed }}" != "yes" ]; then
+            echo "Stopped before invoking a model. See the guard step."
+          elif [ "${{ vars.FELIX_UNATTENDED }}" != "true" ]; then
+            echo "In scope and within budget, but FELIX_UNATTENDED is not set."
+            echo "The guards ran; nothing was invoked. This is the intended"
+            echo "state until the risk rules have judged real changes."
+          fi
