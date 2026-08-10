@@ -4823,3 +4823,27 @@ def test_a_refused_outcome_is_not_reported_as_a_memory(tmp_path, make_fake):
     )
     after = st.converged_log()[-1]
     assert after["outcome"] == "the buyer walked" and after["outcome_kind"] == "reversed"
+
+
+def test_the_outcome_box_is_keyed_by_its_own_memory_index():
+    """The outcome side had the race the forecast side was fixed for.
+
+    `openMemory(i)` assigned a module-level `memIndex` synchronously, but the panel is only
+    replaced inside the response handler. During that round trip the DOM still held the PREVIOUS
+    memory's block, so a fate click read the old textarea and posted it under the NEW index. The
+    server's drift guard passed -- the index was internally consistent, only the TEXT belonged to
+    another decision -- and `record_outcome` overwrites in place, so that memory's recorded outcome
+    was destroyed and `_should_ask_outcome` never reopened the ask.
+
+    The index is bound into the rendered block now, exactly as a forecast is bound to its token."""
+    from pathlib import Path
+
+    page = Path("src/elenchus/web/static/index.html").read_text()
+    assert "let memIndex" not in page, "the mutable global is what made the stale post possible"
+    assert "id=\"mem-outcome-'+index+'\"" in page, "the textarea must be keyed by its own index"
+    assert "recordOutcome(kind, index)" in page, (
+        "the handler must take the index, not read a global"
+    )
+    assert "{index:index,outcome:text" in page, "the POST must carry the block's own index"
+    # one click, one outcome
+    assert "data-outcome-index" in page and "dataset.sending" in page

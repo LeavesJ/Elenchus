@@ -43,8 +43,8 @@ DISCRIMINATOR PER SURFACE, all verified against the real database before this wa
 | record_json.ledger_ref                | experience_id INSIDE the json (its own identity) |
 | record_json.house_refs                | PER INDEX: (house_refs[i], house_at[i]) ->       |
 |                                       | web_converged.experience_id                      |
-| web_domain_slot.member_refs_json      | member_frames_json: MOVED_FRAMES decides the new |
-|                                       | ref, KEPT_FRAMES decides whether the old survives|
+| web_domain_slot.member_refs_json      | frames.breadth_json: which member frame ACTUALLY |
+|                                       | held OLD_REF. Membership decides nothing.        |
 | web_sitting_state.next_pick_ref       | none; cleared on LIVE, left+counted on closed    |
 
 A SECOND ADVERSARIAL PASS FOUND THREE MORE, ALL THE SAME ROOT ERROR ONE LEVEL DOWN: a discriminator
@@ -62,6 +62,22 @@ at the wrong GRAIN, or read from the wrong TABLE.
   slot with no `web_converged` row at all and the gate passed on the wrong evidence. The
   discriminator is `member_frames_json`, and the rewrite ADDS rather than replaces: a slot whose
   members include frames from both problems legitimately draws on both after the split.
+A FOURTH PASS FOUND THE SAME ERROR AGAIN, ON BOTH SIDES OF THE SLOT PREDICATE. Rounds one to
+three each fixed one membership test and left another: `frames - MOVED_FRAMES`, then
+`frames & KEPT_FRAMES`, then the `frames & MOVED_FRAMES` gate one line above it. All three read
+presence in a connected-component union as evidence of authorship. `member_frames_json` cannot
+answer the question at all -- the slot row never records which frame contributed which ref -- so
+the predicate now reads `frames.breadth_json` per frame_code, hoisted before the frames UPDATE.
+
+THE DOCTRINE THIS COST FOUR ROUNDS TO LEARN, and it generalises past this migration:
+
+> Never infer ownership from membership in an aggregate unless EVERY member of that aggregate is
+> capable of producing the value being migrated.
+
+`tests/test_ledger_ref_identity.py` pins it as a property rather than an example: adding a frame
+that never held OLD_REF must not change its treatment. Verified to catch all four historical
+variants of the bug.
+
 * `next_pick_ref` was left everywhere on the argument that such rows sit on CLOSED sittings. That
   was true of one particular database and false as a general claim. On a live sitting the pick is
   restored into `_next_pick` and can be offered to the learner under an identity that now means the
@@ -225,6 +241,29 @@ def migrate(db_path: str) -> dict[str, int]:
                     else:
                         converged_owner.setdefault(key, r[2])
                     old_ref_owners.add(r[2])
+
+            # WHICH FRAMES ACTUALLY AUTHORED OLD_REF, read from `frames.breadth_json` BEFORE the
+            # frames UPDATE below rewrites it -- the same hoist `converged_owner` needs, for the
+            # same reason.
+            #
+            # THIS IS THE AUTHORIZED EVIDENCE, and four rounds of this migration guessed at it from
+            # `member_frames_json` instead. That column is a connected-COMPONENT union:
+            # `terrain._components` links frames by ANY shared breadth ref and `slots._union_into`
+            # only ever grows it, so a frame reaches a slot through refs that have nothing to do
+            # with the split. Membership is not authorship on EITHER side --
+            # `embed_credentials_as_a_list` is also in `irreversible_anchor`'s rubric and joins via
+            # `veldra:embedded_anchor_lock_in`; a moved frame joins via its own other problems.
+            #
+            # The per-frame record settles it and nothing else can: `state.update_state` only ever
+            # does `breadth.add(ledger_ref)` for the SERVED experience, and no path removes a ref
+            # from breadth, so a frame holds OLD_REF if and only if it was served under it.
+            authored_old: set[str] = set()
+            if _has_table(conn, "frames"):
+                for r in conn.execute(
+                    "SELECT frame_code, breadth_json, unprompted_breadth_json FROM frames"
+                ):
+                    if OLD_REF in json.loads(r[1] or "[]") or OLD_REF in json.loads(r[2] or "[]"):
+                        authored_old.add(r[0])
 
             # -- the owned-problem rows the load gate and the vessel count require ----------
             if _has_table(conn, "corpus"):
@@ -444,18 +483,23 @@ def migrate(db_path: str) -> dict[str, int]:
                     if OLD_REF not in refs:
                         continue
                     frames = set(json.loads(row["member_frames_json"] or "[]"))
-                    if not (frames & MOVED_FRAMES):
-                        continue  # no moved frame contributed this ref
-                    # Not `frames - MOVED_FRAMES`: see KEPT_FRAMES. The question is whether a
-                    # frame that could have WRITTEN the old ref is in this slot, not whether any
-                    # other frame is.
-                    keeps_old = bool(frames & KEPT_FRAMES)
+                    # MEMBERSHIP DECIDES NOTHING. A frame counts only if `authored_old` -- the
+                    # per-frame breadth record -- says it actually held OLD_REF. Both sides of this
+                    # predicate were membership tests before, which is why the same defect survived
+                    # three rounds of fixing it.
+                    authors = frames & authored_old
+                    adds_new = bool(authors & MOVED_FRAMES)
+                    keeps_old = bool(authors & KEPT_FRAMES)
+                    if not (adds_new or keeps_old):
+                        # No frame here ever held the old ref, so it arrived through some other
+                        # member and is none of this migration's business. Leave it untouched.
+                        continue
                     out: list[str] = []
                     for r in refs:
                         if r == OLD_REF:
                             if keeps_old and OLD_REF not in out:
                                 out.append(OLD_REF)
-                            if NEW_REF not in out:
+                            if adds_new and NEW_REF not in out:
                                 out.append(NEW_REF)
                         elif r not in out:
                             out.append(r)

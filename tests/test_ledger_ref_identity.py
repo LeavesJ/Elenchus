@@ -191,8 +191,14 @@ def test_distinct_refs_count_as_distinct_problems_for_transfer_and_the_strong_ba
 # the columns production has.
 
 
-def _production_db(path):
-    """A database with the REAL schema, built by the real writers, in its PRE-split state."""
+def _production_db(path, authored_frames=None):
+    """A database with the REAL schema, built by the real writers, in its PRE-split state.
+
+    `authored_frames` is which frames actually HELD OLD_REF in their breadth. It defaults to the
+    historical set, but every slot test must set it explicitly: seeding every frame as an author
+    made membership and authorship identical in every fixture here, so no test in this file could
+    tell them apart -- which is exactly the confusion the migration kept making, encoded into the
+    thing meant to catch it."""
     from elenchus.persistence import Store
     from elenchus.web.sitting_store import SittingStore
 
@@ -208,7 +214,8 @@ def _production_db(path):
         "INSERT OR REPLACE INTO ledger (id, owned_problem, links_json) VALUES (?,?,?)",
         (OLD_REF, "the license fork problem", "[]"),
     )
-    for code in sorted(MOVED_FRAMES) + ["embed_credentials_as_a_list"]:
+    historical = sorted(MOVED_FRAMES) + ["embed_credentials_as_a_list"]
+    for code in historical if authored_frames is None else sorted(authored_frames):
         c.execute(
             "INSERT OR REPLACE INTO frames (frame_code, strength, last_seen, due, last_evidence,"
             " evidence_count, breadth_json, unprompted_breadth_json) VALUES (?,?,?,?,?,?,?,?)",
@@ -654,14 +661,18 @@ def test_an_ambiguous_house_entry_is_left_and_counted_never_guessed(tmp_path):
 # The example-based tests above each pinned one instance. This section pins the PROPERTY, which is
 # what would have caught round three on the day it shipped.
 
-_UNRELATED_FRAMES = [
-    "choose_the_failure_default_deliberately",  # decision_under_stakes / proof / irreversible
-    "some_future_frame_nobody_has_written_yet",
-]
+_UNRELATED_FRAME = "choose_the_failure_default_deliberately"  # decision_under_stakes / proof
 
 
-def _slot_refs_after_migration(tmp_path, name, frames, refs=(OLD_REF,)):
-    db = _production_db(str(tmp_path / f"{name}.db"))
+def _slot_refs_after_migration(tmp_path, name, frames, authored, refs=(OLD_REF,)):
+    """Build a slot whose member_frames are `frames`, where only `authored` actually held OLD_REF.
+
+    THE `authored` AXIS IS THE WHOLE POINT and it is required, not optional. `member_frames_json`
+    is a connected-COMPONENT union -- `terrain._components` links frames by ANY shared breadth ref
+    and `slots._union_into` only ever grows it -- so a frame reaches a slot through refs that have
+    nothing to do with the split. A helper that let membership imply authorship is how the previous
+    property test looked thorough while encoding the exact bug it was written to catch."""
+    db = _production_db(str(tmp_path / f"{name}.db"), authored_frames=authored)
     c = sqlite3.connect(db)
     c.execute(
         "INSERT INTO web_domain_slot (slot, first_touch_at, member_refs_json, member_frames_json,"
@@ -679,46 +690,60 @@ def _slot_refs_after_migration(tmp_path, name, frames, refs=(OLD_REF,)):
     return out
 
 
-def test_an_unrelated_frame_cannot_change_how_the_old_ref_is_treated(tmp_path):
-    """THE PROPERTY, not an example.
+def test_a_non_authoring_frame_cannot_change_how_the_old_ref_is_treated(tmp_path):
+    """THE PROPERTY, on the axis that actually decides.
 
-    A frame that could never have authored OLD_REF must not change the migration's treatment of
-    OLD_REF -- not whether it moves, not whether it is retained, not whether it is ambiguous. This
-    is the invariant `keeps_old = frames - MOVED_FRAMES` violated: every unrelated frame flipped
-    the answer, because membership was being read as authorship."""
+    A frame that never held OLD_REF must not change its treatment -- not whether it moves, not
+    whether it is retained -- no matter which side of the split that frame's rubric sits on. Four
+    adversarial rounds died on this one invariant: `frames - MOVED_FRAMES`, then
+    `frames & KEPT_FRAMES`, then `frames & MOVED_FRAMES` one line above it, all read component
+    membership as evidence of authorship."""
     from elenchus.ledger_ref_migration import KEPT_FRAMES
 
-    bases = {
-        "only_kept": set(KEPT_FRAMES),
-        "only_moved": set(MOVED_FRAMES),
-        "kept_and_moved": set(KEPT_FRAMES) | set(MOVED_FRAMES),
-        "neither": {"protect_the_core_lane"} ^ {"protect_the_core_lane"},  # empty
-    }
-    for label, base in bases.items():
-        alone = _slot_refs_after_migration(tmp_path, f"{label}_alone", base)
-        for i, extra in enumerate(_UNRELATED_FRAMES):
-            widened = _slot_refs_after_migration(tmp_path, f"{label}_{i}", base | {extra})
+    kept, moved = sorted(KEPT_FRAMES)[0], sorted(MOVED_FRAMES)[0]
+    for label, authors in (
+        ("moved_author", {moved}),
+        ("kept_author", {kept}),
+        ("both_authors", {kept, moved}),
+    ):
+        alone = _slot_refs_after_migration(tmp_path, f"{label}_a", authors, authors)
+        for i, passenger in enumerate([kept, moved, _UNRELATED_FRAME]):
+            if passenger in authors:
+                continue
+            widened = _slot_refs_after_migration(
+                tmp_path, f"{label}_{i}", authors | {passenger}, authors
+            )
             assert widened == alone, (
-                f"adding {extra!r} to a {label} slot changed the treatment of the old ref: "
-                f"{alone} -> {widened}. Membership is being read as authorship."
+                f"a non-authoring {passenger!r} in a {label} slot changed the treatment of the "
+                f"old ref: {alone} -> {widened}. Membership is being read as authorship."
             )
 
 
-def test_the_four_authorship_cases_each_get_the_right_treatment(tmp_path):
-    """The property above says an unrelated frame changes nothing. This says what the ANSWER is
-    for each authorship case, so "changes nothing" cannot be satisfied by doing nothing."""
+def test_a_slot_no_member_of_which_authored_the_old_ref_is_left_alone(tmp_path):
+    """The ref arrived through some other member of the component and is none of this migration's
+    business. Touching it would assert an ownership the database does not record."""
     from elenchus.ledger_ref_migration import KEPT_FRAMES
 
-    only_kept = _slot_refs_after_migration(tmp_path, "k", set(KEPT_FRAMES))
-    assert only_kept == [OLD_REF], "only continuity_lock_in's frame: the old ref stays, alone"
-
-    only_moved = _slot_refs_after_migration(tmp_path, "m", set(MOVED_FRAMES))
-    assert only_moved == [NEW_REF], "only moved frames: the old ref cannot have come from here"
-
-    both = _slot_refs_after_migration(tmp_path, "b", set(KEPT_FRAMES) | set(MOVED_FRAMES))
-    assert both == [OLD_REF, NEW_REF], "both authors present: the slot draws on both problems"
-
-    neither = _slot_refs_after_migration(tmp_path, "n", {_UNRELATED_FRAMES[0]})
-    assert neither == [OLD_REF], (
-        "no frame here could have authored the old ref, so the migration must not touch it"
+    out = _slot_refs_after_migration(
+        tmp_path, "noauthor", set(KEPT_FRAMES) | set(MOVED_FRAMES), authored=set()
     )
+    assert out == [OLD_REF], f"a slot with no author of the old ref was rewritten anyway: {out}"
+
+
+def test_each_authorship_case_gets_the_right_treatment(tmp_path):
+    """What the ANSWER is for each case, so "an unrelated frame changes nothing" cannot be
+    satisfied by a migration that does nothing at all."""
+    from elenchus.ledger_ref_migration import KEPT_FRAMES
+
+    kept, moved = sorted(KEPT_FRAMES)[0], sorted(MOVED_FRAMES)[0]
+
+    assert _slot_refs_after_migration(tmp_path, "k", {kept}, {kept}) == [OLD_REF], (
+        "only continuity_lock_in's frame authored it: the old ref stays, alone"
+    )
+    assert _slot_refs_after_migration(tmp_path, "m", {moved}, {moved}) == [NEW_REF], (
+        "only a moved frame authored it: the old ref cannot have come from anywhere else here"
+    )
+    assert _slot_refs_after_migration(tmp_path, "b", {kept, moved}, {kept, moved}) == [
+        OLD_REF,
+        NEW_REF,
+    ], "both authored it: the slot genuinely draws on both owned problems"

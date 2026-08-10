@@ -173,23 +173,27 @@ async function goContinue(btn,body){
 let opening = false;
 function openMemory(i){
   if(opening) return; opening = true;
-  memIndex = i;
   post('/api/session/single/memory',{index:i}).then(r=>{
     opening = false;
-    if(r.kind==='memory') showMemory(r);
+    if(r.kind==='memory') showMemory(r, i);
     else if(r.kind==='nudge') muted(r.message||'');
   }).catch(()=>{ opening=false; });
 }
-// Which memory the open bubble is showing — recordOutcome posts against it. The server still
-// resolves the index by-ref through the same drift guard as the read, so a stale value here
-// degrades to an honest "unavailable", never a wrong write.
-let memIndex = -1;
+// THERE IS NO `memIndex` GLOBAL ANY MORE, and its absence is the fix. It was assigned
+// synchronously in openMemory while the panel still showed the PREVIOUS memory, so during the
+// round trip a fate click read the old block's textarea and posted it under the NEW index. The
+// server's drift guard passed, because the index was internally consistent — only the TEXT
+// belonged to a different decision — and record_outcome overwrites in place, so that memory's
+// recorded outcome was destroyed and `_should_ask_outcome` never reopened the ask.
+//
+// The index is now bound INTO the rendered block, exactly as a forecast is bound to its token: a
+// stale block can only ever post its own index, which the drift guard then handles honestly.
 // The four fates, in the learner's words. Every label says what BECAME of the decision and
 // none of them says whether it was right — that is the whole point of the tag (invariant 5).
 const FATES = [['held','I held to it'],['reversed','I reversed it'],
   ['overtaken','Events overtook it'],['too_early','Too early to tell']];
 function fateLabel(k){ for(const [v,l] of FATES) if(v===k) return l; return ''; }
-function outcomeBlock(m){
+function outcomeBlock(m, index){
   if(m.outcome){
     return '<div class="mem-label">What happened</div><div class="mem-line">'+esc(m.outcome)+'</div>'
       + (m.outcome_kind ? '<div class="mem-when">'+esc(fateLabel(m.outcome_kind))+'</div>' : '');
@@ -198,9 +202,9 @@ function outcomeBlock(m){
   return '<div class="mem-label">What happened?</div>'
     + '<div class="mem-muted mem-ask">You decided this a while ago. If you know how it turned out, '
     + 'say so in your own words — this is recorded beside the memory, never scored.</div>'
-    + '<textarea id="mem-outcome" class="mem-outcome" rows="3" placeholder="What actually happened."></textarea>'
-    + '<div class="mem-fates">'
-    + FATES.map(([v,l])=>'<button class="mem-fate" onclick="recordOutcome(\''+v+'\')">'+l+'</button>').join('')
+    + '<textarea id="mem-outcome-'+index+'" class="mem-outcome" rows="3" placeholder="What actually happened."></textarea>'
+    + '<div class="mem-fates" data-outcome-index="'+index+'">'
+    + FATES.map(([v,l])=>'<button class="mem-fate" onclick="recordOutcome(\''+v+'\','+index+')">'+l+'</button>').join('')
     + '</div>';
 }
 // The forecast, asked ONCE at the landing. The copy is deliberately the flattest question that
@@ -257,16 +261,24 @@ function recordExpectation(token){
     muted((r.kind==='nudge' && r.message) ? r.message : 'That one could not be recorded.');
   }).catch(()=>{ release(); muted('connection lost — your words are still here, try again.'); });
 }
-function recordOutcome(kind){
-  const box = document.getElementById('mem-outcome');
+function recordOutcome(kind, index){
+  const box = document.getElementById('mem-outcome-'+index);
   const text = box ? box.value.trim() : '';
+  // A blank answer is refused by the store before any write — it would otherwise replace a real
+  // recorded outcome with whitespace — so do not send one.
   if(!text){ if(box) box.focus(); return; }
-  post('/api/session/single/outcome',{index:memIndex,outcome:text,kind:kind}).then(r=>{
-    if(r.kind==='memory') showMemory(r);       // re-read, so we render what actually landed
-    else if(r.kind==='nudge') muted(r.message||'');
-  }).catch(()=>{});
+  const fates = document.querySelector('[data-outcome-index="'+index+'"]');
+  if(fates){ if(fates.dataset.sending === '1') return; fates.dataset.sending = '1'; }
+  const btns = fates ? fates.querySelectorAll('button') : [];
+  btns.forEach(b => { b.disabled = true; });
+  const release = () => { if(fates) fates.dataset.sending = ''; btns.forEach(b => { b.disabled = false; }); };
+  post('/api/session/single/outcome',{index:index,outcome:text,kind:kind}).then(r=>{
+    if(r.kind==='memory'){ showMemory(r, index); return; }  // re-read: render what actually landed
+    release();                                              // refusal: keep their words on screen
+    muted((r.kind==='nudge' && r.message) ? r.message : 'That one could not be recorded.');
+  }).catch(()=>{ release(); muted('connection lost — your words are still here, try again.'); });
 }
-function showMemory(m){
+function showMemory(m, index){
   const p = document.getElementById('memory');
   if(m.unavailable){
     p.innerHTML = '<div class="mem-line mem-muted">This memory predates the update — it will appear after your next session.</div>'
@@ -278,7 +290,7 @@ function showMemory(m){
       + '<div class="mem-label">What you said</div><div class="mem-line">'
       + (m.position ? esc(m.position) : '<span class="mem-muted">your words weren\'t captured for older judgments</span>')+'</div>'
       + '<div class="mem-when">'+ago+(m.origin?(' · from your '+esc(m.origin)+' sitting'):'')+'</div>'
-      + outcomeBlock(m)
+      + outcomeBlock(m, index)
       + '<button class="mem-close" onclick="hideMemory()">close</button>';
   }
   p.hidden = false;
