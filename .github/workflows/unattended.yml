@@ -1,0 +1,156 @@
+name: unattended repair
+
+# Wired, and off.
+#
+# Every guard below runs whether or not the switch is on, so the path is
+# exercised rather than theoretical. Nothing invokes a model until the repository
+# variable FELIX_UNATTENDED is set to "true", which is a deliberate act by a
+# person who has watched the risk rules judge some real changes first.
+#
+# The rules deciding what is in scope were written in one sitting and have never
+# been tested against a real failure. Turning this on before they have is
+# trusting a boundary nobody has walked into.
+#
+#   gh variable set FELIX_UNATTENDED --body true --repo OWNER/REPO     enable
+#   gh variable delete FELIX_UNATTENDED --repo OWNER/REPO              disable
+#
+# The division of labour matters more than any single guard. The model may read
+# and edit, and nothing else. It cannot run git, cannot push, and cannot decide
+# that its own work is finished. The workflow runs the gate afterwards and pushes
+# only if the gate is green. An agent that verifies itself is not verified.
+
+on:
+  workflow_run:
+    workflows: [gate]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# One at a time. A loop that can fan out is not bounded by an attempt ceiling,
+# because each branch of the fan has its own.
+concurrency:
+  group: unattended-${{ github.event.workflow_run.head_branch || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    # workflow_run carries repository secrets even when the run it followed came
+    # from a fork. The checkout below would fail for a fork branch anyway, but
+    # relying on an accident is not a control, so same-repo is explicit.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'failure' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+          fetch-depth: 0
+          path: repo
+
+      - uses: actions/checkout@v4
+        with:
+          repository: LeavesJ/felix
+          ssh-key: ${{ secrets.FELIX_DEPLOY_KEY }}
+          path: felix
+
+      # Scope before anything reads the failing log. Handing a model the
+      # diagnostics and then telling it what it may not touch is the wrong order.
+      - name: Scope the failure
+        id: scope
+        working-directory: repo
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+        run: |
+          set -uo pipefail
+          ../felix/engine/harness/felix repair | tee /tmp/brief.txt
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" != "3" ]; then echo "proceed=yes" >> "$GITHUB_OUTPUT"; exit 0; fi
+
+          echo "out of scope: a red path is implicated" >&2
+          echo "proceed=no" >> "$GITHUB_OUTPUT"
+          # Escalation is the one path that must not fail quietly. If the label
+          # cannot be applied, the job fails so somebody notices, rather than a
+          # red-path failure disappearing into a green checkmark.
+          pr="$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number')"
+          if [ -z "$pr" ]; then
+            echo "no open PR for $BRANCH; cannot escalate by label" >&2; exit 1
+          fi
+          gh pr edit "$pr" --add-label needs-founder || {
+            echo "failed to apply needs-founder to #$pr" >&2; exit 1; }
+
+      # Budget is spent only by a run that will actually do something. Charging
+      # for a run that stops at the switch would exhaust the ceiling while the
+      # loop was still disabled, and leave nothing for the day it is enabled.
+      - name: Spend from the budget
+        id: budget
+        if: steps.scope.outputs.proceed == 'yes' && vars.FELIX_UNATTENDED == 'true'
+        working-directory: repo
+        run: |
+          if ../felix/engine/harness/felix budget --record --why "ci repair"; then
+            echo "proceed=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Attempt a repair
+        if: steps.budget.outputs.proceed == 'yes'
+        working-directory: repo
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -uo pipefail
+          # Pinned. An unpinned global install pulls whatever shipped that
+          # morning into a job holding an API key.
+          npm install -g @anthropic-ai/claude-code@2.1.37 >/dev/null 2>&1
+          # Read and Edit only. No git, no shell, no push. The model changes
+          # files; this workflow decides whether the change is acceptable.
+          claude -p "$(cat /tmp/brief.txt)
+
+          Repair this failure by editing files. Do not touch any path the brief
+          did not name. If the fix needs a file outside that set, stop and
+          explain instead of widening the change." \
+            --allowedTools "Read,Edit" \
+            || echo "the attempt did not complete; the gate below still decides"
+
+      # The gate decides, not the model, and not the absence of an error.
+      - name: Verify and push
+        if: steps.budget.outputs.proceed == 'yes'
+        working-directory: repo
+        env:
+          BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+        run: |
+          set -uo pipefail
+          if git diff --quiet; then
+            echo "nothing changed; leaving the failure as it was"; exit 0
+          fi
+          if ! ../felix/engine/harness/felix gate; then
+            echo "gate still red after the attempt; not pushing" >&2
+            git checkout -- .
+            exit 1
+          fi
+          git config user.name "felix[bot]"
+          git config user.email "felix@users.noreply.github.com"
+          git commit -am "fix: unattended repair, verified by the gate
+
+          Produced by the unattended loop and pushed only because the gate went
+          green afterwards. Scope was checked before the failing log was read."
+          git push origin "HEAD:$BRANCH"
+
+      - name: Report
+        if: always()
+        run: |
+          if [ "${{ steps.scope.outputs.proceed }}" != "yes" ]; then
+            echo "Stopped at scope. A person decides here."
+          elif [ "${{ vars.FELIX_UNATTENDED }}" != "true" ]; then
+            echo "In scope, and the switch is off. The guards ran and nothing was"
+            echo "invoked or spent. This is the intended state until the risk rules"
+            echo "have judged real changes."
+          elif [ "${{ steps.budget.outputs.proceed }}" != "yes" ]; then
+            echo "Budget exhausted for the last 24h. Nothing was invoked."
+          fi
