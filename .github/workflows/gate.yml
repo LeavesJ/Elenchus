@@ -177,6 +177,21 @@ jobs:
         env:
           STRIX_LLM: ${{ secrets.STRIX_LLM }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          # Opt-out, and on by default upstream. It sends no target, URL, path
+          # or finding — session duration, OS, scan mode, model name, counts by
+          # severity — but a private project's CI should not be pinging an
+          # analytics endpoint because nobody read the default.
+          STRIX_TELEMETRY: "0"
         run: |
-          strix -n -t ./ --scan-mode quick \
+          # --max-budget is a hard cumulative cap across the root agent and every
+          # child, checked after each model response, and it is the reason this
+          # job can exist before anybody has decided how much Strix is worth.
+          # Sub-agents stop at 90% so the root keeps enough to write its report.
+          # It can overshoot slightly — the cost is estimated from token usage —
+          # so treat it as a ceiling with a margin, not a guarantee.
+          #
+          # --scan-mode quick is explicit because the upstream DEFAULT IS DEEP,
+          # which is 1-4 hours. A default that expensive should never arrive by
+          # omission on a pull request.
+          strix -n -t ./ --scan-mode quick --max-budget 5 \
             --scope-mode diff --diff-base "origin/${{ github.base_ref }}"
