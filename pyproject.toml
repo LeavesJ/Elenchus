@@ -44,4 +44,5 @@ select = ["E4", "E7", "E9", "F"]
 testpaths = ["tests"]
 markers = [
     "live: exercises the real Anthropic API (requires ANTHROPIC_API_KEY); skipped otherwise",
+    "preview: exercises a running preview server (requires PREVIEW_URL); skipped otherwise",
 ]

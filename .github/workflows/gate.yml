@@ -63,3 +63,63 @@ jobs:
       - name: Run the gate
         working-directory: repo
         run: ../felix/engine/harness/felix gate
+
+  # The guidebook's Phase 1 loop asks for "deploy preview" and then "test it",
+  # and this repository had neither. scripts/smoke_server.py already raised the
+  # real app against the scripted fake model, but no gate and no workflow ever
+  # referenced it — while two static suites opened by saying "the browser smoke
+  # supplies the behavioural teeth". The teeth were a manual habit.
+  #
+  # A separate job on purpose. The gate answers "is this code correct" before
+  # anything is stood up; this answers "does the thing actually come up and
+  # serve" after it is, which is a different question and must be able to fail
+  # on its own. It is not a deploy to anywhere a stranger can reach — it is the
+  # smallest honest version of a preview: the real app, on a real port, over
+  # real HTTP, checked by something that fails.
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out Elenchus
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,web]" "pytest==9.1.1"
+
+      # No ANTHROPIC_API_KEY here either. The smoke server is wired to the
+      # deterministic scripted model, so the preview costs nothing and cannot
+      # vary between runs.
+      - name: Stand up the preview
+        run: |
+          python scripts/smoke_server.py --port 8123 --fresh --db "$RUNNER_TEMP/preview.db" \
+            > "$RUNNER_TEMP/preview.log" 2>&1 &
+          echo "PREVIEW_URL=http://127.0.0.1:8123" >> "$GITHUB_ENV"
+
+      # Bounded wait, and a failure here is a real failure: an app that never
+      # binds is the thing this job exists to catch. The log is printed so the
+      # reason is in the run rather than in somebody's memory.
+      - name: Wait for it to answer
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf -o /dev/null http://127.0.0.1:8123/; then
+              echo "preview answered after ${i}s at http://127.0.0.1:8123"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "preview never answered on :8123 after 60s" >&2
+          cat "$RUNNER_TEMP/preview.log" >&2
+          exit 1
+
+      - name: Test it
+        run: python -m pytest tests/test_preview.py -m preview -q
+
+      - name: Preview log
+        if: always()
+        run: cat "$RUNNER_TEMP/preview.log" || true
