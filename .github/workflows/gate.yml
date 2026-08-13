@@ -123,3 +123,60 @@ jobs:
       - name: Preview log
         if: always()
         run: cat "$RUNNER_TEMP/preview.log" || true
+
+  # Strix: autonomous pentesting agents, Apache-2.0, from usestrix. The Phase 1
+  # build list names it and a prior audit concluded it did not exist — that
+  # audit checked the plugin marketplace, PATH, pip and brew, and never searched
+  # the web. It exists, and this is it.
+  #
+  # Advisory on purpose, for now. It is an LLM agent: 15-30 minutes per quick
+  # run, real token spend, and non-deterministic — which is the opposite of what
+  # a required check should be. It earns `continue-on-error: false` once its
+  # false-positive rate here is known, and not before.
+  #
+  # Installed from PyPI at a pinned version rather than the documented
+  # `curl … | bash`, so CI is not executing an unpinned remote script on every
+  # build.
+  pentest:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Check out Elenchus
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Skips cleanly until the founder adds the secrets, so this job never
+      # fails for a reason nobody can act on from inside a pull request.
+      - name: Is Strix configured?
+        id: cfg
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          if [ -n "$LLM_API_KEY" ]; then echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "LLM_API_KEY is not set; skipping. felix setup names this step." >&2
+          fi
+
+      - name: Set up Python
+        if: steps.cfg.outputs.ready == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install Strix
+        if: steps.cfg.outputs.ready == 'true'
+        run: pip install "strix-agent==1.5.3"
+
+      # Scoped to what the pull request changed. A full-tree run is 60-120
+      # minutes and belongs on a schedule, not on every push.
+      - name: Scan what this branch changes
+        if: steps.cfg.outputs.ready == 'true'
+        env:
+          STRIX_LLM: ${{ secrets.STRIX_LLM }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          strix -n -t ./ --scan-mode quick \
+            --scope-mode diff --diff-base "origin/${{ github.base_ref }}"
