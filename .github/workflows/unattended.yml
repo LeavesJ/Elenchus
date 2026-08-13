@@ -110,7 +110,30 @@ jobs:
           npm install -g @anthropic-ai/claude-code@2.1.37 >/dev/null 2>&1
           # Read and Edit only. No git, no shell, no push. The model changes
           # files; this workflow decides whether the change is acceptable.
-          claude -p "$(cat /tmp/brief.txt)
+          # The constitution, inlined rather than referenced. It is already in
+          # this runner — the Felix checkout above brings it — but nothing had
+          # ever told the model it was there, so the ONE path that runs without
+          # a person watching was the one path with no doctrine at all.
+          #
+          # Inlined and not merely pointed at, because Read is allowed and a
+          # pointer is a suggestion. The alternative considered and rejected was
+          # committing CLAUDE.md into this repository: that would put a second
+          # copy beside the one Felix holds, free to drift, which is the exact
+          # complaint already open about scripts/prepush.sh.
+          DOCTRINE=../felix/projects/elenchus/CLAUDE.md
+          if [ ! -f "$DOCTRINE" ]; then
+            echo "the constitution is missing from the Felix checkout; refusing to run unattended without it" >&2
+            exit 1
+          fi
+          claude -p "The constitution governing this repository. Everything below
+          the line is the brief; this part is the standing rules, and they are not
+          optional.
+
+          $(cat "$DOCTRINE")
+
+          ----
+
+          $(cat /tmp/brief.txt)
 
           Repair this failure by editing files. Do not touch any path the brief
           did not name. If the fix needs a file outside that set, stop and
