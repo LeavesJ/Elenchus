@@ -83,7 +83,11 @@ variants of the bug.
   was true of one particular database and false as a general claim. On a live sitting the pick is
   restored into `_next_pick` and can be offered to the learner under an identity that now means the
   other problem, so it is CLEARED there (transient state the next selection recomputes) and left,
-  counted, on closed sittings where it is genuinely dead.
+  counted, elsewhere. NOT "left on closed sittings where it is genuinely dead", which this bullet
+  said for a week and which is the same unearned claim one level down: the live clear matches by
+  `sitting_id` against `web_sitting`, so a row whose sitting is missing from that table is left
+  without anything establishing its status. `next_pick_ref_left_unverified` counts how many of the
+  left rows are in that position, and only the remainder is provably dead.
 
 `license_continuity` gets a corpus row with NO SCENE. `experience._attach_scene` returns the
 experience unchanged when no entry resolves, so it serves its own authored prompt, which is the
@@ -474,10 +478,18 @@ def migrate(db_path: str) -> dict[str, int]:
                 # 2026-08-10 run was read against and silently narrowing it would re-describe a
                 # number already written down. Nonzero here means that many of `left_closed` are
                 # a guess, which is the same refusal `house_refs_undiscriminated` records.
+                # `NOT EXISTS`, NOT `NOT IN`, and the difference is the whole point of the counter.
+                # `web_sitting.id` is a TEXT PRIMARY KEY, which sqlite lets hold NULL, and `NOT IN`
+                # is three-valued: one NULL anywhere in the subquery makes every comparison UNKNOWN
+                # rather than TRUE, so the count collapses to 0. A counter whose job is to say "this
+                # many were guessed at" would answer NONE exactly when the table is at its most
+                # ambiguous. `NOT EXISTS` is two-valued and fails CLOSED: a NULL `sitting_id`, the
+                # row with the least evidence of all, correlates to nothing and is counted.
                 if _has_table(conn, "web_sitting"):
                     c["next_pick_ref_left_unverified"] = conn.execute(
-                        "SELECT COUNT(*) FROM web_sitting_state WHERE next_pick_ref=? AND "
-                        "sitting_id NOT IN (SELECT id FROM web_sitting WHERE status='closed')",
+                        "SELECT COUNT(*) FROM web_sitting_state s WHERE s.next_pick_ref=? AND "
+                        "NOT EXISTS (SELECT 1 FROM web_sitting w WHERE w.id=s.sitting_id "
+                        "AND w.status='closed')",
                         (OLD_REF,),
                     ).fetchone()[0]
                 else:

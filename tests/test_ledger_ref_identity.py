@@ -756,37 +756,41 @@ def test_an_unauthored_slot_is_left_alone_AND_COUNTED(tmp_path):
     how the first version of this file went wrong". The slot branch added in round four skipped
     silently, so an operator reading `web_domain_slot: 0` could not tell "no slot needed migrating"
     from "a slot holds the old ref and I declined to touch it". Same policy, same file, one block
-    apart."""
+    apart.
+
+    TWO SLOTS, AND THAT IS THE POINT. The first version of this test built ONE slot and made it
+    unauthored, so the counter could be hoisted above the authorship predicate -- counting every
+    slot holding the old ref rather than only the refused ones -- and the whole file still passed.
+    That is this file's oldest failure repeating itself for a fifth time: a fixture in which the
+    wrong predicate cannot give a different answer. A counter that discriminates must be shown a
+    case on each side of the line."""
     from elenchus.ledger_ref_migration import KEPT_FRAMES
 
-    db = _production_db(str(tmp_path / "unauthored.db"), authored_frames=set())
+    moved = sorted(MOVED_FRAMES)[0]
+    kept = sorted(KEPT_FRAMES)[0]
+    db = _production_db(str(tmp_path / "unauthored.db"), authored_frames={moved})
     c = sqlite3.connect(db)
-    c.execute(
-        "INSERT INTO web_domain_slot (slot, first_touch_at, member_refs_json, member_frames_json,"
-        " status) VALUES (?,?,?,?,?)",
-        (
-            0,
-            NOW.isoformat(),
-            json.dumps([OLD_REF]),
-            json.dumps(sorted(set(MOVED_FRAMES) | set(KEPT_FRAMES))),
-            "live",
-        ),
-    )
+    for slot, members in ((0, [moved]), (1, [kept, _UNRELATED_FRAME])):
+        c.execute(
+            "INSERT INTO web_domain_slot (slot, first_touch_at, member_refs_json,"
+            " member_frames_json, status) VALUES (?,?,?,?,?)",
+            (slot, NOW.isoformat(), json.dumps([OLD_REF]), json.dumps(sorted(members)), "live"),
+        )
     c.commit()
     c.close()
 
     counts = migrate(db)
 
-    assert counts["web_domain_slot"] == 0, "no member authored the ref; nothing may be rewritten"
+    assert counts["web_domain_slot"] == 1, "slot 0's member authored the ref and must move"
     assert counts["web_domain_slot_unauthored"] == 1, (
-        "and the refusal must be reported, never silent"
+        "exactly ONE slot was refused. Counting 2 means the counter is keyed on holding the old "
+        "ref rather than on the refusal, which is the discrimination it exists to report"
     )
     c = sqlite3.connect(db)
-    refs = json.loads(
-        c.execute("SELECT member_refs_json FROM web_domain_slot WHERE slot=0").fetchone()[0]
-    )
+    rows = dict(c.execute("SELECT slot, member_refs_json FROM web_domain_slot").fetchall())
     c.close()
-    assert refs == [OLD_REF], f"the row was rewritten on evidence nobody has: {refs}"
+    assert json.loads(rows[0]) == [NEW_REF], "the authored slot moves"
+    assert json.loads(rows[1]) == [OLD_REF], "the unauthored slot is untouched"
 
 
 def test_a_pick_whose_sitting_status_is_unknown_is_not_reported_as_closed(tmp_path):
@@ -802,11 +806,16 @@ def test_a_pick_whose_sitting_status_is_unknown_is_not_reported_as_closed(tmp_pa
     db = _production_db(str(tmp_path / "orphan.db"))
     st = SittingStore(db)
 
-    dead = st.create_sitting(NOW)
-    st.write_state(dead, next_pick=(OLD_REF, "a genuinely dead door"), now=NOW)
-    st.close_sitting(dead)
+    # TWO closed and ONE orphan, and the asymmetry is deliberate. With one of each, the correct
+    # predicate and its exact INVERSION both return 1, so the test was satisfied by the negation
+    # of the thing it protects. Counts on the two sides must differ for the assertion to mean
+    # anything: 1 unverified against 2 verifiable.
+    for i, label in enumerate(("a genuinely dead door", "another dead door")):
+        dead = st.create_sitting(NOW + timedelta(minutes=i))
+        st.write_state(dead, next_pick=(OLD_REF, label), now=NOW)
+        st.close_sitting(dead)
 
-    orphan = st.create_sitting(NOW + timedelta(minutes=1))
+    orphan = st.create_sitting(NOW + timedelta(minutes=5))
     st.write_state(orphan, next_pick=(OLD_REF, "a door of unknown status"), now=NOW)
     c = sqlite3.connect(db)
     c.execute("DELETE FROM web_sitting WHERE id=?", (orphan,))  # state outlives its sitting row
@@ -815,8 +824,86 @@ def test_a_pick_whose_sitting_status_is_unknown_is_not_reported_as_closed(tmp_pa
 
     counts = migrate(db)
 
-    assert counts["next_pick_ref_cleared_live"] == 0, "neither sitting is live"
+    assert counts["next_pick_ref_cleared_live"] == 0, "nothing is live"
+    assert counts["next_pick_ref_left_closed"] == 3, "all three rows were left in place"
+    assert counts["next_pick_ref_left_unverified"] == 1, (
+        "exactly ONE of the three cannot be shown to sit on a closed sitting. Reading 2 means the "
+        "predicate is inverted; reading 3 means it is not discriminating at all"
+    )
+
+
+def test_one_null_id_cannot_drive_the_unverified_count_to_zero(tmp_path):
+    """The counter must fail CLOSED. `NOT IN` fails open, and that is how it was first written.
+
+    SQLite permits NULL in a `TEXT PRIMARY KEY` (`web_sitting.id` is exactly that), and its
+    three-valued `NOT IN` yields UNKNOWN, never TRUE, once a NULL appears in the subquery. So a
+    single `web_sitting` row with a NULL id drove this counter to 0 no matter how many rows were
+    genuinely unverifiable, reporting "nothing here was guessed" precisely when the data is at its
+    most ambiguous.
+
+    The fixture holds one row on each side of the line, because a fixture where every row is
+    unverifiable cannot tell an undercount from a correct answer. `NOT IN` returns 0 here and the
+    truth is 1.
+
+    Same shape as everything else this file has been wrong about: a check that answers zero when it
+    cannot decide, instead of answering that it cannot decide."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = _production_db(str(tmp_path / "nullid.db"))
+    st = SittingStore(db)
+
+    # Only ONE sitting may be live at a time: a partial unique index makes the second
+    # `create_sitting` ADOPT the first rather than mint a second id. Close before creating.
+    dead = st.create_sitting(NOW)
+    st.write_state(dead, next_pick=(OLD_REF, "provably dead"), now=NOW)
+    st.close_sitting(dead)
+
+    orphan = st.create_sitting(NOW + timedelta(minutes=1))
+    st.write_state(orphan, next_pick=(OLD_REF, "unknowable"), now=NOW)
+
+    c = sqlite3.connect(db)
+    c.execute("DELETE FROM web_sitting WHERE id=?", (orphan,))  # state outlives its sitting row
+    c.execute(
+        "INSERT INTO web_sitting (id, status, updated_at) VALUES (NULL,'closed',?)",
+        (NOW.isoformat(),),
+    )
+    c.commit()
+    assert c.execute("SELECT COUNT(*) FROM web_sitting WHERE id IS NULL").fetchone()[0] == 1, (
+        "the whole point of this fixture is a NULL id; if sqlite ever rejects it, this test is void"
+    )
+    c.close()
+
+    counts = migrate(db)
+
+    assert counts["next_pick_ref_cleared_live"] == 0, "nothing is live"
     assert counts["next_pick_ref_left_closed"] == 2, "both rows were left in place"
     assert counts["next_pick_ref_left_unverified"] == 1, (
-        "exactly one of them could be SHOWN to sit on a closed sitting; the other is a guess"
+        "the orphan cannot be shown to sit on a closed sitting and must be reported; a NULL id "
+        "elsewhere in the table must not silently answer the question for every row at once"
+    )
+
+
+def test_without_web_sitting_every_left_row_is_unverified(tmp_path):
+    """The branch the counter exists for, and it had no test.
+
+    `next_pick_ref_left_closed` is computed unconditionally, but the live clear that gives the word
+    "closed" its meaning runs only `if _has_table(conn, "web_sitting")`. Without that table nothing
+    establishes any row's status, so every left row is a guess and the fallback must say so.
+    Deleting the `else` branch entirely left the whole file green before this existed."""
+    db = _production_db(str(tmp_path / "nositting.db"))
+    c = sqlite3.connect(db)
+    c.execute(
+        "INSERT INTO web_sitting_state (sitting_id, next_pick_ref, next_pick_title) VALUES (?,?,?)",
+        ("orphaned-state-row", OLD_REF, "a door with no sitting table at all"),
+    )
+    c.execute("DROP TABLE web_sitting")
+    c.commit()
+    c.close()
+
+    counts = migrate(db)
+
+    assert counts["next_pick_ref_cleared_live"] == 0, "there is no table to read status from"
+    assert counts["next_pick_ref_left_closed"] == 1
+    assert counts["next_pick_ref_left_unverified"] == 1, (
+        "with no web_sitting table NOTHING is provably closed, so the whole left count is guessed"
     )
