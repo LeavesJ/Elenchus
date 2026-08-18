@@ -1141,14 +1141,13 @@ def test_memory_chrome_is_recollective_never_evaluative():
 
 # ---- Phase A T3: the confluence event's wire carrier (review MUST-FIX) ------------------------
 
-# continuity_lock_in and license_continuity share ONE ledger_ref ("veldra:license_fork_risk",
-# a pre-existing content coincidence, out of this task's scope): `display_titles()` keys by that
-# ref, so the front-door slot for it shows license_continuity's title even on the fresh, empty
-# state where the RANKING (a separate, score-based dedup — `problem_menu()`) actually resolves
-# that slot to continuity_lock_in (verified directly: a fresh SessionRegistry's
-# `ch.inflight_exp` reads `('continuity_lock_in', 'veldra:license_fork_risk')` after choosing
-# this exact slot). The label is misleading; the underlying door is the one the P1 recipe needs.
-_CONTINUITY_TITLE = "A contract ambiguity mid-rollout"  # -> continuity_lock_in (see above)
+# This comment used to document, in detail, that the label on this door was WRONG:
+# continuity_lock_in and license_continuity shared one ledger_ref, `display_titles()` keys by
+# that ref, so the slot resolving to continuity_lock_in was labelled with license_continuity's
+# title. It called that "a pre-existing content coincidence, out of this task's scope" and routed
+# around it. It was not a coincidence, it was a collision that also made one problem unofferable
+# and served the other's scene; the refs are split now and the label matches the door.
+_CONTINUITY_TITLE = "Continuity terms a buyer wants pinned"  # continuity_lock_in's own title
 _STAKES_TITLE = "Pricing power in a concentrated market"  # decision_under_stakes
 
 

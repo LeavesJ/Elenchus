@@ -9,7 +9,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
-from elenchus.web.sitting_store import SittingStore
+from elenchus.web.sitting_store import EXPECTATION_TTL, SittingStore
 
 NOW = datetime(2026, 7, 1, 21, 0, 0, tzinfo=timezone.utc)
 LATER = NOW + timedelta(hours=1)
@@ -681,3 +681,199 @@ def test_gate_rejection_table_is_additive_on_an_existing_db(tmp_path):
 
     second = SittingStore(db)  # re-open: CREATE TABLE IF NOT EXISTS runs again
     assert second.read_world(sit) == "her situation"
+
+
+def test_expectation_is_frozen_at_convergence_and_round_trips(tmp_path):
+    """The prospective half of the calibration record. Frozen AT convergence, before reality
+    resolves, so it is a forecast rather than a reconstruction."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="I sign.")
+    row = st.converged_log()[0]
+    assert row["expectation"] is None and row["expectation_at"] is None
+
+    assert st.record_expectation(sid, "veldra:a", NOW, "Churn stays under 8%.", NOW) is True
+    row = st.converged_log()[0]
+    assert row["expectation"] == "Churn stays under 8%."
+    assert row["expectation_at"] == NOW.isoformat()
+    # annotates, never rewrites: the memory the learner committed to is untouched
+    assert row["position"] == "I sign." and row["converged_at"] == NOW.isoformat()
+
+
+def test_expectation_is_write_once_because_an_editable_forecast_is_not_a_forecast(tmp_path):
+    """The freeze is the whole mechanism, and it is enforced in SQL (`AND expectation IS NULL`)
+    rather than by convention.
+
+    `record_outcome` deliberately overwrites: a decision's fate is not final the first time you
+    ask. This is the exact opposite. A second write arriving AFTER the learner has watched
+    reality unfold would replace a prospective answer with a hindsight-shaped one, and the
+    calibration corpus would silently become worthless while still looking full."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="I sign.")
+    assert st.record_expectation(sid, "veldra:a", NOW, "Churn stays under 8%.", NOW) is True
+
+    # reality has since arrived; a second attempt must not land
+    assert st.record_expectation(sid, "veldra:a", NOW, "I knew it would spike.", LATER) is False
+    row = st.converged_log()[0]
+    assert row["expectation"] == "Churn stays under 8%."
+    assert row["expectation_at"] == NOW.isoformat()
+
+
+def test_expectation_precedes_the_outcome_so_prospectivity_is_auditable(tmp_path):
+    """`expectation_at` exists so that "this was a forecast, not a reconstruction" is CHECKABLE
+    on every row rather than assumed from where the call site happens to sit today. A row whose
+    expectation_at is not strictly before its outcome_at is a reconstructed answer."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="I sign.")
+    st.record_expectation(sid, "veldra:a", NOW, "Churn stays under 8%.", NOW)
+    st.record_outcome(sid, "veldra:a", NOW, "Churn hit 14%.", "reversed", LATER)
+
+    row = st.converged_log()[0]
+    assert row["expectation_at"] < row["outcome_at"]
+    # both halves survive together: the forecast is not overwritten by the outcome
+    assert row["expectation"] == "Churn stays under 8%."
+    assert row["outcome"] == "Churn hit 14%." and row["outcome_kind"] == "reversed"
+
+
+def test_expectation_survives_the_migration_on_a_legacy_db(tmp_path):
+    """Dbs created before this column must gain it without losing rows, matching the `position`
+    and `outcome` migrations directly above it in the schema block."""
+    path = str(tmp_path / "legacy.db")
+    st = _store(tmp_path, "legacy.db")
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="I sign.")
+
+    # simulate a db that predates the column
+    with sqlite3.connect(path) as c:
+        c.execute("ALTER TABLE web_converged DROP COLUMN expectation")
+        c.execute("ALTER TABLE web_converged DROP COLUMN expectation_at")
+
+    st2 = SittingStore(path)  # migration runs on open
+    row = st2.converged_log()[0]
+    assert row["position"] == "I sign."  # the legacy row survived
+    assert row["expectation"] is None and row["expectation_at"] is None
+    assert st2.record_expectation(sid, "veldra:a", NOW, "Churn stays under 8%.", NOW) is True
+    assert st2.converged_log()[0]["expectation"] == "Churn stays under 8%."
+
+
+def test_expectation_writes_exactly_one_row_even_when_two_share_the_key(tmp_path):
+    """Cardinality is part of the guarantee, not an incidental property.
+
+    `log_converged` is a plain INSERT with no unique constraint on (sitting_id, ref,
+    converged_at), so two rows CAN share the tuple: a coarsened timestamp, a replayed log, an
+    import. An unbounded UPDATE would then stamp one learner's forecast onto two distinct
+    memories -- each later scored against its own outcome -- and still report success. A
+    write-once forecast is worth having because its provenance is strong."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p1")
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p2")
+
+    assert st.record_expectation(sid, "veldra:a", NOW, "churn stays under 8%", NOW) is True
+    rows = [r for r in st.converged_log() if r["ref"] == "veldra:a"]
+    assert len(rows) == 2
+    written = [r for r in rows if r["expectation"] is not None]
+    assert len(written) == 1, f"the forecast landed on {len(written)} rows, not exactly one"
+
+    # the second row is still writable, and it is a DIFFERENT durable record (inside the window)
+    assert (
+        st.record_expectation(
+            sid, "veldra:a", NOW, "a second, separate forecast", NOW + timedelta(minutes=5)
+        )
+        is True
+    )
+    assert sorted(r["expectation"] for r in st.converged_log() if r["ref"] == "veldra:a") == [
+        "a second, separate forecast",
+        "churn stays under 8%",
+    ]
+
+
+def test_a_forecast_is_refused_once_the_outcome_is_known(tmp_path):
+    """`expectation IS NULL` alone made the ordering merely conventional: recording the outcome
+    first and the forecast second succeeded and stamped expectation_at AFTER outcome_at, producing
+    a row the audit predicate classifies as a hindsight reconstruction. The write now refuses it,
+    so a row that exists is a row that was prospective."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p")
+    st.record_outcome(sid, "veldra:a", NOW, "churn hit 14%", "reversed", LATER)
+
+    assert st.record_expectation(sid, "veldra:a", NOW, "I knew it would spike", LATER) is False
+    row = st.converged_log()[0]
+    assert row["expectation"] is None and row["expectation_at"] is None
+
+
+def test_the_forecast_window_closes_fifteen_minutes_after_the_convergence(tmp_path):
+    """The forecast belongs to the immediate post-convergence state. A textarea left open in a tab
+    for an hour is no longer capturing what the learner expected AT the decision, and a record that
+    merely predates the outcome is a weaker claim than one made while the reasoning was still in
+    front of them. Enforced against the PERSISTED converged_at, so a replayed or scripted POST
+    cannot widen it."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p")
+
+    just_inside = NOW + EXPECTATION_TTL - timedelta(seconds=1)
+    assert st.record_expectation(sid, "veldra:a", NOW, "inside the window", just_inside) is True
+    assert st.converged_log()[0]["expectation"] == "inside the window"
+
+
+def test_a_forecast_after_the_window_is_refused_and_writes_nothing(tmp_path):
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p")
+
+    just_outside = NOW + EXPECTATION_TTL + timedelta(seconds=1)
+    assert (
+        st.record_expectation(sid, "veldra:a", NOW, "an hour later, from memory", just_outside)
+        is False
+    )
+    row = st.converged_log()[0]
+    assert row["expectation"] is None and row["expectation_at"] is None
+
+
+def test_the_outcome_write_is_bounded_to_one_row(tmp_path):
+    """The twin of the forecast bound. Two rows can share (sitting_id, ref, converged_at), and a
+    broad UPDATE would stamp one fate onto two memories the learner committed to separately."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p1")
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p2")
+
+    assert st.record_outcome(sid, "veldra:a", NOW, "it held", "held", LATER) is True
+    written = [r for r in st.converged_log() if r["outcome"] is not None]
+    assert len(written) == 1, f"one outcome landed on {len(written)} rows"
+
+    # Re-recording OVERWRITES IN PLACE, which is deliberate for outcomes (a decision's fate is not
+    # final the first time you ask) and is the opposite of the forecast's write-once rule. It must
+    # still touch exactly one row, and the same one.
+    assert st.record_outcome(sid, "veldra:a", NOW, "then it reversed", "reversed", LATER) is True
+    written = [r for r in st.converged_log() if r["outcome"] is not None]
+    assert len(written) == 1, "re-recording spread the outcome onto a second memory"
+    assert written[0]["outcome"] == "then it reversed" and written[0]["position"] == "p1"
+
+
+def test_a_blank_outcome_cannot_destroy_a_recorded_one(tmp_path):
+    """DURABLE-STATE CORRECTNESS, not a papercut. `record_outcome` overwrites in place by design,
+    so a whitespace-only write replaced a real recorded outcome with "   " and flipped its fate
+    tag. Measured before the fix: 'the buyer walked and we lost the quarter' -> '   ' / 'held'.
+    Rejected before any write, so the existing record is preserved rather than repaired after."""
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p")
+    st.record_outcome(sid, "veldra:a", NOW, "the buyer walked", "reversed", LATER)
+
+    for blank in ("", "   ", "\n\t "):
+        assert st.record_outcome(sid, "veldra:a", NOW, blank, "held", LATER) is False
+    row = st.converged_log()[0]
+    assert row["outcome"] == "the buyer walked" and row["outcome_kind"] == "reversed"
+
+
+def test_an_outcome_is_stored_stripped_like_the_forecast(tmp_path):
+    st = _store(tmp_path)
+    sid = st.create_sitting(NOW)
+    st.log_converged(sid, "veldra:a", NOW, experience_id="license_continuity", position="p")
+    assert st.record_outcome(sid, "veldra:a", NOW, "  it held  ", "held", LATER) is True
+    assert st.converged_log()[0]["outcome"] == "it held"

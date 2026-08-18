@@ -4334,10 +4334,20 @@ def test_memory_drift_guard_checks_row_identity_not_ref_alone(tmp_path, make_fak
 
 
 def test_memory_curated_situation_honors_the_row_experience_id(tmp_path, make_fake):
-    """N1 (whole-branch review): `_memory_situation` must not first-match on ledger_ref alone —
-    two library entries share `veldra:license_fork_risk` (continuity_lock_in, license_continuity)
-    with DIFFERENT prompts. The situation returned must be the prompt of the entry whose
-    experience_id actually converged (the row's), not whichever entry sorts first."""
+    """N1 (whole-branch review): `_memory_situation` must key on the row's experience_id, not
+    first-match on `ledger_ref`.
+
+    THE FIXTURE THIS RELIED ON WAS A BUG, and it is gone. `continuity_lock_in` and
+    `license_continuity` used to SHARE `veldra:license_fork_risk` with different prompts, which is
+    what made a ref-only match observably wrong. That collision collapsed two owned problems and
+    is now rejected at load (`content_loader._reject_duplicate_ledger_refs`), so shipped content
+    can no longer produce the ambiguity. The property is kept anyway: a ref-only match is still
+    the wrong shape, and this drives the real registry path to prove the situation returned is the
+    converged row's own prompt.
+
+    That assertion is now a regression guard on the split itself. Before it,
+    `license_continuity`'s ledger_ref resolved to a corpus scene about a buyer's counsel
+    pre-signature, so the learner's memory showed a situation they had never been given."""
     from elenchus.content_loader import load_library
     from elenchus.web.sitting_store import SittingStore
 
@@ -4346,8 +4356,8 @@ def test_memory_curated_situation_honors_the_row_experience_id(tmp_path, make_fa
     library = load_library()
     continuity_lock_in = next(e for e in library if e.experience_id == "continuity_lock_in")
     license_continuity = next(e for e in library if e.experience_id == "license_continuity")
-    assert continuity_lock_in.ledger_ref == license_continuity.ledger_ref
-    assert continuity_lock_in.ledger_ref == "veldra:license_fork_risk"
+    assert continuity_lock_in.ledger_ref != license_continuity.ledger_ref  # two owned problems
+    assert license_continuity.ledger_ref == "veldra:midrollout_contract_boundary"
     assert continuity_lock_in.prompt != license_continuity.prompt
 
     store = SittingStore(db)
@@ -4642,3 +4652,198 @@ def test_house_slot_reads_the_filtered_terrain_row_not_the_original_index_compon
     assert rec["houses"] == [{"region": 0, "bucket": None, "slot": 0}]
     # The general invariant the review names: every house's slot equals its own terrain row's slot.
     assert all(h["slot"] == rec["terrain"][h["region"]]["slot"] for h in rec["houses"])
+
+
+# ---- The forecast frozen at convergence (calibration, prospective half) -----------------------
+
+
+def _converge(reg, sid, make_fake):
+    """Drive a real sitting to a genuine convergence through the registry, never a hand-built
+    record: the ask must be proven to ride the landing the engine actually emits."""
+    tag, _ = reg.start(sid, now=datetime(2026, 8, 8, 10, 0, tzinfo=timezone.utc))
+    assert tag == "say"
+    tag, _ = reg.step(sid, reg.menu_index(sid, _ANCHOR))
+    tag, data = reg.step(sid, "an opening that already holds the move")
+    while tag == "say":
+        tag, data = reg.step(sid, "because the mechanism is the escrow schedule")
+    return tag, data
+
+
+def test_the_landing_asks_for_a_forecast_on_a_genuine_convergence(tmp_path, make_fake):
+    """After the reasoning, before reality. The flag rides the `done` payload the engine emits,
+    so it cannot be attached to a plateau, an error, or a stale flow."""
+    reg = SessionRegistry(
+        str(tmp_path / "e.db"), model_factory=lambda: _agnostic(make_fake, "closed")
+    )
+    tag, data = _converge(reg, "s1", make_fake)
+    assert tag == "done"
+    assert data.get("ask_expectation") is True
+
+
+def test_the_forecast_lands_on_the_row_that_just_converged(tmp_path, make_fake):
+    """No index crosses the wire: the server writes to the convergence it logged for this session
+    moments ago, so a stale-index failure mode does not exist. `expectation_at` must precede any
+    later `outcome_at`, which is what makes prospectivity auditable per row."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "e.db")
+    reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
+    _, data = _converge(reg, "s1", make_fake)
+
+    tag, out = reg.record_expectation(
+        "s1", "  churn stays under 8 percent  ", data["expectation_token"]
+    )
+    assert (tag, out) == ("expectation", {"recorded": True})
+
+    row = SittingStore(db).converged_log()[-1]
+    assert row["expectation"] == "churn stays under 8 percent"  # stored verbatim, stripped
+    assert row["expectation_at"] and row["expectation_at"] >= row["converged_at"]
+    assert row["outcome"] is None  # the forecast never fills the outcome half
+
+
+def test_a_replayed_forecast_cannot_overwrite_the_first_one(tmp_path, make_fake):
+    """An editable forecast is not a forecast. Guarded twice: the pending entry is popped here and
+    the store's UPDATE carries `AND expectation IS NULL`, so neither a double-click nor a POST
+    replayed after the outcome is known can replace a prospective answer."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "e.db")
+    reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
+    _, data = _converge(reg, "s1", make_fake)
+    tok = data["expectation_token"]
+    reg.record_expectation("s1", "churn stays under 8 percent", tok)
+
+    tag, _ = reg.record_expectation("s1", "I knew all along it would spike", tok)
+    assert tag == "nudge"
+    assert SittingStore(db).converged_log()[-1]["expectation"] == "churn stays under 8 percent"
+
+
+def test_no_forecast_is_recorded_without_a_convergence(tmp_path, make_fake):
+    """A session that never converged has no row to freeze against, and an empty answer is not a
+    forecast. Both refuse rather than writing somewhere plausible."""
+    reg = SessionRegistry(
+        str(tmp_path / "e.db"), model_factory=lambda: _agnostic(make_fake, "closed")
+    )
+    reg.start("s1", now=datetime(2026, 8, 8, 10, 0, tzinfo=timezone.utc))
+    assert reg.record_expectation("s1", "something", "no-such-token")[0] == "nudge"
+
+    _, data = _converge(reg, "s2", make_fake)
+    tok = data["expectation_token"]
+    assert reg.record_expectation("s2", "   ", tok)[0] == "nudge"  # whitespace is not an answer
+
+
+def test_the_forecast_question_performs_no_reasoning_move():
+    """Invariant 3 at the copy layer. The ask is the flattest question that can be asked. Anything
+    that names a falsifier, a disconfirming signal, a metric, or asks for a justification hands the
+    learner one of the moves the rubrics exist to test unprompted -- and a standing form field
+    would do it for every learner, on every problem, for free."""
+    from pathlib import Path
+
+    page = Path("src/elenchus/web/static/index.html").read_text()
+    # Only the RENDERED copy, not the comment above it -- that comment names the forbidden
+    # phrasings in order to forbid them, and scanning it would make this test unpassable by
+    # construction. Slice the three functions that compose and send the ask.
+    start = page.index("function askExpectation(")
+    copy = page[start : page.index("function recordOutcome(", start)]
+
+    assert "What do you expect will happen?" in copy
+    for leak in (
+        "change your mind",
+        "falsif",
+        "disconfirm",
+        "prove",
+        "why do you expect",
+        "confidence",
+        "assumption",
+        "evidence",
+    ):
+        assert leak not in copy.lower(), f"the forecast ask leaks a reasoning move: {leak!r}"
+
+
+def test_an_expired_forecast_token_is_told_the_window_closed_not_already_recorded(
+    tmp_path, make_fake
+):
+    """Three refusals, three honest messages. A learner told "already recorded" when the window
+    simply lapsed will never realise the forecast is missing; one told "could not be recorded"
+    will retry a thing that cannot succeed. The window is the STORE's rule, enforced against the
+    persisted converged_at; the registry reads the same constant only to say WHICH refusal it is."""
+    from elenchus.web.sitting_store import EXPECTATION_TTL, SittingStore
+
+    db = str(tmp_path / "ttl.db")
+    reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
+    _, data = _converge(reg, "s1", make_fake)
+    tok = data["expectation_token"]
+
+    sit, ref, at = reg._pending_expectation[tok]
+    aged = (datetime.fromisoformat(at) - EXPECTATION_TTL - timedelta(seconds=1)).isoformat()
+    reg._pending_expectation[tok] = (sit, ref, aged)
+
+    tag, out = reg.record_expectation("s1", "from memory, much later", tok)
+    assert tag == "nudge" and "window" in out["message"].lower()
+    assert tok not in reg._pending_expectation, "an expired ask must not linger"
+    assert SittingStore(db).converged_log()[-1]["expectation"] is None
+
+
+def test_a_refused_outcome_is_not_reported_as_a_memory(tmp_path, make_fake):
+    """`record_outcome` returns whether it wrote. Discarding that told the learner their outcome
+    landed while the record was unchanged -- and the blank case is exactly when it does not write."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "o.db")
+    reg = SessionRegistry(db, model_factory=lambda: _agnostic(make_fake, "closed"))
+    _converge(reg, "s1", make_fake)
+    st = SittingStore(db)
+    row = st.converged_log()[-1]
+
+    # A real outcome first, through the real path, so the refusal below is measured against a
+    # record that EXISTS. Without this the assertion would pass on the drift guard instead --
+    # a test green for the wrong reason.
+    assert (
+        st.record_outcome(
+            row["sitting_id"],
+            row["ref"],
+            datetime.fromisoformat(row["converged_at"]),
+            "the buyer walked",
+            "reversed",
+            datetime.now(timezone.utc),
+        )
+        is True
+    )
+
+    assert (
+        st.record_outcome(
+            row["sitting_id"],
+            row["ref"],
+            datetime.fromisoformat(row["converged_at"]),
+            "   ",
+            "held",
+            datetime.now(timezone.utc),
+        )
+        is False
+    )
+    after = st.converged_log()[-1]
+    assert after["outcome"] == "the buyer walked" and after["outcome_kind"] == "reversed"
+
+
+def test_the_outcome_box_is_keyed_by_its_own_memory_index():
+    """The outcome side had the race the forecast side was fixed for.
+
+    `openMemory(i)` assigned a module-level `memIndex` synchronously, but the panel is only
+    replaced inside the response handler. During that round trip the DOM still held the PREVIOUS
+    memory's block, so a fate click read the old textarea and posted it under the NEW index. The
+    server's drift guard passed -- the index was internally consistent, only the TEXT belonged to
+    another decision -- and `record_outcome` overwrites in place, so that memory's recorded outcome
+    was destroyed and `_should_ask_outcome` never reopened the ask.
+
+    The index is bound into the rendered block now, exactly as a forecast is bound to its token."""
+    from pathlib import Path
+
+    page = Path("src/elenchus/web/static/index.html").read_text()
+    assert "let memIndex" not in page, "the mutable global is what made the stale post possible"
+    assert "id=\"mem-outcome-'+index+'\"" in page, "the textarea must be keyed by its own index"
+    assert "recordOutcome(kind, index)" in page, (
+        "the handler must take the index, not read a global"
+    )
+    assert "{index:index,outcome:text" in page, "the POST must carry the block's own index"
+    # one click, one outcome
+    assert "data-outcome-index" in page and "dataset.sending" in page

@@ -131,7 +131,42 @@ def load_experience(name: str, root: Path | None = None) -> Experience:
 
 def load_library(root: Path | None = None) -> list[Experience]:
     rubrics = sorted((_root(root) / "rubrics").glob("*.yaml"))
-    return [load_experience(p.stem, root=root) for p in rubrics]
+    library = [load_experience(p.stem, root=root) for p in rubrics]
+    _reject_duplicate_ledger_refs(library)
+    return library
+
+
+def _reject_duplicate_ledger_refs(library: list[Experience]) -> None:
+    """A `ledger_ref` is the identity of an OWNED PROBLEM, so two experiences may not share one.
+
+    This is enforced HERE, at the chokepoint every serving path loads content through, and not in
+    `admission.py`. That module has a `valid_ledger_refs` check with **no caller anywhere in `src/`
+    or `tests/`** -- a parameter nothing passes -- so it is documentation wearing the costume of
+    enforcement. An invariant that cannot fail is not an invariant.
+
+    Failing CLOSED is deliberate and it is the cheaper error. `continuity_lock_in` and
+    `license_continuity` shipped sharing `veldra:license_fork_risk`, and nothing broke loudly:
+    `display_titles()` silently dropped one title, `problem_menu()` silently made one problem
+    unofferable, and `experience._attach_scene` silently served one problem's authored scene while
+    the other problem's rubric did the grading. A learner read one situation and was scored against
+    another. Refusing to load beats shipping that again, and a content author sees the collision the
+    moment they introduce it rather than after it has corrupted durable state.
+
+    If two experiences ever legitimately belong to one owned problem, say so with an explicit field
+    rather than by duplicating a string: the accidental encoding is exactly what made this
+    undetectable. See `src/elenchus/ledger_ref_migration.py` for the split that this guard exists to
+    prevent a repeat of."""
+    seen: dict[str, str] = {}
+    for e in library:
+        prior = seen.get(e.ledger_ref)
+        if prior is not None:
+            raise ValueError(
+                f"duplicate ledger_ref {e.ledger_ref!r}: {prior!r} and {e.experience_id!r}. "
+                "A ledger_ref is the identity of one owned problem; two experiences sharing one "
+                "collapses them for the problem menu, the display title, the corpus scene and "
+                "transfer breadth. Give the second its own ref."
+            )
+        seen[e.ledger_ref] = e.experience_id
 
 
 def load_path_type(name: str, root: Path | None = None) -> str:

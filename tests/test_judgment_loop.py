@@ -112,6 +112,185 @@ def test_bounded_error_violation_stops_immediately():
     assert a.hard_wrong_flags == ["erode_core_for_one_customer"]
 
 
+def _tripped_intake():
+    return IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.absent,
+            "protect_the_core_lane": FrameState.absent,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.tripped,
+        },
+    )
+
+
+def _scripted_everywhere(rc):
+    return {
+        code: [rc.model_copy() for _ in range(judgment_loop.MAX_PUSHES + 2)]
+        for code in (
+            "erode_core_for_one_customer",
+            "lead_with_what_you_refuse_to_do",
+            "protect_the_core_lane",
+            "scope_creep_to_please",
+        )
+    }
+
+
+def test_closed_without_mechanism_is_carried_as_uncredited_on_the_trajectory():
+    """The REAL path for the trap-gallery hole `state.update_state` closes.
+
+    `classify_response` returning `closed` with `mechanism_supplied=False` is not hypothetical:
+    it is exactly the shape `AnthropicModel.classify_response`'s evidence-anchor floor produces
+    when a grader claims a mechanism whose span is not in the reply. The loop already refuses to
+    mark the trap repaired on it. What is pinned here is that the refusal RIDES OUT on the
+    trajectory point, because `response_classification` alone still says `closed` and
+    `state.update_state` is downstream of exactly this object."""
+    m = FakeModel(
+        _tripped_intake(),
+        _scripted_everywhere(
+            ResponseClassification(outcome="closed", mechanism_supplied=False, hard_wrong=False)
+        ),
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+    trap_points = [p for p in a.trajectory if p.target_code == "erode_core_for_one_customer"]
+    assert trap_points, "the tripped trap was never pushed"
+    assert all(p.response_classification == "closed" for p in trap_points)
+    assert all(p.gap_closed is False for p in trap_points)
+
+
+def test_a_genuine_repair_is_carried_as_credited_on_the_trajectory():
+    """The positive control for the test above. Without it, `gap_closed = False` everywhere --
+    a constant that suppresses nothing and logs everything -- would pass that assertion.
+
+    `mechanism_span="reply"` is load-bearing and was missing. `_work()` answers every push with
+    the literal string `"reply"`, so this span is that reply VERBATIM. A T2 review found the
+    fixture without it: `AnthropicModel.classify_response`'s evidence anchor floors on
+    `not span`, so a scripted `(mechanism_supplied=True, mechanism_span="")` is a shape no
+    production path can emit, and this was the arc's only test asserting `gap_closed` becomes
+    True out of `assess`. Verified by driving the real `classify_response` over a scripted
+    client: that exact triple comes back `mechanism_supplied=False`. Same fixture-emittability
+    class the sibling test 40 lines down was added to remove, in the same commit."""
+    m = FakeModel(
+        _tripped_intake(),
+        _scripted_everywhere(
+            ResponseClassification(
+                outcome="closed",
+                mechanism_supplied=True,
+                hard_wrong=False,
+                mechanism_span="reply",
+            )
+        ),
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+    trap_points = [p for p in a.trajectory if p.target_code == "erode_core_for_one_customer"]
+    assert trap_points, "the tripped trap was never pushed"
+    assert any(p.gap_closed is True for p in trap_points)
+
+
+def test_uncredited_trap_row_never_claims_the_mechanism_was_missing():
+    """The cell a T2 review used to falsify the first version of this fix, driven end to end.
+
+    `gap_closed=False` says credit was WITHHELD, never why. The `hard_wrong` bounded-error break
+    appends its `Push` before the credit branch is ever evaluated, so a reply the grader
+    classified `closed` with `mechanism_supplied=True` -- a mechanism that WAS supplied and whose
+    span would have passed the evidence anchor -- reaches `state.update_state` with
+    `gap_closed=False`. The row is correct (the trap was not repaired); labelling it
+    `closed_no_mechanism` was a false statement about the learner, which is the same write-time
+    falsification this arc exists to remove.
+
+    `mechanism_span` is the reply VERBATIM, not decorative prose. A review caught the first
+    version pairing a span with a reply that does not contain it: run through the real
+    `AnthropicModel.classify_response` the evidence anchor would have floored
+    `mechanism_supplied` to False, so the fixture described a shape no production path can emit
+    while its docstring claimed the span would pass. What the LOOP reads here is only `outcome`
+    and `hard_wrong` -- the `hard_wrong` break returns before `mechanism_supplied` is ever
+    consulted, which is the whole point -- but a fixture that cannot exist proves nothing, so it
+    is now one that can."""
+    from datetime import datetime, timezone
+
+    from elenchus.state import update_state
+    from elenchus.types import LearnerState
+
+    intake = IntakeClassification(
+        frame_states={
+            "lead_with_what_you_refuse_to_do": FrameState.absent,
+            "protect_the_core_lane": FrameState.absent,
+        },
+        trap_states={
+            "scope_creep_to_please": TrapState.not_tripped,
+            "erode_core_for_one_customer": TrapState.tripped,
+        },
+    )
+    m = FakeModel(
+        intake,
+        _scripted_everywhere(
+            ResponseClassification(
+                outcome="closed",
+                mechanism_supplied=True,
+                # `_work()` replies with the literal "reply", so this span IS a verbatim
+                # substring of it and survives the real evidence anchor. See the docstring.
+                mechanism_span="reply",
+                hard_wrong=True,
+            )
+        ),
+    )
+    a = judgment_loop.assess(
+        _exp(mode=Mode.bounded_error, binding="erode_core_for_one_customer"), _work(), m
+    )
+    assert a.stop_reason is StopReason.bounded_error_violation
+    trap_points = [p for p in a.trajectory if p.target_code == "erode_core_for_one_customer"]
+    assert trap_points and all(p.gap_closed is False for p in trap_points)
+
+    st = update_state(
+        LearnerState(), a, datetime(2026, 6, 22, tzinfo=timezone.utc), "exp1", "veldra:p1"
+    )
+    rows = st.trap_gallery["erode_core_for_one_customer"]
+    assert rows, "the unrepaired trap must still be recorded"
+    # The row exists (Invariant 4: never destroyed at write time) and says only what is true.
+    # A second `"no_mechanism" not in r.detail` assertion used to sit here and could not fail:
+    # it is entailed by the line above, so it read as an independent guard on this commit's
+    # central property while guarding nothing.
+    assert all(r.detail == "closed_uncredited" for r in rows)
+
+
+def test_regressed_trap_keeps_its_gallery_row():
+    """The `regressed` early break, which no test reached.
+
+    A mutation battery found this: hardcoding `gap_closed=True` at the regressed `Push(...)`
+    site passed the ENTIRE suite while deleting the durable gallery row for every regressed
+    trap -- 3,768 rows across a 26,244-scenario sweep. The shipped code was correct and the
+    guard around it was absent, so the one write-time destruction Invariant 4 forbids could be
+    reintroduced by a one-word edit with nothing going red.
+
+    Both other `Push(...)` sites are pinned (`hard_wrong` by the test above, the fall-through by
+    `test_closed_without_mechanism_is_carried_as_uncredited_on_the_trajectory`). This is the
+    third."""
+    from datetime import datetime, timezone
+
+    from elenchus.state import update_state
+    from elenchus.types import LearnerState
+
+    m = FakeModel(
+        _tripped_intake(),
+        _scripted_everywhere(
+            ResponseClassification(outcome="regressed", mechanism_supplied=False, hard_wrong=False)
+        ),
+    )
+    a = judgment_loop.assess(_exp(), _work(), m)
+    assert a.stop_reason is StopReason.regression
+    trap_points = [p for p in a.trajectory if p.target_code == "erode_core_for_one_customer"]
+    assert trap_points, "the tripped trap was never pushed"
+    assert all(p.gap_closed is False for p in trap_points)
+
+    st = update_state(
+        LearnerState(), a, datetime(2026, 6, 22, tzinfo=timezone.utc), "exp1", "veldra:p1"
+    )
+    rows = st.trap_gallery["erode_core_for_one_customer"]
+    assert rows, "a regressed trap was not repaired and must keep its record"
+    assert all(r.detail == "regressed" for r in rows)
+
+
 def test_budget_caps_unproductive_loop():
     intake = IntakeClassification(
         frame_states={

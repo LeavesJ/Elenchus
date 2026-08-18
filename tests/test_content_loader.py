@@ -20,7 +20,7 @@ def test_load_rubric_parses_frames_traps_mode():
 
 def test_load_experience_meta():
     meta = content_loader.load_experience_meta("license_continuity")
-    assert meta["ledger_ref"] == "veldra:license_fork_risk"
+    assert meta["ledger_ref"] == "veldra:midrollout_contract_boundary"
     assert meta["regime"] == "open_ended"
     assert meta["prompt"].strip()
 

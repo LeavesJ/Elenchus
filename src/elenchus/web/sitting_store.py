@@ -32,6 +32,14 @@ OUTCOME_KINDS = frozenset({"held", "reversed", "overtaken", "too_early"})
 # (one caller, one value — a knob nobody turns is a false promise of flexibility); a named
 # constant so the guard and the bubble read the same number.
 OUTCOME_ASK_AFTER_DAYS = 14
+# The forecast belongs to the immediate post-convergence state, not to a later recollection. After
+# this window the ask is closed: a textarea left open in a tab for an hour is no longer capturing
+# what the learner expected AT the decision, and a record that merely predates the outcome is a
+# weaker claim than one made while the reasoning was still in front of them. Enforced against the
+# PERSISTED `converged_at`, never a browser timer or an in-memory stamp, so a replayed or scripted
+# POST cannot widen it. Imported by `web/session_runner.py` to tell a closed window from a taken
+# one; a second copy of a threshold is how two compositions drift apart.
+EXPECTATION_TTL = timedelta(minutes=15)
 
 
 def _backfill_positions(c: sqlite3.Connection) -> int:
@@ -140,7 +148,8 @@ CREATE TABLE IF NOT EXISTS web_sitting_state (
 CREATE TABLE IF NOT EXISTS web_converged (
   sitting_id TEXT NOT NULL, ref TEXT NOT NULL, converged_at TEXT NOT NULL,
   experience_id TEXT NOT NULL DEFAULT '', position TEXT,
-  outcome TEXT, outcome_kind TEXT, outcome_at TEXT);
+  outcome TEXT, outcome_kind TEXT, outcome_at TEXT,
+  expectation TEXT, expectation_at TEXT);
 CREATE TABLE IF NOT EXISTS web_world (
   sitting_id TEXT PRIMARY KEY, situation TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS web_generated_problem (
@@ -227,6 +236,20 @@ class SittingStore:
                 # not a broken memory (unlike `position`, there is nothing to backfill: the
                 # information does not exist anywhere in the record, only in the person).
                 for _col in ("outcome TEXT", "outcome_kind TEXT", "outcome_at TEXT"):
+                    try:
+                        c.execute(f"ALTER TABLE web_converged ADD COLUMN {_col}")
+                    except sqlite3.OperationalError:
+                        pass
+                # Same pattern again, and the ORDER of these two relative to `outcome` is the
+                # whole point. `expectation` is frozen AT convergence, before reality resolves;
+                # `outcome` arrives weeks later. Asking "what did you expect" at outcome time
+                # instead would be retrospective reconstruction contaminated by hindsight, which
+                # is worth no calibration data at all. `expectation_at` exists so that
+                # prospectivity is AUDITABLE rather than assumed: expectation_at < outcome_at is
+                # checkable on every row, and a row that violates it is a reconstructed answer.
+                # Nothing to backfill: like `outcome`, the information exists only in the person,
+                # and for legacy rows the moment to have asked has passed.
+                for _col in ("expectation TEXT", "expectation_at TEXT"):
                     try:
                         c.execute(f"ALTER TABLE web_converged ADD COLUMN {_col}")
                     except sqlite3.OperationalError:
@@ -594,6 +617,85 @@ class SittingStore:
                 (sitting_id, ref, now.isoformat(), experience_id, position),
             )
 
+    def record_expectation(
+        self,
+        sitting_id: str,
+        ref: str,
+        converged_at: datetime,
+        expectation: str,
+        now: datetime,
+    ) -> bool:
+        """Freeze what the learner expects to happen, AT convergence, before reality resolves.
+        Returns True if this call wrote it, False if it was already frozen.
+
+        TWO guards, and the second was missing until a review executed the gap. `expectation IS
+        NULL` makes it write-once. `outcome IS NULL` makes it PROSPECTIVE: without it, recording
+        the outcome first and the forecast second succeeded and stamped `expectation_at` AFTER
+        `outcome_at`, producing a row that this function's own docstring classifies as a hindsight
+        reconstruction, indistinguishable from an honest one. The property was asserted here as
+        checkable and nothing enforced it. Now the ordering is refused at the write, so a row that
+        exists is a row that was prospective.
+
+        WRITE-ONCE, and that is the entire mechanism, not a nicety. `record_outcome` deliberately
+        overwrites, because a decision's fate is not final the first time you ask. This is the
+        opposite: a forecast that can be edited after the outcome is known is not a forecast. The
+        `AND expectation IS NULL` clause makes the freeze atomic in SQL rather than a convention a
+        caller has to remember, so a second call cannot quietly replace a prospective answer with
+        a hindsight-shaped one.
+
+        WHY AT CONVERGENCE AND NOT AT THE 14-DAY OUTCOME ASK. Asking "what had you expected"
+        after the learner has watched reality unfold is retrospective reconstruction, and the
+        answer is contaminated by what happened. Only a frozen forecast supports calibration.
+        `expectation_at` is stored so prospectivity is auditable rather than assumed: on an honest
+        row `expectation_at` is at convergence and strictly precedes `outcome_at`.
+
+        WHY NOT BEFORE THE REASONING. Asking for an expectation, a confidence, or a disconfirming
+        signal BEFORE the exercise would hand the learner a reasoning move for free -- naming the
+        falsifier is itself one of the hidden moves the rubrics test -- and would corrupt
+        `reasoned_unprompted`, which feeds the strong tier in `state.py`. After the reasoning,
+        before reality, is the only window that costs nothing and leaks nothing.
+
+        NOTHING READS THIS INTO LEARNER STATE, and nothing may. A calibration score is a
+        correctness grade on the conclusion with a lag; the moment it reaches `state.py` it
+        breaks invariant 5. This is a record beside the memory, exactly as `outcome` is.
+
+        Keyed on (sitting_id, ref, converged_at) for the same reason `record_outcome` is: a
+        curated ref can reconverge, so a ref string is not a row identity."""
+        if self._inert:
+            return False
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE web_converged SET expectation=?, expectation_at=? "
+                "WHERE rowid = (SELECT rowid FROM web_converged "
+                "               WHERE sitting_id=? AND ref=? AND converged_at=? "
+                "               AND expectation IS NULL AND outcome IS NULL "
+                "               AND converged_at >= ?)",
+                (
+                    expectation,
+                    now.isoformat(),
+                    sitting_id,
+                    ref,
+                    converged_at.isoformat(),
+                    (now - EXPECTATION_TTL).isoformat(),
+                ),
+            )
+            # EXACTLY ONE ROW, and the cardinality is part of the guarantee. A write-once forecast
+            # is worth having because its provenance is strong; an unbounded UPDATE weakens exactly
+            # that. `log_converged` is a plain INSERT with no unique constraint on
+            # (sitting_id, ref, converged_at), so two rows CAN share the tuple -- a coarsened
+            # timestamp, a replayed log, an import -- and an unbounded write would then stamp one
+            # learner's forecast onto two distinct memories, each later scored against its own
+            # outcome, while still reporting success. The rowid subquery makes the write address at
+            # most one row; more than one match is an invariant violation and fails loud rather than
+            # silently duplicating a forecast.
+            if cur.rowcount > 1:  # pragma: no cover - unreachable via the rowid subquery
+                raise RuntimeError(
+                    f"record_expectation matched {cur.rowcount} rows for one convergence "
+                    f"({sitting_id}, {ref}, {converged_at.isoformat()}); a forecast identifies "
+                    "exactly one durable row"
+                )
+            return cur.rowcount == 1
+
     def record_outcome(
         self,
         sitting_id: str,
@@ -602,7 +704,7 @@ class SittingStore:
         outcome: str,
         outcome_kind: str,
         now: datetime,
-    ) -> None:
+    ) -> bool:
         """Attach what HAPPENED to one convergence's decision. Annotates, never rewrites: the
         situation, the position and `converged_at` are untouched, so the memory the learner
         committed to stays exactly as they left it (L-4 — recalled, never regraded).
@@ -627,14 +729,38 @@ class SittingStore:
                 f"outcome_kind must be one of {sorted(OUTCOME_KINDS)}, got {outcome_kind!r} — "
                 f"the tag records what became of the decision, never whether it was right"
             )
+        # BLANK IS NOT AN ANSWER, and letting it through destroyed learner history: a
+        # whitespace-only write replaced a real recorded outcome with "   " and flipped its fate
+        # tag, because this function overwrites in place by design. Rejected BEFORE any write, so
+        # the existing outcome is preserved unchanged rather than repaired afterwards. Stored
+        # stripped, like the forecast.
+        outcome = (outcome or "").strip()
+        if not outcome:
+            return False
         if self._inert:
-            return
+            return False
         with self._conn() as c:
-            c.execute(
+            # ONE ROW, the same standard `record_expectation` holds to and for the same reason.
+            # `log_converged` is a plain INSERT with no unique constraint on
+            # (sitting_id, ref, converged_at), so two rows CAN share the tuple and a broad UPDATE
+            # would stamp one fate onto two distinct memories -- each of which the learner
+            # committed to separately, and one of which would then carry an outcome that belongs to
+            # the other. An unbounded write against learner history is exactly what the forecast
+            # side was just bounded against; leaving its twin unbounded made the guarantee
+            # one-sided.
+            cur = c.execute(
                 "UPDATE web_converged SET outcome=?, outcome_kind=?, outcome_at=? "
-                "WHERE sitting_id=? AND ref=? AND converged_at=?",
+                "WHERE rowid = (SELECT rowid FROM web_converged "
+                "               WHERE sitting_id=? AND ref=? AND converged_at=?)",
                 (outcome, outcome_kind, now.isoformat(), sitting_id, ref, converged_at.isoformat()),
             )
+            if cur.rowcount > 1:  # pragma: no cover - unreachable via the rowid subquery
+                raise RuntimeError(
+                    f"record_outcome matched {cur.rowcount} rows for one convergence "
+                    f"({sitting_id}, {ref}, {converged_at.isoformat()}); an outcome belongs to "
+                    "exactly one durable row"
+                )
+            return cur.rowcount == 1
 
     def converged_within(self, now: datetime, hours: int = 24) -> set[str]:
         """Refs converged within the rolling window — across sittings and processes. A rolling
@@ -659,8 +785,8 @@ class SittingStore:
         with self._conn() as c:
             rows = c.execute(
                 "SELECT sitting_id, ref, converged_at, experience_id, position, "
-                "outcome, outcome_kind, outcome_at FROM web_converged "
-                "ORDER BY converged_at, rowid"
+                "outcome, outcome_kind, outcome_at, expectation, expectation_at "
+                "FROM web_converged ORDER BY converged_at, rowid"
             ).fetchall()
         return [
             {
@@ -672,8 +798,21 @@ class SittingStore:
                 "outcome": outcome,
                 "outcome_kind": outcome_kind,
                 "outcome_at": outcome_at,
+                "expectation": expectation,
+                "expectation_at": expectation_at,
             }
-            for s, r, at, eid, position, outcome, outcome_kind, outcome_at in rows
+            for (
+                s,
+                r,
+                at,
+                eid,
+                position,
+                outcome,
+                outcome_kind,
+                outcome_at,
+                expectation,
+                expectation_at,
+            ) in rows
         ]
 
     def domain_slots(self) -> list[dict]:

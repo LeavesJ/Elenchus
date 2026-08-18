@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import queue
+import secrets
 import re
 import threading
 from collections.abc import Callable
@@ -19,7 +20,12 @@ from ..scheduler import propose_open_ended
 from ..terrain import compose_houses, convergence_order, project_terrain
 from ..types import EntryClass, Outcome, Regime, Selection, Work
 from . import voice
-from .sitting_store import OUTCOME_ASK_AFTER_DAYS, OUTCOME_KINDS, SittingStore
+from .sitting_store import (
+    EXPECTATION_TTL,
+    OUTCOME_ASK_AFTER_DAYS,
+    OUTCOME_KINDS,
+    SittingStore,
+)
 from .slots import resolve_slots
 from .vessels import vessel_count
 
@@ -502,6 +508,20 @@ _DOOR_FAILED_NUDGE = "That door hit an error — refresh to pick up where you le
 # The memory bubble (Spec-1 5b/5d): the click sends an INDEX into house_refs; an out-of-range or
 # non-int index (bool included — isinstance(True, int) is True in Python) is the honest refusal.
 _MEMORY_UNKNOWN_NUDGE = "That spot isn't one of your houses — try another."
+# Neutral and non-directive: neither may hint that a particular KIND of answer was wanted.
+# The old single constant said "That one is already recorded." on EVERY refusal, including
+# the ones where nothing was ever recorded -- a dropped pending entry after a restart, an
+# unwritable db, whitespace. A learner told their forecast was stored, when it was not, will
+# never re-enter it, and the calibration record loses the row silently. Two honest messages.
+_EXPECTATION_UNAVAILABLE_NUDGE = "That one could not be recorded."
+_EXPECTATION_EMPTY_NUDGE = "Nothing was written down."
+# A closed window is not a failure and not a duplicate: it is the design. Say which, because a
+# learner told "already recorded" when the window simply lapsed will never realise the forecast is
+# missing, and one told "could not be recorded" will retry a thing that cannot succeed.
+_EXPECTATION_CLOSED_NUDGE = "The window for that one has closed."
+# Says what happened without implying the learner did something wrong: a blank answer and an
+# unidentifiable row both land here, and neither is worth a scolding.
+_OUTCOME_REFUSED_NUDGE = "Nothing was written down."
 
 # Worker failures log the traceback SERVER-side (the only durable copy — founder dogfood
 # 2026-07-03: the wire's repr(e) rendered as one transient muted line and the refresh the
@@ -669,6 +689,21 @@ class SessionRegistry:
         self._last_record: dict[str, dict] = {}
         self._sitting_done: dict[str, set[str]] = {}
         self._next_pick: dict[str, str | None] = {}
+        # Convergence rows awaiting a forecast, keyed by an OPAQUE PER-CONVERGENCE TOKEN ->
+        # (sitting_id, ref, converged_at).
+        #
+        # This was keyed by session_id, which is one slot -- and `web/app.py` pins every request to
+        # the constant `_SID = "single"`, so the whole server had exactly ONE. A second convergence
+        # overwrote the first's entry while the first's ask was still on screen (the client thread
+        # is append-only), so answering the older box wrote problem A's forecast onto problem B's
+        # durable row, write-once and therefore uncorrectable. A review executed it.
+        #
+        # The token is minted per convergence and echoed back by the client, so a stale UI element
+        # can only ever address ITS OWN convergence -- which is already answered, and refused by
+        # the store's write-once guard. It is opaque because a ref must never reach the client
+        # (L-13). Still in-memory on purpose: a restart drops the ask, which loses a forecast and
+        # corrupts nothing, the fail-safe direction for a record whose only value is being early.
+        self._pending_expectation: dict[str, tuple[str, str, str]] = {}
         # Durable sittings (spec 2026-07-01 late): the write-through store and its bookkeeping.
         # The `continued` idempotency flag stays IN-MEMORY only (rec dict) — it guards "in flight
         # in this process"; persisting it would brick Continue after a restart (spec §2a).
@@ -808,7 +843,9 @@ class SessionRegistry:
                         # Honest selection_log: the chosen spec carries the instance ref (the
                         # gen: seam key) + the base id; the receipt is the base's scored
                         # candidate when the policy ranked it (candidates, not the deduped
-                        # menu — two territories can share a curated ledger_ref), else the top.
+                        # menu -- two territories can share a curated ledger_ref via distinct
+                        # gen: instance refs over one base; two AUTHORED entries cannot, that is
+                        # refused at load), else the top.
                         spec_src, receipt = next(
                             ((s, r) for s, r in proposal.candidates if s.experience_id == eid),
                             (top_spec, top_rcpt),
@@ -1816,6 +1853,16 @@ class SessionRegistry:
                         ch.record["exp"].experience_id,
                         position=self._last_you_turn(sit),
                     )
+                    # The forecast is asked HERE, after the reasoning and before reality, and
+                    # nowhere else. Not at intake and not during the exercise: asking what someone
+                    # expects, or what would disconfirm them, BEFORE they reason hands over one of
+                    # the hidden moves the rubrics test and corrupts `reasoned_unprompted`. Not at
+                    # the 14-day outcome ask either: by then they have watched reality and the
+                    # answer is a reconstruction, which is worth no calibration at all.
+                    token = secrets.token_urlsafe(9)
+                    self._pending_expectation[token] = (sit, rec_ref, now.isoformat())
+                    data["ask_expectation"] = True
+                    data["expectation_token"] = token
             # Houses are convergences (Model A, plan Task 2): compose the cumulative village HERE
             # — beside the frozen terrain, from the SAME post-session state — so the close
             # payload's terrain and houses can never disagree (the log is read AFTER the
@@ -2403,7 +2450,10 @@ class SessionRegistry:
         at_mismatch = bool(ats) and index < len(ats) and row["converged_at"] != ats[index]
         if row["ref"] != refs[index] or at_mismatch:
             return ("memory", {"unavailable": True})  # drift guard — never the wrong memory
-        self._store.record_outcome(
+        # The store's answer, not this function's hope. It refuses a blank outcome and refuses a
+        # row it cannot uniquely identify; reporting the re-read memory regardless would tell the
+        # learner their outcome landed when the record is unchanged.
+        wrote = self._store.record_outcome(
             row["sitting_id"],
             row["ref"],
             datetime.fromisoformat(row["converged_at"]),
@@ -2411,7 +2461,50 @@ class SessionRegistry:
             kind,
             datetime.now(timezone.utc),
         )
+        if not wrote:
+            return ("nudge", {"message": _OUTCOME_REFUSED_NUDGE})
         return self.memory(session_id, index)
+
+    def record_expectation(self, session_id: str, text: str, token: str = ""):
+        """Freeze the learner's forecast against the convergence they just landed.
+
+        No index and no drift guard: the TOKEN names the row, minted at the convergence and held
+        in `_pending_expectation`. `session_id` is accepted for call-site symmetry with
+        `record_outcome` and is deliberately NOT read -- an earlier version of this docstring said
+        the write was scoped to "THIS session", which was never true once the token became the key,
+        and `web/app.py` pins every request to one `_SID` anyway. The token is the whole scope, and
+        it is unguessable, single-use, and time-boxed by `EXPECTATION_TTL`.
+
+        Idempotent by construction at both layers: the pending entry is popped here, and
+        `SittingStore.record_expectation` is write-once in SQL. A replayed POST cannot overwrite a
+        forecast with a later, hindsight-shaped one.
+
+        No model call. These are the learner's own words, stored verbatim and never scored -- a
+        calibration score is a correctness grade on the conclusion with a lag, so nothing may read
+        this into `state.py` (invariant 5)."""
+        text = (text or "").strip()
+        if not text:
+            return ("nudge", {"message": _EXPECTATION_EMPTY_NUDGE})
+        pending = self._pending_expectation.get(token or "")
+        if pending is None:
+            return ("nudge", {"message": _EXPECTATION_UNAVAILABLE_NUDGE})
+        sit, ref, at = pending
+        # The window is the STORE's rule, enforced there against the persisted `converged_at`.
+        # This read exists only to say WHICH refusal happened, and imports the same constant
+        # rather than restating the number.
+        if datetime.now(timezone.utc) - datetime.fromisoformat(at) > EXPECTATION_TTL:
+            self._pending_expectation.pop(token, None)
+            return ("nudge", {"message": _EXPECTATION_CLOSED_NUDGE})
+        wrote = self._store.record_expectation(
+            sit, ref, datetime.fromisoformat(at), text, datetime.now(timezone.utc)
+        )
+        self._pending_expectation.pop(token, None)
+        # `recorded` is the STORE's answer, not this function's hope: an inert or unwritable db,
+        # or an outcome already on the row, all return False, and the client must not claim a
+        # record that does not exist.
+        if not wrote:
+            return ("nudge", {"message": _EXPECTATION_UNAVAILABLE_NUDGE})
+        return ("expectation", {"recorded": True})
 
     def _memory_situation(self, ref: str, experience_id: str = "") -> str | None:
         """The situation text for a convergence ref: the SERVED forged scenario for a gen: ref;
@@ -2419,10 +2512,23 @@ class SessionRegistry:
         forged opening serves verbatim, session_runner.py:543) — NEVER load_territory_text (S3:
         territory text names the decision CATEGORY, an L-6 leak) and NEVER the model-voiced
         opening (voice.opening is a MODEL call, unreproducible; review SF1).
-        N1: a curated ledger_ref is not unique to one library entry — two rubrics can share a
-        ref with different prompts (`veldra:license_fork_risk`: continuity_lock_in vs
-        license_continuity). Prefer the entry matching BOTH ref and the row's experience_id
-        (which converged); fall back to ref-first-match for legacy rows (experience_id='')."""
+        THE INVARIANT NOW: a curated ledger_ref identifies exactly ONE owned problem.
+        `content_loader._reject_duplicate_ledger_refs` refuses a duplicate at the chokepoint every
+        serving path loads through, so current authored content cannot present two entries for one
+        ref. `experience_id` therefore disambiguates HISTORICAL rows only -- records written when a
+        ref could still resolve to more than one experience -- and the ref-first-match fallback
+        exists for legacy rows carrying `experience_id=''`. Neither may be relied on by current
+        content.
+
+        AN EARLIER VERSION OF THIS NOTE DESCRIBED THE COLLISION AS A LIVE PROPERTY, naming
+        `veldra:license_fork_risk` (continuity_lock_in vs license_continuity) as an example. That
+        collision was a defect, not a design: it destroyed one display title, made one problem
+        unofferable, and served one problem's scene under the other's rubric. It is split. The note
+        mattered because it made the fallback read as a deliberate accommodation of a normal state,
+        and a migration that left a stranded row behind then resolved through that fallback and
+        recalled the WRONG problem's situation -- exactly the outcome the comment made look
+        intentional. A stale comment beside fallback logic is how incorrect behaviour gets
+        inherited."""
         row = self._store.read_generated_problem(ref)
         if row is not None:
             return row["scenario"]

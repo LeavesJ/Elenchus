@@ -43,6 +43,19 @@ class _Memory(BaseModel):
     index: int
 
 
+class _Expectation(BaseModel):
+    """The forecast frozen at convergence. Free TEXT only, and deliberately no confidence number
+    and no structured fields: v0 is establishing whether people give interpretable prospective
+    predictions at all, and a confidence widget would presuppose that they do. No index either --
+    the server targets the convergence it just wrote for this session."""
+
+    text: str
+    # Echoes the token the landing handed out. It names WHICH convergence this forecast is for, so
+    # a stale box left in the append-only thread can only ever address its own (already answered,
+    # therefore refused) row instead of whatever the server happens to be holding.
+    token: str = ""
+
+
 class _Outcome(BaseModel):
     """What became of the decision. `kind` is a Literal so a grading word ('worked', 'correct')
     is refused by FastAPI with a 422 before it ever reaches the store — the constraint that
@@ -145,12 +158,22 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
             "next_desc": data.get("next_desc", ""),
             "next_kind": data.get("next_kind", "pressure"),
         }
+        # Attach-only-when-present, like confluence below. True exactly once per convergence:
+        # the moment after the reasoning and before reality, which is the only window where a
+        # forecast is neither a leaked reasoning move nor a hindsight reconstruction.
+        if data.get("ask_expectation"):
+            out["ask_expectation"] = True
+            # Opaque per-convergence id. NOT a ref: an internal identifier must never reach the
+            # client (L-13), and this one carries no problem identity at all.
+            out["expectation_token"] = data.get("expectation_token", "")
         if data.get("confluence"):  # transient (Spec-2 §5): attach-only-when-present, two ints
             out["confluence"] = {
                 "from_slot": data["confluence"]["from_slot"],
                 "to_slot": data["confluence"]["to_slot"],
             }
         return out
+    if tag == "expectation":  # the forecast landed (or was already frozen) — no content echoed
+        return {"kind": "expectation", "recorded": bool(data.get("recorded"))}
     if tag == "memory":  # the memory bubble (Spec-1 5b/5d): a by-ref pure read, no identifiers
         if data.get("unavailable"):
             return {"kind": "memory", "unavailable": True}
@@ -265,5 +288,12 @@ def create_app(db_path: str, model_factory=None) -> FastAPI:
         # Same index-only contract as the read (L-13). Returns the re-read memory, so the
         # client renders the annotated record rather than assuming the write landed.
         return _emit(reg, *reg.record_outcome(_SID, body.index, body.outcome, body.kind))
+
+    @app.post("/api/session/{sid}/expectation")
+    def expectation(sid: str, body: _Expectation) -> dict:
+        # No index: the server writes to the convergence it just logged for this session, so a
+        # stale-index failure mode does not exist here. Write-once in the store, so a replayed
+        # POST cannot overwrite a forecast after the outcome is known.
+        return _emit(reg, *reg.record_expectation(_SID, body.text, body.token))
 
     return app

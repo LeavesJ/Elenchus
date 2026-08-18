@@ -147,7 +147,7 @@ def test_declining_confirmation_makes_no_model_call_and_returns_none(tmp_path):
     outcome = run(
         db_path=tmp_path / "missing.db",
         data_dir=tmp_path / "out",
-        confirm=lambda probe, n_calls, model_id: False,
+        confirm=lambda probe, n_calls, model_id, max_calls=None: False,
     )
     assert outcome is None
     assert not (tmp_path / "out").exists()
@@ -195,10 +195,11 @@ def test_the_exact_call_count_reported_to_the_gate_matches_the_built_corpus_size
 
     captured = {}
 
-    def _capture(probe, n_calls, model_id):
+    def _capture(probe, n_calls, model_id, max_calls=None):
         captured["n_calls"] = n_calls
         captured["probe"] = probe
         captured["model_id"] = model_id
+        captured["max_calls"] = max_calls
         return False
 
     outcome = run(db_path=db_path, data_dir=tmp_path / "out", confirm=_capture)
@@ -240,7 +241,7 @@ def test_gate_accepting_proceeds_past_the_confirmation(tmp_path, monkeypatch):
     outcome = run(
         db_path=tmp_path / "missing.db",
         data_dir=tmp_path / "out",
-        confirm=lambda *a: True,
+        confirm=lambda *a, **k: True,
         now=datetime(2026, 8, 2, tzinfo=timezone.utc),
     )
     assert outcome is not None
@@ -266,7 +267,7 @@ def test_run_records_empty_fallback_on_both_halves_when_the_db_is_absent(tmp_pat
         raw_parse_territory=raw_parse_t,
         db_path=tmp_path / "missing.db",
         data_dir=tmp_path / "out",
-        confirm=lambda *a: True,
+        confirm=lambda *a, **k: True,
         now=datetime(2026, 8, 2, tzinfo=timezone.utc),
     )
     assert result.classify_corpus_source == "empty_fallback"
@@ -292,7 +293,7 @@ def test_run_records_live_db_on_both_halves_when_the_db_has_rows(tmp_path):
         raw_parse_territory=raw_parse_t,
         db_path=db_path,
         data_dir=tmp_path / "out",
-        confirm=lambda *a: True,
+        confirm=lambda *a, **k: True,
         now=datetime(2026, 8, 2, tzinfo=timezone.utc),
     )
     assert result.classify_corpus_source == "live_db"
@@ -309,12 +310,15 @@ def test_limit_truncates_the_corpus_and_therefore_the_call_count(tmp_path):
     _seeded_db(db_path, n_pairs=5, n_situations=5)
     captured = {}
 
-    def _capture(probe, n_calls, model_id):
+    def _capture(probe, n_calls, model_id, max_calls=None):
         captured["n_calls"] = n_calls
+        captured["max_calls"] = max_calls
         return False
 
     run(db_path=db_path, data_dir=tmp_path / "out", confirm=_capture, limit=1)
     assert captured["n_calls"] == 3 * (1 + 1)  # 1 classify item + 1 territory item, 3 arms each
+    # Both halves go through `_parse_required`, which spends one retry, so the ceiling is 2x.
+    assert captured["max_calls"] == 2 * 3 * (1 + 1)
 
 
 # ---------------------------------------------------------------------------
@@ -335,7 +339,7 @@ def test_written_result_round_trips_through_json(tmp_path):
         raw_parse_territory=raw_parse_t,
         db_path=db_path,
         data_dir=tmp_path / "out",
-        confirm=lambda *a: True,
+        confirm=lambda *a, **k: True,
         now=now,
     )
     assert path.name == "20260802T120000Z.json"
@@ -378,7 +382,7 @@ def test_run_records_a_failed_item_without_aborting_and_reports_the_refusal_rate
         raw_parse_territory=raw_parse_t,
         db_path=db_path,
         data_dir=tmp_path / "out",
-        confirm=lambda *a: True,
+        confirm=lambda *a, **k: True,
         now=datetime(2026, 8, 2, tzinfo=timezone.utc),
     )
     assert len(result.classify_failures) == 1
@@ -407,7 +411,7 @@ def test_run_checkpoints_every_item_as_it_completes(tmp_path):
         raw_parse_territory=raw_parse_t,
         db_path=db_path,
         data_dir=tmp_path / "out",
-        confirm=lambda *a: True,
+        confirm=lambda *a, **k: True,
         now=now,
     )
     checkpoint_path = tmp_path / "out" / "20260802T120000Z.checkpoint.jsonl"
@@ -453,7 +457,7 @@ def test_a_crash_partway_leaves_a_readable_checkpoint_of_the_completed_items(tmp
             raw_parse_territory=raw_parse_t,
             db_path=db_path,
             data_dir=tmp_path / "out",
-            confirm=lambda *a: True,
+            confirm=lambda *a, **k: True,
             now=now,
         )
 

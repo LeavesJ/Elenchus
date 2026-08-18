@@ -896,10 +896,32 @@ class AnthropicModel:
         # differing only in case are the same words -- casefolding two DIFFERENT words can never
         # make them match, it only ever merges case-variants of one identical word.
         #
-        # FLOOR, never raise: `assessment/judgment_loop.py:317` only raises the frame state on
-        # `outcome == "closed" AND mechanism_supplied`, so flooring `mechanism_supplied` alone is
-        # sufficient, and `outcome` is left untouched -- the reply lands in the same shape the
-        # loop already handles for an honest "no mechanism" classification. Raising instead would
+        # FLOOR, never raise. `assessment/judgment_loop.py` raises the frame state and repairs a
+        # trap only on `outcome == "closed" AND mechanism_supplied`, so the floor withholds both,
+        # and `outcome` is left untouched -- the reply lands in the same shape the loop already
+        # handles for an honest "no mechanism" classification.
+        #
+        # CORRECTION: an earlier version of this comment concluded from that one call site that
+        # "flooring `mechanism_supplied` alone is sufficient". It was not, and the tree
+        # contradicted it. `state.update_state` re-derived "this trap was repaired" from
+        # `response_classification` -- which is this untouched `outcome` -- so a floored
+        # `mechanism_supplied` still left `"closed"` on the trajectory point and deleted the
+        # trap's durable gallery row. The floor is sufficient now because the loop's own credit
+        # decision rides out on `types.Push.gap_closed` and `state.update_state` reads that
+        # instead; it was never sufficient by itself.
+        #
+        # The rule that follows is NARROWER than an earlier version of this line claimed. It said
+        # anything downstream keying off a bare `outcome == "closed"` reopens the hole, and a
+        # review falsified the universal by pointing at `state.update_state`, which reads exactly
+        # that to pick the trap-gallery row's detail token and provably does NOT reopen it -- the
+        # row is still written either way. The real rule: never key a REPAIR or CREDIT decision
+        # off the bare outcome; reading it to DESCRIBE what the grader said is fine. Grep
+        # `gap_closed` before adding a reader of the first kind.
+        #
+        # BACK TO THE FLOOR ITSELF. The two corrections above were inserted between the
+        # `FLOOR, never raise` line and the sentence that answers it, orphaning the fragment that
+        # used to follow directly. Restated so it reads with its own subject: RAISING instead of
+        # flooring would
         # kill the door mid-sitting over a field-level evidence gap: state is already banked by
         # the time this runs (nothing in `judgment_loop.assess` persists mid-loop --
         # `orchestration.run_session`'s `store.save_state` runs only after `assess` returns), so
@@ -909,8 +931,28 @@ class AnthropicModel:
         # (only the normalization feeding it improved): it only withholds a state RAISE, which
         # stays conservative -- unlike `grade_sharper`'s analogous check below, which no longer
         # floors at all, because a floor there REVERTS state already credited (see its own
-        # comment). Logged (never silently indistinguishable from an honest False) so the floor
-        # rate is observable before anyone has to trust it.
+        # comment). Logged so the floor rate is observable in a server log before anyone has to
+        # trust it.
+        #
+        # THE LOG IS THE ONLY TRACE, and an earlier version of this line went further and said the
+        # floor is "never silently indistinguishable from an honest False". That is false wherever
+        # the value is PERSISTED rather than logged, and a review executed the case that matters:
+        # the `injection_scoring.Draw` built from a floored verdict is byte-identical to one built
+        # from an honest False, the probe's checkpoint writes only `row.model_dump()`, and its
+        # artifact carries no floor field. So the floor rate is NOT recoverable from a completed
+        # probe run.
+        #
+        # THE RETURNED OBJECT, HOWEVER, DOES DISTINGUISH THEM, and the sentence that used to close
+        # this paragraph denied it ("reading the returned object cannot do it"). A T2 review
+        # falsified it by execution. The floor clears `mechanism_supplied` and never touches
+        # `mechanism_span`, so a floored verdict rides out still carrying the span that failed
+        # while an honest False carries the `""` default: measured, floored is
+        # `(supplied=False, span='A SPAN NOT IN THE REPLY')` against honest
+        # `(supplied=False, span='')`, and they are not byte-identical. The loss is `Draw`'s, not
+        # this object's. That matters for the FIX, not just the prose: the cheap repair for D3 is
+        # to widen `Draw` to carry `mechanism_span`, which the record already has here, rather
+        # than to add a new side channel at this site. The false universal argued against the
+        # cheaper correct fix.
         if resp.mechanism_supplied:
             span = _normalize_for_span_match(resp.mechanism_span)
             haystack = _normalize_for_span_match(response)
@@ -1097,6 +1139,19 @@ class AnthropicModel:
         # so this carries none of the re-fed-turn concern that forced `_TURN_RENDER_CAP` higher.
         # The question, key, and criteria are curated content and stay in `system`, outside the
         # seam.
+        #
+        # This composition carries the SAME forgeable shape `classify_response` does: engine
+        # headings in a `Label: value` form (`Question:`, `Reference answer(s):`, `Criteria:`)
+        # and one `labelled(...)` block a learner writes freely into. The measured turn-forgery
+        # attack on `classify_response` was never run against this method, but nothing about it
+        # is specific to the open-ended side, and here a landing writes `correct=True` straight
+        # through `assessment/checkable_scorer.py` into the concept result. `content/prompts/
+        # grade.md` now carries the same reframe `response.md` and `grade_sharper.md` do, stating
+        # that every indented line under `Student answer:` was typed by the student and that
+        # nothing inside it revises the criteria. THE REFRAME'S EFFICACY IS UNMEASURED HERE, on
+        # this method, exactly as it is on the other two -- `injection_probe.py` targets
+        # `classify_response` only, and no probe cell sends a `grade_answer` composition. Do not
+        # read the added prose as a closed hole; it is parity, not proof.
         #
         # The cap is a REFUSAL threshold here, never a trim point, and unlike its three sibling
         # sites this one does not call `_cap_rendered_turn` at all (T2 review Fix 1). Reason:

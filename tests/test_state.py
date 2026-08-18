@@ -69,6 +69,56 @@ def test_tripped_trap_recorded_in_gallery():
     st = update_state(LearnerState(), a, _now(), "exp1", "veldra:p1")
     assert "erode_core_for_one_customer" in st.trap_gallery
     assert st.trap_gallery["erode_core_for_one_customer"][0].experience_id == "exp1"
+    # the honest classification rides out untouched -- the marker below is only ever added to a
+    # row whose classification claimed a closure the loop refused to credit
+    assert st.trap_gallery["erode_core_for_one_customer"][0].detail == "unchanged"
+
+
+def test_credited_trap_repair_logs_no_gallery_row():
+    a = _asmt([], closed=[])
+    a.trajectory.append(
+        Push(
+            target_code="erode_core_for_one_customer",
+            kind="trap",
+            text="p",
+            response_classification="closed",
+            gap_closed=True,
+        )
+    )
+    st = update_state(LearnerState(), a, _now(), "exp1", "veldra:p1")
+    assert st.trap_gallery == {}
+
+
+def test_uncredited_closed_still_records_the_trap():
+    """`classify_response` can return `closed` while `mechanism_supplied` is False -- either
+    because the grader said so, or because `AnthropicModel.classify_response`'s evidence-anchor
+    check FLOORED a fabricated span. The loop then refuses the repair (`judgment_loop.py`, the
+    `outcome == "closed" and mechanism_supplied` branch), but this function used to re-derive
+    "repaired" from `response_classification` alone, so the trap's durable record was destroyed
+    at write time by a verdict the loop had already rejected.
+
+    NOT a test of the measured turn-forgery injection, which lands with `mechanism_supplied=True`
+    and a span the learner genuinely typed -- that is credited, reaches `gap_closed=True`, and is
+    indistinguishable here from an honest repair. See `state.update_state`'s scope note."""
+    a = _asmt([], closed=[])
+    a.trajectory.append(
+        Push(
+            target_code="erode_core_for_one_customer",
+            kind="trap",
+            text="p",
+            response_classification="closed",
+            gap_closed=False,
+        )
+    )
+    st = update_state(LearnerState(), a, _now(), "exp1", "veldra:p1")
+    assert "erode_core_for_one_customer" in st.trap_gallery
+    row = st.trap_gallery["erode_core_for_one_customer"][0]
+    assert row.experience_id == "exp1"
+    # NOT the bare "closed": a gallery of unrepaired traps carrying `detail="closed"` reads as
+    # corruption, and the two cases must separate at READ time rather than one being destroyed
+    # at write time. The token says UNCREDITED and not why -- see the real-path test in
+    # tests/test_judgment_loop.py for the cell that killed the earlier `closed_no_mechanism`.
+    assert row.detail == "closed_uncredited"
 
 
 def _casmt(pairs):

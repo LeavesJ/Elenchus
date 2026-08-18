@@ -27,9 +27,9 @@ from elenchus.types import (
 
 EMBED = "embed_credentials_as_a_list"
 P1 = "veldra:embedded_anchor_lock_in"
-P2 = "veldra:license_fork_risk"
+P2 = "veldra:license_fork_risk"  # continuity_lock_in, EMBED's home
 LEAD = "lead_with_what_you_refuse_to_do"
-R1 = "veldra:license_fork_risk"
+R1 = "veldra:midrollout_contract_boundary"  # license_continuity, LEAD's home (split from license_fork_risk)
 R2 = "veldra:concentrated_market_pricing_power"
 NOW1 = datetime(2026, 6, 26, tzinfo=timezone.utc)
 
@@ -187,31 +187,33 @@ def test_two_session_run_reaches_strong_through_the_real_path(tmp_path):
     ) == fs.last_seen + timedelta(days=30)
 
 
-def test_shadow_on_license_continuity_self_resolves():
-    # Arm 2 of the cascade on the DEFAULT menu path (what real use takes): the isolate shadows
-    # license_continuity while embed is unlocated; license_continuity (commit_under_the_deadline's only
-    # home) surfaces once embed is strong. Tested, not routed around.
+def test_license_continuity_is_never_shadowed_by_continuity_lock_in():
+    """THE SHADOW WAS THE BUG, AND THIS TEST USED TO ASSERT IT AS A FEATURE.
+
+    Its earlier form was `test_shadow_on_license_continuity_self_resolves`, and it asserted that
+    ONE `ledger_ref` (`P2`) resolved to `continuity_lock_in` on a fresh state and to
+    `license_continuity` once `embed` went strong -- describing that as a cascade that "self
+    resolves". It only ever did that because the two experiences SHARED
+    `veldra:license_fork_risk` and `Proposal.problem_menu()` dedupes by ref, keeping one candidate
+    per owned problem. The "shadow" was `license_continuity` being silently unreachable from the
+    menu, which is one of the three live defects the ref split fixed. A docstring explaining why a
+    defect is desirable is the most expensive kind of wrong comment, because it stops the next
+    reader from looking.
+
+    They are two owned problems, so neither shadows the other and both are offerable from any
+    state. `commit_under_the_deadline` is `license_continuity`'s only home, and it no longer has
+    to wait for another problem's frame to mature before it can be reached."""
     lib, cfg = load_library(), load_progression()
 
-    def served(state):
+    def menu_ids(state):
         menu = Proposal(candidates=select_next(state, lib, cfg, NOW1)).problem_menu()
-        return next(s.experience_id for s, _ in menu if s.ledger_ref == P2)
+        return {s.experience_id for s, _ in menu}
 
-    assert served(LearnerState()) == "continuity_lock_in"  # fresh: isolate shadows
-    forming = LearnerState(
-        frames={
-            EMBED: FrameStrength(
-                strength=Strength.forming,
-                last_seen=NOW1,
-                due=NOW1,
-                last_evidence="x",
-                evidence_count=1,
-                breadth={P1},
-                unprompted_breadth={P1},
-            )
-        }
+    fresh = menu_ids(LearnerState())
+    assert {"continuity_lock_in", "license_continuity"} <= fresh, (
+        f"one problem is shadowing the other on a fresh state: {sorted(fresh)}"
     )
-    assert served(forming) == "continuity_lock_in"  # still the isolate (transfer)
+
     strong = LearnerState(
         frames={
             EMBED: FrameStrength(
@@ -225,7 +227,12 @@ def test_shadow_on_license_continuity_self_resolves():
             )
         }
     )
-    assert served(strong) == "license_continuity"  # self-resolves: commit reachable again
+    assert {"continuity_lock_in", "license_continuity"} <= menu_ids(strong)
+
+    # and they occupy distinct menu slots, which is the property the shared ref destroyed
+    menu = Proposal(candidates=select_next(LearnerState(), lib, cfg, NOW1)).problem_menu()
+    refs = [s.ledger_ref for s, _ in menu]
+    assert len(refs) == len(set(refs)), "problem_menu emitted two candidates for one owned problem"
 
 
 def test_loop_guardian_embed_unprompted_on_continuity_lock_in():

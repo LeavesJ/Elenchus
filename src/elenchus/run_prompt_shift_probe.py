@@ -217,7 +217,11 @@ def run(
         # Three arms (A, B, C) per item, across both halves -- exactly what run_classify_probe
         # and run_territory_probe each spend per item below.
         n_calls = 3 * (len(classify_items) + len(territory_items))
-        if not confirm("prompt_shift_probe", n_calls, MODEL_ID):
+        # Both halves reach the network through `classify_response` / `map_territories`, and both
+        # go through `AnthropicModel._parse_required`, which spends ONE retry on a refusal, an
+        # empty parse, or a truncation. So the ceiling is twice the schedule, the same understated
+        # guard a T2 review found in `run_injection_probe` and the same fix.
+        if not confirm("prompt_shift_probe", n_calls, MODEL_ID, max_calls=2 * n_calls):
             print("declined -- no calls made")
             return None
         from .model import AnthropicModel  # lazy: tests never need the SDK or network

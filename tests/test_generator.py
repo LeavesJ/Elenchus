@@ -536,25 +536,51 @@ def test_seed_ledger_refs_resolve_in_the_real_corpus():
     not __import__("pathlib").Path("data/elenchus.db").exists(),
     reason="real seeded corpus (gitignored data/) not present",
 )
-def test_seeded_license_scene_clears_the_moat():
-    """The authored (gitignored) license_continuity scene the student actually sees must clear the
-    same anti-label bar as the abstract prompt — the moat holds over the concrete scene + situation."""
-    from elenchus.content_loader import load_denylist, load_experience
+def test_both_split_problems_resolve_scene_and_rubric_through_their_own_ref():
+    """BOTH sides, named explicitly. Filename ordering must not decide what this covers.
+
+    The earlier version read `veldra:license_fork_risk`'s scene and validated it against
+    `license_continuity`'s rubric. Those were one problem when it was written; after the ledger_ref
+    split the ref belongs to `continuity_lock_in`, so it paired one problem's scene with another's
+    rubric and green meant nothing. The rewrite after that took `next(...)` over the library, which
+    sorts by rubric filename, so it silently settled on `continuity_lock_in` and covered one of the
+    two. This drives `_attach_scene` itself for each side.
+
+      continuity_lock_in  -> veldra:license_fork_risk            -> receives the continuity scene
+      license_continuity  -> veldra:midrollout_contract_boundary -> keeps its authored prompt
+    """
+    from elenchus.content_loader import load_denylist, load_library
+    from elenchus.experience import _attach_scene
     from elenchus.generator import validate_scene
     from elenchus.persistence import Store
 
+    lib = {e.experience_id: e for e in load_library()}
+    assert lib["continuity_lock_in"].ledger_ref == "veldra:license_fork_risk"
+    assert lib["license_continuity"].ledger_ref == "veldra:midrollout_contract_boundary"
+
     store = Store("data/elenchus.db")
     try:
-        entry = store.get_corpus("veldra:license_fork_risk")
-        if entry is None or entry.scene is None:
-            pytest.skip("license_fork_risk scene not authored in this data/")
-        rubric = load_experience("license_continuity").rubric
-        validate_scene(  # must not raise — a leaking authored scene would be a moat breach
-            entry.scene,
-            rubric,
-            framework_denylist=load_denylist("framework_denylist"),
-            scaffold_denylist=load_denylist("scaffold_denylist"),
-        )
+        corpus = store.load_corpus()
+        by_ref = {c.ledger_ref: c for c in corpus}
+        for eid in ("continuity_lock_in", "license_continuity"):
+            exp = lib[eid]
+            entry = by_ref.get(exp.ledger_ref)
+            if entry is None:
+                pytest.skip(f"{exp.ledger_ref} absent from this data/")
+            served = _attach_scene(exp, corpus, None)
+            if entry.scene is None:
+                # no scene for this owned problem: the authored prompt must stand, untouched
+                assert served.prompt == exp.prompt, f"{eid} was served a scene it does not own"
+                continue
+            # a scene exists for THIS ref: it is the one served, and it must clear the moat
+            # against THIS problem's own rubric — the only pairing _attach_scene can produce
+            assert served.prompt == entry.scene.prompt
+            validate_scene(
+                entry.scene,
+                exp.rubric,
+                framework_denylist=load_denylist("framework_denylist"),
+                scaffold_denylist=load_denylist("scaffold_denylist"),
+            )
     finally:
         store.close()
 
