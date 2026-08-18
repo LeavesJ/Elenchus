@@ -747,3 +747,76 @@ def test_each_authorship_case_gets_the_right_treatment(tmp_path):
         OLD_REF,
         NEW_REF,
     ], "both authored it: the slot genuinely draws on both owned problems"
+
+
+def test_an_unauthored_slot_is_left_alone_AND_COUNTED(tmp_path):
+    """Leaving the row alone is right. Reporting nothing about it is not.
+
+    One block up, `house_refs_undiscriminated` exists because "a silent skip reported as zero is
+    how the first version of this file went wrong". The slot branch added in round four skipped
+    silently, so an operator reading `web_domain_slot: 0` could not tell "no slot needed migrating"
+    from "a slot holds the old ref and I declined to touch it". Same policy, same file, one block
+    apart."""
+    from elenchus.ledger_ref_migration import KEPT_FRAMES
+
+    db = _production_db(str(tmp_path / "unauthored.db"), authored_frames=set())
+    c = sqlite3.connect(db)
+    c.execute(
+        "INSERT INTO web_domain_slot (slot, first_touch_at, member_refs_json, member_frames_json,"
+        " status) VALUES (?,?,?,?,?)",
+        (
+            0,
+            NOW.isoformat(),
+            json.dumps([OLD_REF]),
+            json.dumps(sorted(set(MOVED_FRAMES) | set(KEPT_FRAMES))),
+            "live",
+        ),
+    )
+    c.commit()
+    c.close()
+
+    counts = migrate(db)
+
+    assert counts["web_domain_slot"] == 0, "no member authored the ref; nothing may be rewritten"
+    assert counts["web_domain_slot_unauthored"] == 1, (
+        "and the refusal must be reported, never silent"
+    )
+    c = sqlite3.connect(db)
+    refs = json.loads(
+        c.execute("SELECT member_refs_json FROM web_domain_slot WHERE slot=0").fetchone()[0]
+    )
+    c.close()
+    assert refs == [OLD_REF], f"the row was rewritten on evidence nobody has: {refs}"
+
+
+def test_a_pick_whose_sitting_status_is_unknown_is_not_reported_as_closed(tmp_path):
+    """`next_pick_ref_left_closed` counts every row the live clear did not take and calls it dead.
+
+    The live clear matches `sitting_id IN (SELECT id FROM web_sitting WHERE status='live')`, so a
+    state row whose sitting has no `web_sitting` row at all is not cleared, is counted, and is
+    reported under a name asserting it is closed. Nothing in the file establishes that. The whole
+    point of leaving these rows was that a bare ref cannot be discriminated, so the count must not
+    quietly claim otherwise."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = _production_db(str(tmp_path / "orphan.db"))
+    st = SittingStore(db)
+
+    dead = st.create_sitting(NOW)
+    st.write_state(dead, next_pick=(OLD_REF, "a genuinely dead door"), now=NOW)
+    st.close_sitting(dead)
+
+    orphan = st.create_sitting(NOW + timedelta(minutes=1))
+    st.write_state(orphan, next_pick=(OLD_REF, "a door of unknown status"), now=NOW)
+    c = sqlite3.connect(db)
+    c.execute("DELETE FROM web_sitting WHERE id=?", (orphan,))  # state outlives its sitting row
+    c.commit()
+    c.close()
+
+    counts = migrate(db)
+
+    assert counts["next_pick_ref_cleared_live"] == 0, "neither sitting is live"
+    assert counts["next_pick_ref_left_closed"] == 2, "both rows were left in place"
+    assert counts["next_pick_ref_left_unverified"] == 1, (
+        "exactly one of them could be SHOWN to sit on a closed sitting; the other is a guess"
+    )

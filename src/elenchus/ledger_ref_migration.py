@@ -45,7 +45,8 @@ DISCRIMINATOR PER SURFACE, all verified against the real database before this wa
 |                                       | web_converged.experience_id                      |
 | web_domain_slot.member_refs_json      | frames.breadth_json: which member frame ACTUALLY |
 |                                       | held OLD_REF. Membership decides nothing.        |
-| web_sitting_state.next_pick_ref       | none; cleared on LIVE, left+counted on closed    |
+| web_sitting_state.next_pick_ref       | none; cleared on LIVE, left+counted otherwise,   |
+|                                       | with the un-provable share counted separately   |
 
 A SECOND ADVERSARIAL PASS FOUND THREE MORE, ALL THE SAME ROOT ERROR ONE LEVEL DOWN: a discriminator
 at the wrong GRAIN, or read from the wrong TABLE.
@@ -209,9 +210,11 @@ def migrate(db_path: str) -> dict[str, int]:
         "web_sitting_inflight": 0,
         "web_sitting_record": 0,
         "web_domain_slot": 0,
+        "web_domain_slot_unauthored": 0,
         "house_refs_undiscriminated": 0,
         "next_pick_ref_cleared_live": 0,
         "next_pick_ref_left_closed": 0,
+        "next_pick_ref_left_unverified": 0,
     }
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -461,6 +464,24 @@ def migrate(db_path: str) -> dict[str, int]:
                 c["next_pick_ref_left_closed"] = conn.execute(
                     "SELECT COUNT(*) FROM web_sitting_state WHERE next_pick_ref=?", (OLD_REF,)
                 ).fetchone()[0]
+                # OF THOSE, HOW MANY THE NAME IS OVERCLAIMING. `left_closed` counts every row the
+                # live clear did not take, which is not the same set as "rows on a closed sitting":
+                # the clear matches by `sitting_id` against `web_sitting`, so a state row whose
+                # sitting has no row there is untouched, counted, and reported as dead on no
+                # evidence. `web_sitting` missing entirely does it to every row at once.
+                #
+                # Counted rather than folded into `left_closed`, because that key is what the
+                # 2026-08-10 run was read against and silently narrowing it would re-describe a
+                # number already written down. Nonzero here means that many of `left_closed` are
+                # a guess, which is the same refusal `house_refs_undiscriminated` records.
+                if _has_table(conn, "web_sitting"):
+                    c["next_pick_ref_left_unverified"] = conn.execute(
+                        "SELECT COUNT(*) FROM web_sitting_state WHERE next_pick_ref=? AND "
+                        "sitting_id NOT IN (SELECT id FROM web_sitting WHERE status='closed')",
+                        (OLD_REF,),
+                    ).fetchone()[0]
+                else:
+                    c["next_pick_ref_left_unverified"] = c["next_pick_ref_left_closed"]
 
             # -- domain slots: derived discriminator, and it refuses to guess --------------
             if _has_table(conn, "web_domain_slot"):
@@ -493,6 +514,14 @@ def migrate(db_path: str) -> dict[str, int]:
                     if not (adds_new or keeps_old):
                         # No frame here ever held the old ref, so it arrived through some other
                         # member and is none of this migration's business. Leave it untouched.
+                        #
+                        # AND COUNT IT. Leaving the row is right; saying nothing about it is not.
+                        # `house_refs_undiscriminated` exists one block up for exactly this, on the
+                        # stated ground that a silent skip reported as zero is how the first version
+                        # of this file went wrong -- and this branch, added by the round that
+                        # finally got the predicate right, was silent. Nonzero here means a slot
+                        # still holds OLD_REF and wants a human, not that nothing needed migrating.
+                        c["web_domain_slot_unauthored"] += 1
                         continue
                     out: list[str] = []
                     for r in refs:
