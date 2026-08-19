@@ -19,6 +19,11 @@ dev = [
     "ruff>=0.6",
 ]
 web = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
+# Optional on purpose. Nothing observes production yet, and a crash reporter is
+# only worth its dependency once somebody is reading it. Install with
+# `.[observability]` and set SENTRY_DSN; without the DSN the app never
+# initialises it, so a default install and every test run stay unchanged.
+observability = ["sentry-sdk>=2.0"]
 
 [project.scripts]
 elenchus = "elenchus.cli:main"
@@ -44,4 +49,5 @@ select = ["E4", "E7", "E9", "F"]
 testpaths = ["tests"]
 markers = [
     "live: exercises the real Anthropic API (requires ANTHROPIC_API_KEY); skipped otherwise",
+    "preview: exercises a running preview server (requires PREVIEW_URL); skipped otherwise",
 ]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from pathlib import Path
 from typing import Literal
 
@@ -223,8 +225,41 @@ class _NoStoreStaticFiles(StaticFiles):
         return response
 
 
+def _init_observability() -> str:
+    """Wire crash reporting, if and only if this deployment asked for it.
+
+    Three ways to stay silent, all of them normal: no SENTRY_DSN in the
+    environment, the optional `observability` extra not installed, or an
+    initialisation that raises. A reporter that takes the app down when the
+    reporting service is unreachable has inverted its own purpose, and a test
+    run must never depend on either being present.
+
+    Returns what happened, so a caller can log it rather than guess.
+    """
+    dsn = os.environ.get("SENTRY_DSN", "").strip()
+    if not dsn:
+        return "off: no SENTRY_DSN"
+    try:
+        import sentry_sdk
+    except ImportError:
+        return "off: sentry-sdk not installed (pip install '.[observability]')"
+    try:
+        sentry_sdk.init(
+            dsn=dsn,
+            # Errors always; traces only if explicitly asked for, because a
+            # default sample rate is a bill nobody chose.
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0") or 0),
+            environment=os.environ.get("SENTRY_ENVIRONMENT", "unknown"),
+            send_default_pii=False,
+        )
+    except Exception as exc:  # noqa: BLE001 — never let the reporter break the app
+        return f"off: sentry init failed ({type(exc).__name__})"
+    return "on"
+
+
 def create_app(db_path: str, model_factory=None) -> FastAPI:
     app = FastAPI(title="Elenchus — Cartographer MVP")
+    app.state.observability = _init_observability()
 
     reg = SessionRegistry(db_path, model_factory or (lambda: _default_model()))
     build = _build_stamp()
