@@ -33,7 +33,7 @@ jobs:
       # checks it is running: ruff would descend into it and git status would
       # report it.
       - name: Check out Elenchus
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: repo
 
@@ -68,14 +68,14 @@ jobs:
       # quietly downgrade what `main` is gated by.
       - name: Check out Felix
         if: steps.ctx.outputs.harness == 'yes'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: LeavesJ/felix
           ssh-key: ${{ secrets.FELIX_DEPLOY_KEY }}
           path: felix
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.14'
 
