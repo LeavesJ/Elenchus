@@ -7,9 +7,15 @@ name = "elenchus"
 version = "0.1.0"
 description = "A retention-and-deployment engine: a thin doctrine layer over a rented model."
 requires-python = ">=3.12"
+# A floor is a compatibility claim, and these are checked by installing them, not by reading them.
+# `pydantic>=2.0` and `pyyaml>=6.0` were both false against this project's own `requires-python`:
+# on 3.14, pyyaml 6.0 fails to build outright, and pydantic below 2.12 has no pydantic-core wheel
+# and needs a Rust toolchain. 2.0.0 is additionally excluded by fastapi's own metadata, so the
+# declared floor set was not merely optimistic, it was unsatisfiable. The suite passes at exactly
+# these versions.
 dependencies = [
-    "pydantic>=2.0",
-    "pyyaml>=6.0",
+    "pydantic>=2.12",
+    "pyyaml>=6.0.3",
     "anthropic>=0.120",
 ]
 

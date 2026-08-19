@@ -4024,7 +4024,9 @@ def test_plateau_only_returning_user_gets_no_homebase_on_either_path(tmp_path, m
     store.close_sitting(sit)
     reg = SessionRegistry(db, model_factory=make_fake)
     tag1, data1 = reg.resume_or_start("single")  # 1st: fresh frontdoor (no live sitting)
-    assert data1.get("frontdoor")
+    # `tag1` was captured and never asserted while `tag2` was, so the FIRST call's tag -- the one
+    # the comment above claims is a fresh start -- was the untested half of the pair.
+    assert tag1 == "say" and data1.get("frontdoor")
     assert "terrain" not in data1 and "houses" not in data1  # plateau-only: no world on fresh load
     tag2, data2 = reg.resume_or_start("single")  # 2nd: reload -> resume parked at front door
     assert tag2 == "resume" and data2.get("frontdoor")
