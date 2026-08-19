@@ -3,6 +3,13 @@ name: gate
 # The gate itself lives in the private Felix repo, not here. This file is only
 # the wiring that lets GitHub run it, which is why it is the single addition to
 # this repo's tracked set. Everything it enforces is defined elsewhere.
+#
+# ONE JOB, DELIBERATELY. `gate` is the required status check on `main`, and a
+# required check is satisfied by a context of that exact name. Splitting the
+# harness-dependent half into a second job would mean either that the REQUIRED
+# check no longer covers the doctrine checks, or that the second job is required
+# too and a fork pull request is blocked by a check it can never turn green.
+# So the job stays one, and degrades on the one path where it must.
 
 on:
   pull_request:
@@ -30,7 +37,37 @@ jobs:
         with:
           path: repo
 
+      # Decided from the EVENT, before anything tries to clone. GitHub withholds
+      # repository secrets from a pull request opened on a fork, so
+      # `secrets.FELIX_DEPLOY_KEY` is empty there and the Felix checkout cannot
+      # succeed. That used to fail the job, which made `gate` a required check an
+      # outside contributor could never satisfy -- invisible while an admin could
+      # bypass the requirement, and absolute from the day `enforce_admins` was
+      # turned on. Deciding here is what lets the job degrade on purpose rather
+      # than die on a clone.
+      #
+      # Read through env rather than interpolated into the script: `${{ }}` pastes
+      # its value into the shell before bash sees it.
+      - name: Decide whether the harness is reachable
+        id: ctx
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          THIS_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "pull_request" ] && [ "$HEAD_REPO" != "$THIS_REPO" ]; then
+            echo "harness=no" >> "$GITHUB_OUTPUT"
+            echo "fork pull request from $HEAD_REPO: the private harness is unreachable"
+          else
+            echo "harness=yes" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Not `continue-on-error`. Everywhere except a fork PR -- every push to
+      # `main` included -- an unreachable harness must FAIL the job rather than
+      # quietly downgrade what `main` is gated by.
       - name: Check out Felix
+        if: steps.ctx.outputs.harness == 'yes'
         uses: actions/checkout@v4
         with:
           repository: LeavesJ/felix
@@ -55,11 +92,32 @@ jobs:
       # Fails the job if Felix cannot tell which project this is, so a broken
       # binding surfaces here rather than silently gating nothing.
       - name: Confirm the governing project
+        if: steps.ctx.outputs.harness == 'yes'
         working-directory: repo
         run: ../felix/engine/harness/felix which
 
       # No ANTHROPIC_API_KEY is provided on purpose. The @live tests skip
       # without one, so CI stays free and never bills a pull request.
       - name: Run the gate
+        if: steps.ctx.outputs.harness == 'yes'
         working-directory: repo
         run: ../felix/engine/harness/felix gate
+
+      # The fork path. Everything the gate does that does not need the harness,
+      # run from the repository itself. PYTHONPATH=src rather than trusting the
+      # editable install, which is what the project's own runbook says to do.
+      - name: Run what a fork can run
+        if: steps.ctx.outputs.harness == 'no'
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          ruff format --check .
+          ruff check .
+          PYTHONPATH=src pytest -q
+
+      # A partial green must announce itself. This is the whole reason the fork
+      # path is acceptable: it does not pretend to be the gate.
+      - name: Say what did not run
+        if: steps.ctx.outputs.harness == 'no'
+        run: |
+          echo "::warning title=Partial gate::format, lint and the suite ran. The doctrine checks did NOT: confidential, secret, lift-bank, ignore-leak, inversion. They live in the private harness, which a fork run cannot reach. Run 'felix gate' against this branch locally before merging it."
