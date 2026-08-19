@@ -17,18 +17,6 @@ ARTIFACT_DIMENSIONS = (
 )
 WRAPPER_WORDS = ("streak", "points", "badge", "leaderboard", "timer", "reward", "level up")
 
-HARD_REJECTS = frozenset(
-    {
-        GateCode.recoverable_label,
-        GateCode.pre_named_framework,
-        GateCode.type_hint_scaffold,
-        GateCode.softened_ambiguity,
-        GateCode.cosmetic_engagement,
-        GateCode.insufficient_interrogation_depth,
-    }
-)
-QUALITY_FLOORS = frozenset({GateCode.owned_or_real, GateCode.process_layer_load})
-
 
 class GateError(RuntimeError):
     """Raised when no shippable experience exists, or a rubric fails the gate at load."""
