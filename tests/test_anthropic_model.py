@@ -133,10 +133,26 @@ class _Wire:
 
 
 class _Resp:
-    def __init__(self, parsed_output=None, content=None, stop_reason="end_turn"):
+    def __init__(self, parsed_output=None, content=None, stop_reason="end_turn", stop_details=None):
         self.parsed_output = parsed_output
         self.content = content or []
         self.stop_reason = stop_reason
+        # anthropic.types.Message carries this alongside stop_reason: the policy category and a
+        # human-readable explanation, present only on a refusal. Default None so every existing
+        # _Resp in this file is unchanged.
+        self.stop_details = stop_details
+
+
+class _StopDetails:
+    """The shape of `anthropic.types.RefusalStopDetails` (SDK 0.120.2): a policy category out of
+    cyber / bio / frontier_llm / reasoning_extraction / general_harms, and an explanation that the
+    SDK's own docstring says is not guaranteed to be stable. Both Optional."""
+
+    type = "refusal"
+
+    def __init__(self, category=None, explanation=None):
+        self.category = category
+        self.explanation = explanation
 
 
 class _TextBlock:
@@ -1923,3 +1939,108 @@ def test_concierge_sitting_close_bounds_a_pathological_segment_turn_on_the_rende
     # 40100 sits above _TURN_RENDER_CAP (40000) plus the "…[trimmed]" suffix and the fixed
     # situation/segment/closing-instruction wrapper (measured: 40082 chars for this exact fixture).
     assert len(user) < 40100
+
+
+# ---- safety floor S2: log what Anthropic's own classifier said ---------------------------------
+
+
+def test_a_refusal_on_the_humane_turn_records_the_policy_category(caplog):
+    """`concierge_turn` swallows a refusal and returns "" so the loop never blocks. That is the
+    right behaviour and it is also why the refusal leaves no trace anywhere: the branch discards
+    a verdict we already paid for on every call. Until this lands, "has a real safety refusal ever
+    been suppressed here?" is unanswerable, and the 2026-08-29 audit could not answer it either.
+
+    Server-side only (Invariant 10). The category must never ride the wire; the return value is
+    unchanged.
+    """
+    import logging
+
+    client = _Client(
+        create_result=_Resp(
+            stop_reason="refusal",
+            stop_details=_StopDetails(
+                category="general_harms", explanation="the request touches a restricted area"
+            ),
+        )
+    )
+    with caplog.at_level(logging.WARNING, logger="elenchus.model"):
+        out = AnthropicModel(client=client).concierge_turn(
+            "a decision about a contract", "a push", []
+        )
+
+    assert out == "", "logging must not change what the refusal branch returns"
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "general_harms" in logged, f"the policy category was discarded: {logged!r}"
+    assert "restricted area" in logged, f"the explanation was discarded: {logged!r}"
+    assert "concierge_turn" in logged, f"the branch that refused is not identifiable: {logged!r}"
+
+
+def test_a_doctrine_critical_refusal_is_recorded_before_it_raises(caplog):
+    """The other half of the floor: the branches that DO fail loud still throw the classifier's
+    verdict away, so a ModelError in a server log says "refused" and never says what for.
+    `_parse_required` spends its single retry first, so a deterministic refusal is seen twice.
+    """
+    import logging
+
+    details = _StopDetails(category="cyber", explanation="could enable exploit development")
+    client = _Client(
+        parse_result=[
+            _Resp(parsed_output=None, stop_reason="refusal", stop_details=details),
+            _Resp(parsed_output=None, stop_reason="refusal", stop_details=details),
+        ]
+    )
+    with caplog.at_level(logging.WARNING, logger="elenchus.model"):
+        with pytest.raises(ModelError):
+            AnthropicModel(client=client).classify_intake(_exp(), "opening")
+
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "cyber" in logged, f"the category was discarded on a raising branch: {logged!r}"
+    assert "exploit development" in logged, f"the explanation was discarded: {logged!r}"
+
+
+def test_a_non_refusal_stop_reason_records_nothing():
+    """The scope of the guard is part of the guard (L-33). A log that fires on every empty parse
+    would report refusals that never happened, and `_require`'s branch is reached by BOTH an
+    actual refusal and a merely-empty `parsed_output`."""
+    import logging
+
+    from elenchus.model import _log_refusal
+
+    logger = logging.getLogger("elenchus.model")
+    records = []
+    handler = logging.Handler()
+    handler.emit = records.append
+    logger.addHandler(handler)
+    try:
+        _log_refusal("_require", _Resp(parsed_output=None, stop_reason="end_turn"))
+    finally:
+        logger.removeHandler(handler)
+
+    assert records == [], "an empty parse is not a refusal and must not be recorded as one"
+
+
+def test_every_refusal_branch_records_what_the_classifier_said():
+    """The plan says TEN branches, so this pins ten rather than trusting the one or two a
+    behavioural test happens to drive (L-33: a guard whose scope is narrower than its claim has
+    no teeth). Source-level on purpose: several of these branches are only reachable through a
+    live model, and this is what makes "all ten" checkable offline.
+
+    If a new refusal branch is added without a `_log_refusal` call, this fails and names the line.
+    """
+    import pathlib
+
+    import elenchus.model as model_mod
+
+    lines = pathlib.Path(model_mod.__file__).read_text().splitlines()
+    branches = [i for i, line in enumerate(lines) if '== "refusal"' in line]
+    assert len(branches) == 10, (
+        f"expected the ten refusal branches the safety floor names, found {len(branches)} at "
+        f"lines {[i + 1 for i in branches]}; if a branch was added or removed, this count and "
+        "the plan's S1/S2 wording both need rechecking"
+    )
+
+    unlogged = [i + 1 for i in branches if "_log_refusal(" not in "\n".join(lines[i : i + 8])]
+    assert not unlogged, (
+        f"refusal branches at lines {unlogged} discard the classifier's verdict; every branch "
+        "that sees stop_reason == 'refusal' must call _log_refusal"
+    )
