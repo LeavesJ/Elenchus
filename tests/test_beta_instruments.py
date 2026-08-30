@@ -750,3 +750,20 @@ def test_serving_the_default_database_warns(caplog):
         resolve_runtime({"ELENCHUS_DB": str(tmp := "/tmp/x/elenchus.db")})
     assert not caplog.records, "an isolated boot must not warn"
     assert tmp  # keep ruff quiet about the walrus
+
+
+def test_the_leave_copy_promises_only_what_a_left_room_delivers():
+    """Found by the founder reading the real screen (2026-08-30, from a phone): the leave said
+    "it's here when you come back", but a left sitting deliberately never resumes -- the next
+    visit is a fresh front door and the retained words are not re-shown. Rows kept: true.
+    Room re-served: false. The copy may promise the first, never the second."""
+    from elenchus.web.session_runner import _STATIC_LEAVE
+
+    low = _STATIC_LEAVE.lower()
+    assert "stays saved" in low or "keeps what you wrote" in low, (
+        "the true half -- the words are retained -- should still be said"
+    )
+    for false_promise in ("when you come back", "pick up where", "resume"):
+        assert false_promise not in low, (
+            f"the leave promises {false_promise!r}, but a left room is never re-entered"
+        )

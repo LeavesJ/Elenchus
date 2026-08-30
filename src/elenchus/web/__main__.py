@@ -3,8 +3,16 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import logging
+
 from .app import create_app
 from .runtime import resolve_runtime
+
+# Entrypoint-owned logging config (L-9's logging variant, found live 2026-08-30): with no
+# config, logging's last-resort handler drops below WARNING, so the model_call timing lines --
+# the exact data the S4 measurement reads -- were silently discarded while the suite's caplog
+# stayed green. INFO on stderr; uvicorn adds its own handlers independently.
+logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
 
 _ROOT = Path(__file__).resolve().parents[3]
 
