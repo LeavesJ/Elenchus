@@ -11,6 +11,7 @@ from elenchus.types import (
     FrameState,
     TrapState,
 )
+from elenchus.content_loader import load_library
 from elenchus.web.app import create_app
 
 # Phase C T4: single-sourced world fake (tests/conftest.py) — `_world_factory` delegates to it.
@@ -818,15 +819,14 @@ def test_reserve_convergence_adds_a_new_house(tmp_path, make_fake):
     db = str(tmp_path / "hr.db")
     store = SittingStore(db)
     wall = datetime.now(timezone.utc)
-    for i, eid in enumerate(
-        [
-            "irreversible_anchor",
-            "license_continuity",
-            "proof_before_promise",
-            "decision_under_stakes",
-        ]
-    ):
-        store.log_converged("prior", f"gen:prior:{i}", wall - timedelta(hours=4 - i), eid)
+    # Every territory except the one the scripted fake maps the situation to -- derived, so a
+    # new territory does not leave a door unwindowed and flip the asserted "reserve" to a "say"
+    # (territory-cost audit 2026-08-30). continuity_lock_in is a FIXTURE fact: the fake's map.
+    aged = sorted(
+        e.experience_id for e in load_library() if e.experience_id != "continuity_lock_in"
+    )
+    for i, eid in enumerate(aged):
+        store.log_converged("prior", f"gen:prior:{i}", wall - timedelta(hours=len(aged) - i), eid)
 
     app = create_app(db_path=db, model_factory=_world_factory(make_fake))
     client = TestClient(app)
@@ -844,7 +844,7 @@ def test_reserve_convergence_adds_a_new_house(tmp_path, make_fake):
 
     cl = client.post("/api/session/s/close").json()
     assert cl["kind"] == "close"
-    assert len(cl["houses"]) == 6  # prior sitting's 4 rows + live sitting's 2 rows = 6 houses
+    assert len(cl["houses"]) == len(aged) + 2  # prior sitting's rows + live sitting's 2
 
 
 def test_houses_are_stable_across_a_restart(tmp_path, make_fake):
@@ -928,15 +928,14 @@ def test_informed_reserve_over_http(tmp_path, make_fake):
     db = str(tmp_path / "reserve.db")
     store = SittingStore(db)
     wall = datetime.now(timezone.utc)
-    for i, eid in enumerate(
-        [
-            "irreversible_anchor",
-            "license_continuity",
-            "proof_before_promise",
-            "decision_under_stakes",
-        ]
-    ):
-        store.log_converged("prior", f"gen:prior:{i}", wall - timedelta(hours=4 - i), eid)
+    # Every territory except the one the scripted fake maps the situation to -- derived, so a
+    # new territory does not leave a door unwindowed and flip the asserted "reserve" to a "say"
+    # (territory-cost audit 2026-08-30). continuity_lock_in is a FIXTURE fact: the fake's map.
+    aged = sorted(
+        e.experience_id for e in load_library() if e.experience_id != "continuity_lock_in"
+    )
+    for i, eid in enumerate(aged):
+        store.log_converged("prior", f"gen:prior:{i}", wall - timedelta(hours=len(aged) - i), eid)
 
     app = create_app(db_path=db, model_factory=_world_factory(make_fake))
     client = TestClient(app)

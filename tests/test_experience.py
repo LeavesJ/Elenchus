@@ -3,13 +3,13 @@ from elenchus.experience import SELECTORS, select_experience
 from elenchus.persistence import Store
 from elenchus.types import CorpusEntry, LearnerState, NextExperienceSpec, Regime
 
-SEED_REFS = (
-    "veldra:license_fork_risk",
-    "veldra:concentrated_market_pricing_power",
-    "veldra:first_customer_proof_loop",
-    "veldra:embedded_anchor_lock_in",  # SP2 admit: irreversible_anchor experience
-    "veldra:midrollout_contract_boundary",  # license_continuity, split out of license_fork_risk
-)
+# Derived, not enumerated (territory-cost audit 2026-08-30): a new territory used to fail three
+# tests here with recoverable_label/cosmetic_engagement purely because this fixture had not been
+# told about it. The fixture's JOB is "every authored seed has a corpus home", so it derives that
+# from the library itself and a new territory costs zero edits here.
+from elenchus.content_loader import load_library
+
+SEED_REFS = tuple(sorted({e.ledger_ref for e in load_library()}))
 
 
 def _seed_corpus(store: Store):
