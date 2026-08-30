@@ -651,6 +651,42 @@ def _normalize_for_span_match(text: str) -> str:
     return " ".join(folded.split()).casefold()
 
 
+class _TimedMessages:
+    """Observation-only timing over the client's messages seam (S4 prep, 2026-08-30).
+
+    The S4 plan is measure-then-pick: dogfood sittings with per-call durations, THEN choose the
+    client timeout. Nothing logged durations, so the sittings would have produced zero
+    measurement. This is the single choke point both `messages.create` and `messages.parse` pass
+    through, so one wrapper times every API call uniformly, logs server side only (Invariant
+    10), and changes nothing a caller sees -- results and exceptions pass straight through, and
+    a call that RAISES is still timed, because a hung-then-failed call is exactly the datum S4
+    exists to bound. Two callers need this seam: every AnthropicModel method via `_get_client`,
+    and the timing tests.
+    """
+
+    def __init__(self, client):
+        self._client = client
+        self.messages = self
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+    def _timed(self, kind: str, fn, kwargs):
+        import time as _time
+
+        t0 = _time.perf_counter()
+        try:
+            return fn(**kwargs)
+        finally:
+            _log.info("model_call %s %.2fs", kind, _time.perf_counter() - t0)
+
+    def create(self, **kwargs):
+        return self._timed("create", self._client.messages.create, kwargs)
+
+    def parse(self, **kwargs):
+        return self._timed("parse", self._client.messages.parse, kwargs)
+
+
 class AnthropicModel:
     """Real adapter over Claude Opus 5. Doctrine lives in content/prompts/; this is plumbing.
 
@@ -669,7 +705,7 @@ class AnthropicModel:
             import anthropic  # lazy: tests never need the SDK or network
 
             self._client = anthropic.Anthropic(api_key=self._api_key)
-        return self._client
+        return _TimedMessages(self._client)
 
     def _parse_required(self, *, max_tokens: int, **kwargs):
         """One structured parse, output REQUIRED — with a SINGLE retry: budget-doubled on
