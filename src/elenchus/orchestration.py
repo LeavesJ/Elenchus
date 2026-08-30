@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from .assessment import get_assessor
-from .content_loader import load_library, load_progression
+from .content_loader import load_library, load_progression, library_version
 from .crystallization import crystallization_candidates
 from .experience import select_experience
 from .model import Model
@@ -111,7 +111,7 @@ def run_session(
     assessment = get_assessor(exp.regime)(exp, work, model)
     state = STATE_UPDATERS[exp.regime](state, assessment, now, exp.experience_id, exp.ledger_ref)
     store.save_state(state)
-    store.log_decision(selection)
+    store.log_decision(selection, content_version=library_version(experiences))
 
     candidates = crystallization_candidates(
         state, core, ledger, experiences, now, load_progression()

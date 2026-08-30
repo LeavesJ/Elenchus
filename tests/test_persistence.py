@@ -290,7 +290,7 @@ def test_selection_log_decision_columns_fresh_and_old_db(tmp_path):
             chosen_receipt=rc("lead", "veldra:p2", "e2"),
             outcome=Outcome.redirected,
         )
-        store.log_decision(sel)
+        store.log_decision(sel, content_version="cv-test")
         row = store._db.execute("SELECT * FROM selection_log").fetchone()
         assert row["frame"] == "lead" and row["experience_id"] == "e1"  # proposed
         assert row["outcome"] == "redirected"
@@ -314,4 +314,66 @@ def test_core_decision_log_roundtrip(tmp_path):
     store.log_core_decision(v, now)
     row = store._db.execute("SELECT * FROM core_decision_log").fetchone()
     assert row["kind"] == "promote" and row["target"] == "protect" and row["outcome"] == "accepted"
+    store.close()
+
+
+def test_selection_rows_carry_the_content_version(tmp_path):
+    """The replacement for the cut cold-start ordering pin (two-week plan, adversarial review):
+    a pin protected nothing that exists, but a curve read across a content change silently mixes
+    selections computed over DIFFERENT libraries. The stamp partitions them at read time. It is
+    REQUIRED at the call, not defaulted -- an unstamped row can never be attributed afterwards,
+    the same stance as web_content_gap.sitting_id.
+
+    Old databases migrate: the column arrives via the defensive ALTER and legacy rows read NULL,
+    because the library they were computed over is not recoverable.
+    """
+    import sqlite3
+    from datetime import datetime, timezone
+
+    from elenchus.persistence import Store
+    from elenchus.types import NextExperienceSpec, Outcome, Regime, Selection, SelectionReceipt
+
+    old = tmp_path / "old.db"
+    con = sqlite3.connect(old)
+    con.executescript(
+        "CREATE TABLE selection_log (created_at TEXT NOT NULL, frame TEXT NOT NULL, "
+        "problem TEXT NOT NULL, experience_id TEXT NOT NULL, drive TEXT NOT NULL, "
+        "scores_json TEXT NOT NULL, runner_up_drive TEXT, margin REAL NOT NULL, "
+        "content_gaps_json TEXT NOT NULL);"
+        "INSERT INTO selection_log VALUES ('2026-06-01T00:00:00+00:00','f','p','e','deploy',"
+        "'{}',NULL,0.1,'[]');"
+    )
+    con.commit()
+    con.close()
+
+    store = Store(old)
+    legacy = store._db.execute("SELECT content_version FROM selection_log").fetchone()
+    assert legacy["content_version"] is None, "a legacy row must not be attributed to a guess"
+
+    now = datetime(2026, 6, 25, tzinfo=timezone.utc)
+    rc = SelectionReceipt(
+        frame="lead",
+        problem="veldra:p1",
+        experience_id="e1",
+        drive="deploy",
+        scores={"V": 0.7},
+        runner_up_drive=None,
+        margin=0.2,
+        content_gaps=[],
+        created_at=now,
+    )
+    sel = Selection(
+        proposed_receipt=rc,
+        chosen_spec=NextExperienceSpec(
+            target_frames=["lead"],
+            ledger_ref="veldra:p1",
+            regime=Regime.open_ended,
+            experience_id="e1",
+        ),
+        chosen_receipt=rc,
+        outcome=Outcome.accepted,
+    )
+    store.log_decision(sel, content_version="cv-abc123")
+    rows = store._db.execute("SELECT content_version FROM selection_log ORDER BY rowid").fetchall()
+    assert [r["content_version"] for r in rows] == [None, "cv-abc123"]
     store.close()

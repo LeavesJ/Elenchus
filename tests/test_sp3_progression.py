@@ -111,24 +111,49 @@ def test_session1_credits_embed_unprompted_through_the_real_loop():
     )  # never probed -> the read is genuinely unprompted
 
 
-def test_two_session_run_reaches_strong_through_the_real_path(tmp_path):
-    # The DF matrix (living sitting §2d) closed embed's SECOND unprompted home — production
-    # continuity_lock_in force-probes embed (the named, accepted cost), so embed can no longer
-    # mint strong through two unprompted contexts. The strong arc is therefore pinned on
-    # lead_with_what_you_refuse_to_do: the one frame with two non-DF homes on distinct refs
-    # (license_continuity -> R1, decision_under_stakes -> R2). Same engine path as before:
-    # unprompted at intake on two distinct refs -> strong -> the 30-day savings effect.
+def test_the_strong_arc_is_closed_at_cold_start_and_this_is_the_tripwire(tmp_path):
+    """THE TRIPWIRE, re-pinned consciously on 2026-08-30. Its previous form minted strong.
+
+    The §2d repair (founder-ratified 2026-08-29) moved license_continuity's decision_frame to
+    lead_with_what_you_refuse_to_do so that commit_under_the_deadline keeps an unprompted channel
+    once its own territory lands. The computed consequence, verified by running this exact
+    scenario against the repaired library: EVERY frame in the curated five now has exactly ONE
+    non-DF home, so no frame can read unprompted at intake on two distinct refs, and the
+    two-curated-refs strong arc -- unprompted on R1 and R2 -> strong -> the 30-day savings
+    effect -- is UNREACHABLE at cold start. Mastery claims move to the isolated homes the new
+    territories bring; the engine's own strong rule keeps its unit teeth in test_state.py
+    (test_storage_tier_strong_needs_two_unprompted_problems, test_strong_reachable_across_two_problems).
+
+    This drives the same two sessions the old strong arc used, through the real engine over the
+    real library, and asserts the CLOSURE: session 1's DF probe consumes lead's unprompted read
+    on R1, so two sessions end at forming with one unprompted ref, never strong. If a content
+    change reopens a second non-DF home for any frame, the matrix sweep below fails first and
+    this prose is the map. That is what a tripwire is for.
+    """
     db = tmp_path / "sp3.db"
     store = build_store(db)
     core = derive_core(aim())
     lib, cfg = load_library(), load_progression()
 
-    # --- session 1: license_continuity. lead present_reasoned (unprompted); the DF
-    # (commit_under_the_deadline) and protect_the_core_lane absent (probed, closed).
+    # The matrix, computed from content, not asserted from memory: one non-DF home per frame.
+    homes: dict[str, set[str]] = {}
+    for e in lib:
+        for f in e.rubric.frames:
+            if f.frame_code != e.rubric.decision_frame:
+                homes.setdefault(f.frame_code, set()).add(e.experience_id)
+    two_free = {c: ids for c, ids in homes.items() if len(ids) >= 2}
+    assert not two_free, (
+        f"a frame regained a second non-DF home {two_free} -- the strong arc has reopened and "
+        "this test must be re-pinned to mint strong through it (see the old form in git history)"
+    )
+
+    # --- session 1: license_continuity. lead present_reasoned at intake, but lead IS the DF now:
+    # the forced probe consumes the read, so no unprompted credit lands on R1. commit and protect
+    # absent (probed, closed). This is "a DF frame loses reasoned_unprompted THERE", executed.
     s1_model = _model_for(
         frames_present=[LEAD],
         traps=["scope_creep_to_please", "erode_core_for_one_customer", "commit_without_a_tripwire"],
-        probed_responses={"commit_under_the_deadline", "protect_the_core_lane"},
+        probed_responses={LEAD, "commit_under_the_deadline", "protect_the_core_lane"},
     )
     state1, _ = run_session(
         store,
@@ -142,27 +167,26 @@ def test_two_session_run_reaches_strong_through_the_real_path(tmp_path):
     )
     assert state1.frames[LEAD].strength is Strength.forming
     assert state1.frames[LEAD].breadth == {R1}
-    assert state1.frames[LEAD].unprompted_breadth == {R1}
-    # session-1 learner surface withholds the frame (both sessions credit an unprompted read)
+    assert state1.frames[LEAD].unprompted_breadth == set(), (
+        "the DF probe did not consume the unprompted read -- the §2d cost model is wrong"
+    )
+    # the learner surface still withholds the frame (Invariant 3 is state-independent)
     assert LEAD not in format_problem_menu(Proposal(candidates=select_next(state1, lib, cfg, NOW1)))
 
-    # --- ordering pin at the worst-case forming edge (+7d), derived from the REAL post-S1 state ---
+    # --- ordering at the worst-case forming edge (+7d), derived from the REAL post-S1 state.
+    # These pins SURVIVED the repair (verified by execution): the deploy tie at V=1.83 and the
+    # deterministic lead-first order are properties of forming-day arithmetic, not of the DF.
     now2 = NOW1 + timedelta(days=7)
     ranked = select_next(state1, lib, cfg, now2)
     top_spec, top_rcpt = ranked[0]
     assert top_spec.experience_id == "decision_under_stakes"
     assert top_rcpt.frame == LEAD and top_rcpt.drive == "deploy"
-    # S1 banks three forming frames the same day, so the two deploy candidates (lead ->
-    # decision_under_stakes, protect -> proof_before_promise) TIE on V (1.83) and the policy's
-    # deterministic order puts the LEAD deployment first; deploy dominates diagnose at rank 2.
     assert ranked[0][1].scores["V"] == ranked[1][1].scores["V"]
     assert ranked[0][1].scores["V"] > ranked[2][1].scores["V"]
-    assert LEAD not in format_problem_menu(
-        Proposal(candidates=ranked)
-    )  # session-2 surface withholds too
 
-    # --- session 2 at +7d on decision_under_stakes; lead present_reasoned (unprompted) -> strong;
-    # the DF (choose_the_failure_default_deliberately) absent (probed, closed).
+    # --- session 2 at +7d on decision_under_stakes, lead's one remaining non-DF home: the
+    # unprompted read lands on R2 -- and that is the ONLY unprompted ref lead can ever earn at
+    # cold start, so strong stays out of reach through the curated library.
     s2_model = _model_for(
         frames_present=[LEAD],
         traps=["assumed_the_happy_path", "scope_creep_to_please"],
@@ -178,13 +202,16 @@ def test_two_session_run_reaches_strong_through_the_real_path(tmp_path):
         decide=_steer("decision_under_stakes"),
         decide_core=lambda c: [],
     )
-    assert state2.frames[LEAD].strength is Strength.strong
-    assert state2.frames[LEAD].unprompted_breadth == {R1, R2}
-    # post-strong savings effect: due interval jumps to 30 days
+    assert state2.frames[LEAD].strength is Strength.forming, (
+        "two curated sessions minted strong -- the closure this test pins has reopened"
+    )
+    assert state2.frames[LEAD].breadth == {R1, R2}
+    assert state2.frames[LEAD].unprompted_breadth == {R2}
+    # and the savings effect does NOT fire: the due interval stays on the forming schedule
     fs = Store(db).load_state(now2).frames[LEAD]
     assert derive_due(
         fs.evidence_count, fs.unprompted_breadth, fs.last_seen
-    ) == fs.last_seen + timedelta(days=30)
+    ) != fs.last_seen + timedelta(days=30)
 
 
 def test_license_continuity_is_never_shadowed_by_continuity_lock_in():
@@ -261,3 +288,33 @@ def test_loop_guardian_embed_unprompted_on_continuity_lock_in():
     assert (
         "shipped_the_one_shot_term" in probed
     )  # the loop did run a probe — guardian is non-trivial
+
+
+def test_run_session_stamps_the_selection_with_the_library_it_saw(tmp_path):
+    """The content-version stamp, produced by the REAL path (L-9): run_session stamps every
+    selection row with the version of the open-ended library the proposal was computed over."""
+    db = tmp_path / "stamp.db"
+    store = build_store(db)
+    core = derive_core(aim())
+    s1_model = _model_for(
+        frames_present=[LEAD],
+        traps=["scope_creep_to_please", "erode_core_for_one_customer", "commit_without_a_tripwire"],
+        probed_responses={LEAD, "commit_under_the_deadline", "protect_the_core_lane"},
+    )
+    run_session(
+        store,
+        core,
+        s1_model,
+        NOW1,
+        regime=Regime.open_ended,
+        present=_present,
+        decide=_steer("license_continuity"),
+        decide_core=lambda c: [],
+    )
+    from elenchus.content_loader import library_version
+
+    expected = library_version([e for e in load_library() if e.regime is Regime.open_ended])
+    row = store._db.execute("SELECT content_version FROM selection_log").fetchone()
+    assert row["content_version"] == expected, (
+        "the selection row does not carry the version of the library it was computed over"
+    )

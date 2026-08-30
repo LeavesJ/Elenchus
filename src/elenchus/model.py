@@ -552,6 +552,40 @@ def _target_detail(rubric, kind: str, code: str) -> str:
     raise ModelError(f"unknown {kind} code: {code}")
 
 
+def _log_refusal(where: str, resp) -> None:
+    """Record what Anthropic's own safety classifier said, on every branch that sees a refusal.
+
+    This exists because the verdict was being thrown away. `anthropic.types.Message` carries
+    `stop_details` alongside `stop_reason` -- a policy category out of cyber / bio / frontier_llm /
+    reasoning_extraction / general_harms, plus an explanation -- and until this landed there were
+    ZERO references to it anywhere in `src/` or `tests/`. Ten branches read `stop_reason` and nine
+    of them discard everything else, so "has a real safety refusal ever been suppressed here?" had
+    no answer, and the 2026-08-29 beta readiness audit could not answer it either. The classifier
+    already runs on every call we pay for; this is the line that stops binning its output.
+
+    SERVER SIDE ONLY, per Invariant 10 and L-13. The category and the explanation never enter a
+    return value or a payload, only the log. `concierge_turn` still returns "" and `_require`
+    still raises; nothing here changes what a caller sees.
+
+    Scoped to an ACTUAL refusal (L-33). Two of the ten branches are compound -- `_require` and
+    `_parse_required` fire on `refusal OR parsed_output is None` -- so an unscoped log would
+    record refusals that never happened and poison the very count this exists to make countable.
+
+    Deliberately NOT a retry hook. Conditioning behaviour on the category would be a gate over a
+    distribution nobody has measured, which Invariant 7 forbids; measuring it is the whole point
+    and the measurement has not been taken yet.
+    """
+    if getattr(resp, "stop_reason", None) != "refusal":
+        return
+    details = getattr(resp, "stop_details", None)
+    _log.warning(
+        "model refusal in %s: category=%s explanation=%s",
+        where,
+        getattr(details, "category", None),
+        getattr(details, "explanation", None),
+    )
+
+
 def _require(resp):
     """Doctrine-critical calls never silently default: raise on refusal / empty output. Truncation
     gets its OWN message (L-17 third strike): adaptive thinking eating the budget must never
@@ -561,6 +595,7 @@ def _require(resp):
             "structured output truncated at max_tokens — raise this call's budget (L-17)"
         )
     if getattr(resp, "stop_reason", None) == "refusal" or resp.parsed_output is None:
+        _log_refusal("_require", resp)
         raise ModelError("model refused or returned no parsed output")
     return resp.parsed_output
 
@@ -684,6 +719,7 @@ class AnthropicModel:
                     "(L-17)"
                 ) from exc
         elif getattr(resp, "stop_reason", None) == "refusal" or resp.parsed_output is None:
+            _log_refusal("_parse_required", resp)
             resp = client.messages.parse(model=self._model, max_tokens=max_tokens, **kwargs)
         return _require(resp)  # the single retry is spent; both classes now fail LOUD
 
@@ -774,6 +810,7 @@ class AnthropicModel:
             **_PARAMS,
         )
         if getattr(resp, "stop_reason", None) == "refusal":
+            _log_refusal("generate_push", resp)
             raise ModelError("push generation refused")
         for block in resp.content:
             if getattr(block, "type", None) == "text":
@@ -1018,7 +1055,8 @@ class AnthropicModel:
             **_PARAMS,
         )
         if getattr(resp, "stop_reason", None) == "refusal":
-            return ""  # never block the loop; voice falls back to the push or a safe contract
+            _log_refusal("concierge_turn", resp)
+            return ""  # never block the loop; voice serves _PUSH_HELD (probe) or SAFE_CONTRACT
         for block in resp.content:
             if getattr(block, "type", None) == "text":
                 return block.text
@@ -1037,6 +1075,7 @@ class AnthropicModel:
             **_PARAMS,
         )
         if getattr(resp, "stop_reason", None) == "refusal":
+            _log_refusal("concierge_close", resp)
             return ""
         for block in resp.content:
             if getattr(block, "type", None) == "text":
@@ -1053,6 +1092,7 @@ class AnthropicModel:
             **_PARAMS,
         )
         if getattr(resp, "stop_reason", None) == "refusal":
+            _log_refusal("concierge_open", resp)
             return ""
         for block in resp.content:
             if getattr(block, "type", None) == "text":
@@ -1117,6 +1157,7 @@ class AnthropicModel:
             **_PARAMS,
         )
         if getattr(resp, "stop_reason", None) == "refusal":
+            _log_refusal("concierge_land", resp)
             return ""
         for block in resp.content:
             if getattr(block, "type", None) == "text":
@@ -1252,6 +1293,7 @@ class AnthropicModel:
             kwargs["system"] = injection
         resp = self._get_client().messages.create(**kwargs)
         refused = getattr(resp, "stop_reason", None) == "refusal"
+        _log_refusal("generate_output", resp)
         text = ""
         for block in resp.content:
             if getattr(block, "type", None) == "text":
@@ -1435,6 +1477,7 @@ class AnthropicModel:
             **_PARAMS,
         )
         if getattr(resp, "stop_reason", None) == "refusal":
+            _log_refusal("forge_scenario", resp)
             return ""  # the forge's gates treat an empty scenario as a failed generation
         for block in resp.content:
             if getattr(block, "type", None) == "text":
@@ -1508,6 +1551,7 @@ class AnthropicModel:
             **_PARAMS,
         )
         if getattr(resp, "stop_reason", None) == "refusal":
+            _log_refusal("concierge_sitting_close", resp)
             return ""
         for block in resp.content:
             if getattr(block, "type", None) == "text":

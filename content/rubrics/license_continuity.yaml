@@ -27,4 +27,6 @@ traps:
     trap_detail: Special-casing one account in a way that weakens the core promise.
   - trap_code: commit_without_a_tripwire
     trap_detail: Committing to a course without naming what would make you reverse it.
-decision_frame: commit_under_the_deadline
+# §2d repair (2026-08-30, founder-ratified 2026-08-29): moved from commit_under_the_deadline so
+# that frame keeps its unprompted channel here once the fourth territory carries it as DF.
+decision_frame: lead_with_what_you_refuse_to_do

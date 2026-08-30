@@ -96,11 +96,19 @@ TERRITORY_IDS = (
     "proof_before_promise",
 )
 
-# The pinned DF matrix (spec §2d). license_continuity's is pre-existing; the other four are the
-# arc floor, with the signal costs named in the spec (a DF frame loses reasoned_unprompted THERE;
-# irreversible_anchor's DF is therefore NOT embed — the spine frame keeps its unprompted channel).
+# The pinned DF matrix (spec §2d), with the signal costs named in the spec (a DF frame loses
+# reasoned_unprompted THERE; irreversible_anchor's DF is therefore NOT embed — the spine frame
+# keeps its unprompted channel).
+#
+# license_continuity moved commit_under_the_deadline -> lead_with_what_you_refuse_to_do on
+# 2026-08-30 (the §2d repair, founder-ratified 2026-08-29). The fourth territory carries
+# commit_under_the_deadline as ITS decision frame on veldra:berkeley_focus_allocation; with
+# license_continuity's DF also commit, the frame would be DF on BOTH its homes and lose its
+# unprompted channel entirely. Computed over the real library: exactly one violation, exactly
+# two valid assignments, and this pin is the minimal one. lead survives because it was DF on
+# neither of its two homes (license_continuity, decision_under_stakes); it is DF on one now.
 PINNED_DECISION_FRAMES = {
-    "license_continuity": "commit_under_the_deadline",
+    "license_continuity": "lead_with_what_you_refuse_to_do",
     "decision_under_stakes": "choose_the_failure_default_deliberately",
     "irreversible_anchor": "choose_the_failure_default_deliberately",
     "continuity_lock_in": "embed_credentials_as_a_list",
@@ -153,8 +161,9 @@ def test_territory_description_clears_the_code_teeth(eid):
 def test_df_matrix_is_pinned_and_the_rule_holds():
     """§2d: every rubric carries the PINNED decision_frame, the DF names a frame that exists in
     that rubric, and the rule holds — computed from content: no frame that lives on 2+ territories
-    is DF on all of them (a multi-home frame keeps an unprompted channel somewhere). A single-home
-    DF is forced by construction (commit_under_the_deadline has only one home) and is pinned above."""
+    is DF on all of them (a multi-home frame keeps an unprompted channel somewhere). Since the
+    §2d repair, commit_under_the_deadline is DF nowhere in the curated five; its DF home arrives
+    with the fourth territory (veldra:berkeley_focus_allocation)."""
     library = {e.experience_id: e for e in load_library()}
     assert set(PINNED_DECISION_FRAMES) == set(library)
     homes: dict[str, set[str]] = {}

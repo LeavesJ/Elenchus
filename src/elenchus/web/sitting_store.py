@@ -141,7 +141,8 @@ CREATE TABLE IF NOT EXISTS web_sitting (
   id TEXT PRIMARY KEY, status TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_web_sitting_live ON web_sitting(status) WHERE status='live';
 CREATE TABLE IF NOT EXISTS web_sitting_turn (
-  sitting_id TEXT NOT NULL, seq INTEGER NOT NULL, kind TEXT NOT NULL, payload_json TEXT NOT NULL);
+  sitting_id TEXT NOT NULL, seq INTEGER NOT NULL, kind TEXT NOT NULL, payload_json TEXT NOT NULL,
+  at TEXT);
 CREATE TABLE IF NOT EXISTS web_sitting_state (
   sitting_id TEXT PRIMARY KEY, record_json TEXT, next_pick_ref TEXT, next_pick_title TEXT,
   inflight_json TEXT, theme_json TEXT, territory_rank_json TEXT, landed_at TEXT);
@@ -164,7 +165,8 @@ CREATE TABLE IF NOT EXISTS web_domain_slot (
 );
 CREATE TABLE IF NOT EXISTS web_content_gap (
   situation TEXT NOT NULL, mapped_eid TEXT NOT NULL, confidence TEXT NOT NULL,
-  verdict TEXT NOT NULL, corrected INTEGER NOT NULL, at TEXT NOT NULL);
+  verdict TEXT NOT NULL, corrected INTEGER NOT NULL, at TEXT NOT NULL,
+  sitting_id TEXT);
 CREATE TABLE IF NOT EXISTS web_gate_rejection (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   sitting_id  TEXT NOT NULL,
@@ -193,6 +195,28 @@ class SittingStore:
                         "ALTER TABLE web_converged "
                         "ADD COLUMN experience_id TEXT NOT NULL DEFAULT ''"
                     )
+                except sqlite3.OperationalError:
+                    pass
+                # Same pattern: dbs created before per-turn time (retention instrument,
+                # 2026-08-29, T3 signed off) lack the column. `seq` already orders a transcript;
+                # `at` is what places it on a CLOCK, which is what a return curve needs and what
+                # web_sitting cannot supply -- _SITTING_MAX_IDLE (18h) RESUMES a returning learner
+                # into the SAME row, so the better retained they are the fewer rows they leave.
+                # Legacy turns stay NULL: like `outcome`, the information exists nowhere to
+                # backfill from. Visits are gap-clustered over the non-NULL stamps.
+                try:
+                    c.execute("ALTER TABLE web_sitting_turn ADD COLUMN at TEXT")
+                except sqlite3.OperationalError:
+                    pass
+                # Same pattern: dbs created before the gap knew whose sitting it came from
+                # (2026-08-29) lack the column. This is the one column in the beta instruments
+                # that cannot be backfilled from anything: twelve unattributed gap rows cannot
+                # distinguish twelve people each missing a territory from ONE person correcting
+                # twelve times, and those two readings prescribe opposite content. Nullable, and
+                # legacy rows stay NULL, because attributing an old row would be a guess -- the
+                # same stance `outcome` and legacy `at` take.
+                try:
+                    c.execute("ALTER TABLE web_content_gap ADD COLUMN sitting_id TEXT")
                 except sqlite3.OperationalError:
                     pass
                 # Same pattern: dbs created before the mapper rank persisted (triage fold,
@@ -313,11 +337,16 @@ class SittingStore:
             raise
         return sitting_id
 
-    def close_sitting(self, sitting_id: str) -> None:
+    def close_sitting(self, sitting_id: str, status: str = "closed") -> None:
+        """End a sitting. Two callers, two values: a converged close writes 'closed'; the S3
+        leave writes 'left', because a walked-out sitting and a converged one are opposite
+        findings and the beta's reader must be able to tell them apart. Rows are never touched
+        (Invariant 4); only the one status cell moves, and `ux_web_sitting_live` only constrains
+        'live', so neither value collides with it."""
         if self._inert:
             return
         with self._conn() as c:
-            c.execute("UPDATE web_sitting SET status='closed' WHERE id=?", (sitting_id,))
+            c.execute("UPDATE web_sitting SET status=? WHERE id=?", (status, sitting_id))
 
     # -- turns (the rendered transcript) -----------------------------------------------------
 
@@ -326,10 +355,10 @@ class SittingStore:
             return
         with self._conn() as c:
             c.execute(
-                "INSERT INTO web_sitting_turn (sitting_id, seq, kind, payload_json) "
-                "SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ? FROM web_sitting_turn "
+                "INSERT INTO web_sitting_turn (sitting_id, seq, kind, payload_json, at) "
+                "SELECT ?, COALESCE(MAX(seq), 0) + 1, ?, ?, ? FROM web_sitting_turn "
                 "WHERE sitting_id=?",
-                (sitting_id, kind, json.dumps(payload), sitting_id),
+                (sitting_id, kind, json.dumps(payload), now.isoformat(), sitting_id),
             )
             c.execute(
                 "UPDATE web_sitting SET updated_at=? WHERE id=?",
@@ -448,6 +477,7 @@ class SittingStore:
 
     def log_content_gap(
         self,
+        sitting_id: str,
         situation: str,
         mapped_eid: str,
         confidence: str,
@@ -462,14 +492,25 @@ class SittingStore:
         pipeline what the library is missing instead of leaving it to be inferred from dogfood
         memory. A miss here is a CONTENT gap, not a user failure.
 
-        Holds her own words, so it lives under the same privacy stance as web_world."""
+        `sitting_id` is REQUIRED, not defaulted: a row written without it can never be
+        attributed afterwards, so a caller that has no sitting must not be able to write one by
+        omission. Holds her own words, so it lives under the same privacy stance as web_world."""
         if self._inert:
             return
         with self._conn() as c:
             c.execute(
                 "INSERT INTO web_content_gap "
-                "(situation, mapped_eid, confidence, verdict, corrected, at) VALUES (?,?,?,?,?,?)",
-                (situation, mapped_eid, confidence, verdict, int(corrected), now.isoformat()),
+                "(situation, mapped_eid, confidence, verdict, corrected, at, sitting_id) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    situation,
+                    mapped_eid,
+                    confidence,
+                    verdict,
+                    int(corrected),
+                    now.isoformat(),
+                    sitting_id,
+                ),
             )
 
     def read_world(self, sitting_id: str) -> str | None:

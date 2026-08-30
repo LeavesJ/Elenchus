@@ -844,7 +844,9 @@ def test_restart_mid_first_segment_offers_fresh_menu(tmp_path, make_fake):
     tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
     assert tag == "resume"
     assert data["honesty"] == _HONESTY_LOST_FIRST  # cause-neutral; nothing landed (C7/C16)
-    assert data["mode"] == "engine" and data["end_visible"] is False
+    # end_visible went constant-True with S3 (2026-08-30): the leave made close() work in every
+    # state, so the control always shows; the flag stays on the wire pending its own retirement.
+    assert data["mode"] == "engine" and data["end_visible"] is True
     assert data["menu"] and data["menu"]["problems"]  # a fresh way forward
     assert "refs" not in data["menu"]  # L-13: the embedded menu is title-only
     assert "eids" not in data["menu"]  # L-13: the F1 territory keys stay server-side too
@@ -1107,7 +1109,7 @@ def test_reopen_seam_on_reentering_the_interrupted_door(tmp_path, make_fake):
 # ---- The living sitting (plan L4): worker front door, same-world continue, rebuild fidelity,
 # ---- bounded difficulty, sitting close (spec §2a/§2c/§2e/§2f/§2g) ---------------------------
 
-from elenchus.content_loader import load_territory_text  # noqa: E402
+from elenchus.content_loader import load_library, load_territory_text  # noqa: E402
 from elenchus.web import session_runner  # noqa: E402
 from elenchus.web import voice as _voice  # noqa: E402
 from elenchus.web.session_runner import (  # noqa: E402
@@ -2588,9 +2590,12 @@ def test_all_windowed_serves_informed_reserve_and_work_anyway_forges_least_recen
     db = str(tmp_path / "fd-window.db")
     store = SittingStore(db)
     wall = datetime.now(timezone.utc)
-    aged = ["irreversible_anchor", "license_continuity", "proof_before_promise", _T2]
-    for i, eid in enumerate(aged):  # oldest first: irreversible_anchor
-        store.log_converged("prior", f"gen:prior:{i}", wall - timedelta(hours=4 - i), eid)
+    # Every territory EXCEPT the one the scripted fake maps the situation to (_T1, a fixture
+    # fact) -- derived, so a new territory does not silently leave one door unwindowed and turn
+    # the asserted "reserve" into a "say" (territory-cost audit 2026-08-30).
+    aged = sorted(e.experience_id for e in load_library() if e.experience_id != _T1)
+    for i, eid in enumerate(aged):  # oldest first: aged[0]
+        store.log_converged("prior", f"gen:prior:{i}", wall - timedelta(hours=len(aged) - i), eid)
 
     reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
     _open_world(reg, "s1")
@@ -2606,7 +2611,7 @@ def test_all_windowed_serves_informed_reserve_and_work_anyway_forges_least_recen
     assert tag == "say" and data["text"] == _SCENARIO
     sit = store.live_sitting()["id"]
     row = store.read_generated_problem(f"gen:{sit}:2")
-    assert row is not None and row["experience_id"] == "irreversible_anchor"  # least recent
+    assert row is not None and row["experience_id"] == aged[0]  # least recent
 
 
 def test_fallback_rides_the_bridge_and_continue_retries_the_forge(tmp_path, make_fake):

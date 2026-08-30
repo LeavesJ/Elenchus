@@ -620,6 +620,7 @@ def test_content_gap_is_recorded_with_her_words(tmp_path):
     db = tmp_path / "g.db"
     s = SittingStore(str(db))
     s.log_content_gap(
+        sitting_id="20260726T000000000000-abc123",
         situation="how do I find my first client",
         mapped_eid="proof_before_promise",
         confidence="low",
@@ -629,10 +630,20 @@ def test_content_gap_is_recorded_with_her_words(tmp_path):
     )
     c = sqlite3.connect(str(db))
     rows = c.execute(
-        "SELECT situation, mapped_eid, confidence, verdict, corrected FROM web_content_gap"
+        "SELECT situation, mapped_eid, confidence, verdict, corrected, sitting_id "
+        "FROM web_content_gap"
     ).fetchall()
     c.close()
-    assert rows == [("how do I find my first client", "proof_before_promise", "low", "topic", 1)]
+    assert rows == [
+        (
+            "how do I find my first client",
+            "proof_before_promise",
+            "low",
+            "topic",
+            1,
+            "20260726T000000000000-abc123",
+        )
+    ]
 
 
 def test_content_gap_is_inert_on_a_memory_store():
@@ -642,6 +653,7 @@ def test_content_gap_is_inert_on_a_memory_store():
     from elenchus.web.sitting_store import SittingStore
 
     SittingStore(":memory:").log_content_gap(
+        sitting_id="20260726T000000000000-abc123",
         situation="x",
         mapped_eid="y",
         confidence="low",

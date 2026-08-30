@@ -205,9 +205,13 @@ def test_a_rubric_without_a_decision_frame_loads_with_none(tmp_path):
     assert content_loader.load_rubric("y", root=tmp_path).decision_frame is None
 
 
-def test_license_continuity_declares_the_commitment_decision_frame():
+def test_license_continuity_declares_the_refusal_decision_frame():
+    """The §2d repair (2026-08-30): the DF moved to lead_with_what_you_refuse_to_do so that
+    commit_under_the_deadline keeps an unprompted channel here once its own territory (the
+    fourth, on veldra:berkeley_focus_allocation) carries it as DF. The commit frame and its
+    trap stay on the rubric -- only the forced-first-probe slot moved."""
     rub = content_loader.load_rubric("license_continuity")
-    assert rub.decision_frame == "commit_under_the_deadline"
+    assert rub.decision_frame == "lead_with_what_you_refuse_to_do"
     assert any(f.frame_code == "commit_under_the_deadline" for f in rub.frames)
     assert any(t.trap_code == "commit_without_a_tripwire" for t in rub.traps)
 
@@ -275,3 +279,24 @@ def test_load_lift_candidates_parses_example(tmp_path):
     assert len(cands) == 1
     assert cands[0].frame_code == "build_more_to_own_less"
     assert cands[0].provenance.pointer == "EXECLOG EX-028"
+
+
+def test_library_version_is_deterministic_and_order_blind():
+    """The stamp is an identity of WHAT the selection was computed over, so it must not move when
+    nothing did: same experiences in any order -> same version. And it must move when the content
+    does, at the grain the policy sees -- a decision_frame change is a different library even
+    though no file was added."""
+    from elenchus.content_loader import library_version, load_library
+
+    lib = [e for e in load_library()]
+    v1 = library_version(lib)
+    v2 = library_version(list(reversed(lib)))
+    assert v1 == v2, "reordering the same library changed its version"
+    assert isinstance(v1, str) and len(v1) >= 12
+
+    changed = [
+        lib[0].model_copy(
+            update={"rubric": lib[0].rubric.model_copy(update={"decision_frame": None})}
+        )
+    ] + lib[1:]
+    assert library_version(changed) != v1, "a decision_frame change did not move the version"

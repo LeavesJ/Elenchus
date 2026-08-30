@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS queue (
 CREATE TABLE IF NOT EXISTS selection_log (
   created_at TEXT NOT NULL, frame TEXT NOT NULL, problem TEXT NOT NULL, experience_id TEXT NOT NULL,
   drive TEXT NOT NULL, scores_json TEXT NOT NULL, runner_up_drive TEXT, margin REAL NOT NULL,
-  content_gaps_json TEXT NOT NULL);
+  content_gaps_json TEXT NOT NULL, content_version TEXT);
 CREATE TABLE IF NOT EXISTS corpus (
   ledger_ref TEXT PRIMARY KEY, domain TEXT NOT NULL, why_owned TEXT NOT NULL,
   unlabeled TEXT NOT NULL, provenance TEXT NOT NULL, corpus_pointers_json TEXT NOT NULL,
@@ -73,7 +73,15 @@ class Store:
             self._db.execute("ALTER TABLE queue ADD COLUMN experience_id TEXT")
         self._db.commit()
         scols = {r["name"] for r in self._db.execute("PRAGMA table_info(selection_log)")}
-        for col in ("outcome", "chosen_frame", "chosen_problem", "chosen_experience_id"):
+        # content_version (2026-08-30): which library the selection was computed over. Legacy
+        # rows stay NULL -- the library they saw is not recoverable.
+        for col in (
+            "outcome",
+            "chosen_frame",
+            "chosen_problem",
+            "chosen_experience_id",
+            "content_version",
+        ):
             if col not in scols:
                 self._db.execute(f"ALTER TABLE selection_log ADD COLUMN {col} TEXT")
         self._db.commit()
@@ -245,13 +253,17 @@ class Store:
             experience_id=row["experience_id"],
         )
 
-    def log_decision(self, selection: Selection) -> None:
+    def log_decision(self, selection: Selection, content_version: str) -> None:
+        """`content_version` is REQUIRED, not defaulted: an unstamped row can never be attributed
+        to the library it was computed over afterwards (the same stance as
+        web_content_gap.sitting_id). Callers hold the library; this store must not read
+        content/."""
         p = selection.proposed_receipt
         c = selection.chosen_receipt
         self._db.execute(
             "INSERT INTO selection_log(created_at,frame,problem,experience_id,drive,scores_json,"
             "runner_up_drive,margin,content_gaps_json,outcome,chosen_frame,chosen_problem,"
-            "chosen_experience_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "chosen_experience_id,content_version) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 p.created_at.isoformat(),
                 p.frame,
@@ -266,6 +278,7 @@ class Store:
                 c.frame,
                 c.problem,
                 c.experience_id,
+                content_version,
             ),
         )
         self._db.commit()
