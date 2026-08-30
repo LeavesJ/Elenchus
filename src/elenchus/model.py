@@ -1056,7 +1056,7 @@ class AnthropicModel:
         )
         if getattr(resp, "stop_reason", None) == "refusal":
             _log_refusal("concierge_turn", resp)
-            return ""  # never block the loop; voice falls back to the push or a safe contract
+            return ""  # never block the loop; voice serves _PUSH_HELD (probe) or SAFE_CONTRACT
         for block in resp.content:
             if getattr(block, "type", None) == "text":
                 return block.text

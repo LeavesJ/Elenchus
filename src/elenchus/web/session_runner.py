@@ -469,6 +469,17 @@ _STATIC_SITTING_CLOSE = (
     "You stepped away mid-problem — that one stays unbuilt. Here's the village you built."
 )
 
+# S3 (2026-08-30): the leave. Before a convergence exists there is no village and no record to
+# author a close from, and this path used to be an ERROR -- the only working exit was closing the
+# tab, and the End control did not render until a convergence existed, so 100% of first sittings
+# had no visible stop. The exit is the honest substitute for the care lane the product must not
+# claim: full recall for anyone who wants out. Factual register, no validation of the choice
+# (Invariant 2's spirit), no village claim -- there is nothing to show yet.
+_STATIC_LEAVE = (
+    "Left there. Nothing more gets asked; your room keeps what you wrote, "
+    "and it's here when you come back."
+)
+
 # Durable sittings: the static seam line on a continued segment (signage, not warmth — muted
 # register, not a Vera bubble; the sitting-aware AUTHORED seam is founder-gated, spec §1).
 _SEAM_TEXT = "Same sitting — next door."
@@ -1655,7 +1666,11 @@ class SessionRegistry:
                     }
 
         rec = self._last_record.get(session_id)
-        end_visible = rec is not None
+        # S3: constant since the leave landed -- close() now works in every state (converged ->
+        # authored close, otherwise -> the static leave), so the control always shows. Kept on
+        # the wire rather than deleted because retiring a payload key the shell reads is its own
+        # change with its own review, and an overnight session does not take it silently.
+        end_visible = True
         next_title = ""
         next_desc = ""
         next_kind = "pressure"
@@ -2666,7 +2681,12 @@ class SessionRegistry:
         if rec is None:
             if self._ch.get(session_id) is None:
                 return ("nudge", {"message": _STALE_NUDGE})  # a previous process's tab
-            return ("error", {"message": "session has not converged"})
+            # S3: nothing has converged, and that is not an error -- it is a person leaving.
+            # Status 'left', not 'closed': a walked-out sitting and a converged one are opposite
+            # findings. Rows retained (Invariant 4). No village keys: nothing landed, and an
+            # authored close over nothing would be an unscreened invention.
+            self._end_sitting(session_id, status="left")
+            return ("close", {"close": _STATIC_LEAVE})
         ch = self._ch.get(session_id)
         # The village payload (living sitting §2f, L5): the frozen terrain + its houses — both
         # composed at the SAME landing (_on_done), so they can never disagree at the close.
@@ -3048,12 +3068,14 @@ class SessionRegistry:
             exps.append(exp)
         return exps
 
-    def _end_sitting(self, session_id: str) -> None:
-        """The sitting is over: mark it closed (rows retained, L-3) and clear the per-sid state
-        via the shared `_reset_session_state` seam (rationale lives there — C1/C14/C18)."""
+    def _end_sitting(self, session_id: str, status: str = "closed") -> None:
+        """The sitting is over: mark it ended (rows retained, L-3) and clear the per-sid state
+        via the shared `_reset_session_state` seam (rationale lives there — C1/C14/C18).
+        `status` carries the S3 distinction through: 'closed' from a converged close and the
+        idle-abandon path, 'left' from the leave."""
         sit = self._sitting_id.get(session_id)
         if sit is not None:
-            self._store.close_sitting(sit)
+            self._store.close_sitting(sit, status=status)
         self._reset_session_state(session_id)
 
     def _reset_session_state(self, session_id: str) -> None:

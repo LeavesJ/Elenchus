@@ -844,7 +844,9 @@ def test_restart_mid_first_segment_offers_fresh_menu(tmp_path, make_fake):
     tag, data = reg2.resume_or_start("s1", now=datetime.now(timezone.utc))
     assert tag == "resume"
     assert data["honesty"] == _HONESTY_LOST_FIRST  # cause-neutral; nothing landed (C7/C16)
-    assert data["mode"] == "engine" and data["end_visible"] is False
+    # end_visible went constant-True with S3 (2026-08-30): the leave made close() work in every
+    # state, so the control always shows; the flag stays on the wire pending its own retirement.
+    assert data["mode"] == "engine" and data["end_visible"] is True
     assert data["menu"] and data["menu"]["problems"]  # a fresh way forward
     assert "refs" not in data["menu"]  # L-13: the embedded menu is title-only
     assert "eids" not in data["menu"]  # L-13: the F1 territory keys stay server-side too

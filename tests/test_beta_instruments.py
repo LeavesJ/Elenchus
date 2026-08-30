@@ -487,3 +487,109 @@ def test_every_learner_turn_write_is_behind_the_guard():
     assert not unguarded, (
         f"these learner-turn writes are not behind the single-flight guard: {unguarded}"
     )
+
+
+# ---- safety floor S3: a working exit (2026-08-30) ----------------------------------------------
+
+
+def _leave_kit(tmp_path, make_fake, name):
+    from conftest import make_world_model
+
+    db = str(tmp_path / name)
+    reg = SessionRegistry(db, model_factory=make_world_model)
+    return db, reg
+
+
+def test_close_at_the_front_door_is_an_exit_not_an_error(tmp_path, make_fake):
+    """Verified over HTTP on 2026-08-29: /close returned {'kind':'error','message':'session has
+    not converged'} at the front door, after choosing a door, and after a real turn. The only
+    working exit was closing the tab, and the End control did not render until a convergence
+    existed -- so 100% of first sittings had no visible stop control. The exit is the honest
+    substitute for the care lane the product must not claim: full recall for anyone who wants
+    out, no distribution required.
+    """
+    db, reg = _leave_kit(tmp_path, make_fake, "leave-frontdoor.db")
+    reg.resume_or_start("single")
+
+    tag, data = reg.close("single")
+
+    assert tag == "close", f"the front-door exit still errors: {(tag, data)}"
+    assert data["close"], "the leave serves no text"
+    live = SittingStore(db).live_sitting()
+    assert live is None, "the sitting is still live after she left"
+
+
+def test_leaving_writes_left_not_closed_and_keeps_every_turn(tmp_path, make_fake):
+    """Invariant 4 half: nothing demoted, nothing deleted -- her rows survive the exit. And the
+    status is 'left', not 'closed', because a walked-out sitting and a converged one must be
+    distinguishable in the data the beta reads: a cohort that leaves at the front door and a
+    cohort that converges are opposite findings."""
+    db, reg = _leave_kit(tmp_path, make_fake, "leave-status.db")
+    reg.resume_or_start("single")
+    reg.step("single", "the decision I am actually facing")  # a real turn, mid-press
+
+    tag, _ = reg.close("single")
+    assert tag == "close"
+
+    rows = _rows(db, "SELECT status FROM web_sitting")
+    assert [r["status"] for r in rows] == ["left"], (
+        f"expected the walked-out status, got {[r['status'] for r in rows]}"
+    )
+    turns = _rows(db, "SELECT kind FROM web_sitting_turn")
+    assert any(t["kind"] == "you" for t in turns), "her turns were not retained through the exit"
+
+
+def test_a_converged_close_still_writes_closed(tmp_path, make_fake):
+    """The two exits stay distinguishable from the other side too."""
+    from conftest import make_world_model
+
+    reg2 = SessionRegistry(str(tmp_path / "leave-converged2.db"), model_factory=make_world_model)
+    reg2.start("s2", now=_T0)
+    idx = reg2.menu_index("s2", "veldra:embedded_anchor_lock_in")  # the anchor ref other tests use
+    reg2.step("s2", idx)
+    for _ in range(8):
+        tag, data = reg2.step("s2", "I'd hold the launch and say why, in writing.")
+        if tag == "done":
+            break
+    assert tag == "done", f"the scripted door never landed: {(tag, data)}"
+    tag, _ = reg2.close("s2")
+    assert tag == "close"
+    rows = _rows(str(tmp_path / "leave-converged2.db"), "SELECT status FROM web_sitting")
+    assert [r["status"] for r in rows] == ["closed"]
+
+
+def test_after_leaving_the_next_visit_is_a_fresh_front_door(tmp_path, make_fake):
+    """'left' must not resume: she ended it. The next visit starts clean, and her old rows stay
+    in the file untouched."""
+    db, reg = _leave_kit(tmp_path, make_fake, "leave-return.db")
+    reg.resume_or_start("single")
+    reg.step("single", "something I was working through")
+    reg.close("single")
+
+    reg2 = SessionRegistry(db, model_factory=reg._model_factory)
+    tag, data = reg2.resume_or_start("single")
+
+    assert tag == "say" and data.get("frontdoor"), (
+        f"a left sitting resumed instead of starting fresh: {(tag, sorted(data))}"
+    )
+    sittings = _rows(db, "SELECT status FROM web_sitting ORDER BY id")
+    assert [r["status"] for r in sittings] == ["left", "live"]
+
+
+def test_a_stale_tab_close_is_still_a_nudge(tmp_path, make_fake):
+    """The refresh escape hatch stays intact: a previous process's tab gets the nudge, never a
+    leave it did not ask this process for."""
+    db, reg = _leave_kit(tmp_path, make_fake, "leave-stale.db")
+    tag, data = reg.close("single")
+    assert tag == "nudge", (tag, data)
+
+
+def test_the_end_control_renders_from_the_first_screen():
+    """The audit's finding: end_visible lived only in the resume payload and the button did not
+    render until a convergence existed. The exit works everywhere now, so it shows everywhere:
+    the front door renders it, and the resume flag rides as a constant the client still reads."""
+    import pathlib
+
+    html = pathlib.Path("src/elenchus/web/static/index.html").read_text()
+    frontdoor = html[html.index("function renderFrontdoor") : html.index("function renderReserve")]
+    assert "showEnd(true)" in frontdoor, "the front door never shows the End control"

@@ -337,11 +337,16 @@ class SittingStore:
             raise
         return sitting_id
 
-    def close_sitting(self, sitting_id: str) -> None:
+    def close_sitting(self, sitting_id: str, status: str = "closed") -> None:
+        """End a sitting. Two callers, two values: a converged close writes 'closed'; the S3
+        leave writes 'left', because a walked-out sitting and a converged one are opposite
+        findings and the beta's reader must be able to tell them apart. Rows are never touched
+        (Invariant 4); only the one status cell moves, and `ux_web_sitting_live` only constrains
+        'live', so neither value collides with it."""
         if self._inert:
             return
         with self._conn() as c:
-            c.execute("UPDATE web_sitting SET status='closed' WHERE id=?", (sitting_id,))
+            c.execute("UPDATE web_sitting SET status=? WHERE id=?", (status, sitting_id))
 
     # -- turns (the rendered transcript) -----------------------------------------------------
 
