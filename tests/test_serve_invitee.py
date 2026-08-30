@@ -73,7 +73,7 @@ def test_the_launcher_boots_an_isolated_instance_and_retains_stderr(tmp_path):
             "--port",
             str(port),
         ],
-        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin"},
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin", "ANTHROPIC_API_KEY": "sk-test-fake"},
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -126,6 +126,7 @@ def test_named_mode_without_a_login_fails_loudly_with_the_command(tmp_path):
         env={
             "PYTHONPATH": str(SRC),
             "PATH": "/usr/bin:/bin",
+            "ANTHROPIC_API_KEY": "sk-test-fake",  # the key refusal fires FIRST; this test is the cert one
             "TUNNEL_ORIGIN_CERT": str(tmp_path / "nope" / "cert.pem"),
         },
         capture_output=True,
@@ -173,6 +174,7 @@ def test_named_mode_creates_routes_and_runs_against_the_named_tunnel(tmp_path):
         env={
             "PYTHONPATH": str(SRC),
             "PATH": f"{bindir}:/usr/bin:/bin",
+            "ANTHROPIC_API_KEY": "sk-test-fake",
             "TUNNEL_ORIGIN_CERT": str(cert),
         },
         stdout=subprocess.PIPE,
@@ -197,3 +199,26 @@ def test_named_mode_creates_routes_and_runs_against_the_named_tunnel(tmp_path):
     finally:
         proc.terminate()
         proc.wait(timeout=10)
+
+
+def test_a_keyless_invitee_launch_warns_before_it_serves_broken_doors(tmp_path, capsys):
+    """L-18, paid for again on 2026-08-30: the origin was launched from a worktree whose root
+    had no .env, the zero-token front door health-checked green, and every DOOR died on the
+    first click -- from the founder's own phone. The launcher cannot know whether __main__'s
+    dotenv load will find a key at ITS root, but it can check the two places one could come
+    from (the environment it passes, and <script repo root>/.env) and shout when both are
+    empty, at launch time instead of first-click time."""
+    from serve_invitee import missing_key_warning
+
+    # neither source has a key -> the warning names both places
+    msg = missing_key_warning({"PATH": "/usr/bin"}, repo_root=tmp_path)
+    assert msg is not None
+    assert "ANTHROPIC_API_KEY" in msg and ".env" in msg
+    assert "front door" in msg.lower(), "the warning must explain WHY health checks will lie"
+
+    # key in the environment -> quiet
+    assert missing_key_warning({"ANTHROPIC_API_KEY": "sk-x"}, repo_root=tmp_path) is None
+
+    # key only in the repo root's .env -> quiet (that is where __main__ loads from)
+    (tmp_path / ".env").write_text("ANTHROPIC_API_KEY=sk-x\n")
+    assert missing_key_warning({"PATH": "/usr/bin"}, repo_root=tmp_path) is None
