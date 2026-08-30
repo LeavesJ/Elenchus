@@ -202,29 +202,19 @@ def _slow_factory(inner_factory, delay: float):
     return lambda: _Slow(inner_factory(), delay)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "KNOWN, UNFIXED: no single-flight guard. Recorded rather than fixed because the fix is "
-        "T2 (it adds learner-facing rejection copy) and wants an independent reviewer, and "
-        "because nothing can hit it yet -- zero sittings since 2026-07-30, beta no earlier than "
-        "2026-09-05. Scheduled Mon 2026-09-01, reviewed Tue. strict=True: the day someone lands "
-        "the guard this test FAILS as an unexpected pass and forces this marker off."
-    ),
-)
 def test_two_overlapping_says_never_stack_two_learner_turns(tmp_path, make_fake):
     """The splice, reproduced with ONE person, ONE process, ONE database: two overlapping `/say`
     calls produce two consecutive `you` rows with no push between, and the sitting then CONVERGES
     on the splice -- writing web_converged, frames and ledger rows off corrupted input.
 
-    XFAIL, NOT SKIP, NOT FIXED. The transcript really does come back
-    `['vera', 'you', 'you', 'vera', 'vera']`, deterministically. This marker records a live defect
-    in the suite's own vocabulary; it does not repair it, and the gate going green does not mean
-    the product is safe to put a second concurrent request in front of.
+    Was `xfail(strict=True)` from 2026-08-29 until the guard landed 2026-08-30; the transcript
+    really did come back `['vera', 'you', 'you', 'vera', 'vera']`, deterministically. The marker
+    came off in the same commit as the fix, which is what strict=True is for.
 
     `_stepping` (session_runner.py:717) is a COUNTER by design, for the drain/reap guard; its own
-    comment says overlapping requests must not unmark each other. So single-flight is NEW work,
-    not a broken guard, and the fix is additive.
+    comment says overlapping requests must not unmark each other, and two readers do pure
+    membership tests on it. So single-flight is NEW work over its own structure, not a repair of
+    that one, and the fix is additive.
 
     Per-invitee isolation does not reach this. It is per-device: a double-click on a slow response
     is enough. The guard must span `append_turn` (:2048) as well as the put/get pair, or the
@@ -349,3 +339,151 @@ def test_gap_rows_written_before_the_column_keep_their_place(tmp_path):
     assert len(rows) == 1, "the pre-existing gap row did not survive the migration"
     assert rows[0]["situation"] == "a situation nobody could serve"
     assert rows[0]["sitting_id"] is None, "a legacy row must not be attributed to a guess"
+
+
+def test_the_refused_say_says_so_and_leaves_no_trace(tmp_path, make_fake):
+    """Rejecting is only half of it. The learner's second message must NOT reach the transcript,
+    and she must be TOLD it did not, or she watches her own words vanish and assumes they landed.
+
+    The guard therefore sits ABOVE `append_turn` (session_runner.py:2049), not around the
+    put/get pair. A guard around the channel alone still writes the doubled `you` row, which is
+    the row the measurement is made of.
+    """
+    import threading
+
+    db = tmp_path / "refused.db"
+    reg = SessionRegistry(str(db), model_factory=_slow_factory(make_fake, 0.25))
+    reg.resume_or_start("single")
+
+    first, second = "the first thing I typed", "the second, sent far too fast"
+    out: dict[str, tuple] = {}
+
+    def say(name: str, text: str) -> None:
+        out[name] = reg.step("single", text)
+
+    a = threading.Thread(target=say, args=("a", first))
+    a.start()
+    deadline = time.monotonic() + 15
+    while reg._stepping.get("single", 0) < 1 and time.monotonic() < deadline:
+        time.sleep(0.001)
+    assert reg._stepping.get("single", 0) >= 1, "thread A never registered as in flight"
+    b = threading.Thread(target=say, args=("b", second))
+    b.start()
+    a.join(timeout=60)
+    b.join(timeout=60)
+
+    assert out["b"][0] == "nudge", f"the overlapping request was not refused: {out['b']}"
+    assert out["b"][1]["message"], "refused with an empty message"
+
+    store = SittingStore(str(db))
+    live = store.live_sitting()
+    assert live is not None
+    said = [t["payload"].get("text") for t in store.turns(live["id"]) if t["kind"] == "you"]
+    assert first in said, "the request that DID get the turn lost its text"
+    assert second not in said, (
+        f"the refused text reached the transcript anyway: {said}; the guard is below append_turn"
+    )
+
+
+def test_a_second_thread_is_refused_but_the_same_thread_may_re_enter(tmp_path, make_fake):
+    """The scope question, unit-level. `choose()` calls `step()` (session_runner.py:2124) and
+    both write learner turns, so a guard that refuses on identity alone would make every door
+    click refuse ITSELF. Re-entrancy is per THREAD, and it has to nest, because the outer claim
+    must survive the inner release."""
+    import threading
+
+    reg = SessionRegistry(str(tmp_path / "claim.db"), model_factory=make_fake)
+
+    assert reg._claim_turn("single") is True
+    assert reg._claim_turn("single") is True, "the owning thread must be able to re-enter"
+
+    refused: list[bool] = []
+    other = threading.Thread(target=lambda: refused.append(reg._claim_turn("single")))
+    other.start()
+    other.join(timeout=10)
+    assert refused == [False], "a second thread got in while the first held the turn"
+
+    reg._release_turn("single")  # inner
+    still_held: list[bool] = []
+    t2 = threading.Thread(target=lambda: still_held.append(reg._claim_turn("single")))
+    t2.start()
+    t2.join(timeout=10)
+    assert still_held == [False], "the inner release dropped the OUTER claim"
+
+    reg._release_turn("single")  # outer
+    freed: list[bool] = []
+    t3 = threading.Thread(target=lambda: freed.append(reg._claim_turn("single")))
+    t3.start()
+    t3.join(timeout=10)
+    assert freed == [True], "the turn was never released"
+
+
+def test_a_refresh_during_an_in_flight_turn_still_resumes(tmp_path, make_fake):
+    """The guard must NOT cover the page load. `resume_or_start` is what a refresh calls, and the
+    stale-tab rule (spec 2c) makes refresh the documented way out of every wedged state -- the
+    two other nudges in this file both say "refresh to pick up where you left off". A guard that
+    refused a refresh while a slow turn was in flight would break the product's own escape hatch
+    at exactly the moment a learner reaches for it."""
+    import threading
+
+    db = tmp_path / "refresh.db"
+    reg = SessionRegistry(str(db), model_factory=_slow_factory(make_fake, 0.25))
+    reg.resume_or_start("single")
+
+    def say() -> None:
+        reg.step("single", "something slow")
+
+    a = threading.Thread(target=say)
+    a.start()
+    deadline = time.monotonic() + 15
+    while reg._stepping.get("single", 0) < 1 and time.monotonic() < deadline:
+        time.sleep(0.001)
+    assert reg._stepping.get("single", 0) >= 1
+
+    tag, _ = reg.resume_or_start("single")
+    a.join(timeout=60)
+
+    assert tag != "nudge", "a refresh mid-turn was refused; the guard is scoped too wide"
+
+
+def test_every_learner_turn_write_is_behind_the_guard():
+    """The claim is "two overlapping requests never stack two learner turns", so the guard has to
+    cover EVERY method that writes one, not the one a concurrency test happened to reach (L-33).
+
+    Three sites write kind `you`: `step`, `choose` and `converse`. `converse` never touches the
+    worker channel, which is exactly why a guard reasoned about as "protect the channel" would
+    miss it and leave the claim false.
+
+    `continue_session` is deliberately NOT here. It writes only `muted` turns and already holds
+    its own atomic check-and-set on `rec["continued"]` (session_runner.py:2163-2169); a second
+    guard over it would replace a tested error message with a nudge and buy no new safety.
+    """
+    import pathlib
+    import re
+
+    from elenchus.web import session_runner as sr
+
+    lines = pathlib.Path(sr.__file__).read_text().splitlines()
+    # Anchored at each call's OWN opening paren: a `muted` write on the line above a `you` write
+    # (session_runner.py:2110/2111) must not be counted, and a multi-line call must still be.
+    writes = []
+    for i, line in enumerate(lines):
+        if "append_turn(" not in line:
+            continue
+        chunk = "\n".join(lines[i : i + 4])
+        call = chunk[chunk.index("append_turn(") :]
+        if re.match(r'append_turn\(\s*[^,]+,\s*"you"', call, re.S):
+            writes.append(i)
+    assert len(writes) == 3, (
+        f"expected three learner-turn writes, found {len(writes)} at {[i + 1 for i in writes]}; "
+        "a new one was added and the guard's scope needs rechecking"
+    )
+
+    unguarded = []
+    for i in writes:
+        start = max(j for j, line in enumerate(lines[: i + 1]) if line.startswith("    def "))
+        if "_claim_turn(" not in "\n".join(lines[start:i]):
+            unguarded.append((lines[start].strip().split("(")[0], i + 1))
+    assert not unguarded, (
+        f"these learner-turn writes are not behind the single-flight guard: {unguarded}"
+    )

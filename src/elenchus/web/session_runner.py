@@ -501,6 +501,11 @@ _STATIC_RESTART_CLOSE = "That last door closed unfinished — here's the village
 # Stale-tab soft fail (a request against a channel this process never had).
 _STALE_NUDGE = "This room went stale — refresh to pick up where you left off."
 
+# Single-flight (2026-08-30). Says what happened and, like _OUTCOME_REFUSED_NUDGE, says plainly
+# that nothing was taken -- a learner who watches her own words vanish assumes they landed. No
+# scolding: a double-click on a slow answer is the whole scenario, and it is not a mistake.
+_IN_FLIGHT_NUDGE = "Still working on the one before this — nothing was sent."
+
 # An errored segment's dead channel: every reply must point at the honest way forward (refresh →
 # durable-sitting resume: transcript + honesty line + working doors), never a bare dead end.
 _DOOR_FAILED_NUDGE = "That door hit an error — refresh to pick up where you left off."
@@ -715,6 +720,24 @@ class SessionRegistry:
         # sids with a request blocked on from_worker (drain/reap guard) — a COUNTER, not a set:
         # overlapping requests for one sid must not unmark each other (batch-review C4).
         self._stepping: dict[str, int] = {}
+        # The turn a session is currently taking: sid -> (owning thread ident, re-entry depth).
+        #
+        # DISTINCT from `_stepping` above, and deliberately not folded into it. That one is a
+        # COUNTER whose two readers (`_drain`, `_reset_session_state`) membership-test it to
+        # decide whether draining or reaping is safe, and whose own comment requires overlapping
+        # requests not to unmark each other. It exists to let concurrency through safely. This one
+        # exists to REJECT it, so making one structure do both would mean the drain guard and the
+        # splice guard could never disagree -- and they must.
+        #
+        # Keyed by owning THREAD because `choose` calls `step` (:2124) and both write a learner
+        # turn: a guard that refused on session identity alone would make every door click refuse
+        # itself. Depth, because the outer claim has to survive the inner release.
+        #
+        # Held only across the brief check-and-set under `_lock`, never across the channel get.
+        # The WORKER thread takes `_lock` too (:874, :1040) while a request thread is parked in
+        # `from_worker.get()`, so holding it across that get deadlocks the process, and an RLock
+        # would not help -- re-entrancy is per thread and the worker is a different thread.
+        self._in_flight: dict[str, tuple[int, int]] = {}
         self._menu_nonce: dict[str, int] = {}  # stale-menu guard: choose echoes, mismatch re-serves
         # A restart-lost segment's identity (server-side only): drives the reopen seam and the
         # interrupted-adjacent converse union screen (spec §2c); cleared at the next landing.
@@ -1411,6 +1434,42 @@ class SessionRegistry:
             self._sitting_id[session_id] = sit
             return sit
 
+    def _claim_turn(self, session_id: str) -> bool:
+        """Take the session's turn, or report that another thread already holds it.
+
+        True means this thread now owns the turn and MUST release it. False means a request for
+        this session is already in flight and this one has to be refused -- rejected, never
+        queued: queueing a second learner turn behind the first is the splice with a delay on it.
+
+        Re-entrant for the owning thread, which is not a nicety. `choose` (:2069) calls `step`
+        (:2124) on the same thread and both write a learner turn.
+        """
+        me = threading.get_ident()
+        with self._lock:
+            held = self._in_flight.get(session_id)
+            if held is None:
+                self._in_flight[session_id] = (me, 1)
+                return True
+            owner, depth = held
+            if owner != me:
+                return False
+            self._in_flight[session_id] = (owner, depth + 1)
+            return True
+
+    def _release_turn(self, session_id: str) -> None:
+        """Give back one level of the claim. A thread that does not own it is a no-op, so a
+        stray release can never hand another thread's turn away."""
+        me = threading.get_ident()
+        with self._lock:
+            held = self._in_flight.get(session_id)
+            if held is None or held[0] != me:
+                return
+            owner, depth = held
+            if depth <= 1:
+                self._in_flight.pop(session_id, None)
+            else:
+                self._in_flight[session_id] = (owner, depth - 1)
+
     def _step_begin(self, session_id: str) -> None:
         with self._lock:
             self._stepping[session_id] = self._stepping.get(session_id, 0) + 1
@@ -2042,17 +2101,28 @@ class SessionRegistry:
                 # Durable sittings make refresh an honest resume — say THAT.
                 return ("nudge", {"message": _DOOR_FAILED_NUDGE})
             return ("error", {"message": "session already ended"})
-        sit = self._sitting_id.get(session_id)
-        if sit is not None and isinstance(value, str):
-            # The user's words persist even if the segment later errors — she DID say them and the
-            # client rendered them (menu indexes are not user text; choose() persists the title).
-            self._store.append_turn(sit, "you", {"text": value}, datetime.now(timezone.utc))
-        self._step_begin(session_id)
+        # Single-flight: claimed BEFORE the learner turn is written, because the guard's claim is
+        # about the transcript, not the channel. Two overlapping /say posts used to write turns 5
+        # and 6 as consecutive `you` rows and the sitting CONVERGED on the splice -- web_converged,
+        # frames(evidence_count=1) and five ledger rows off corrupted input. Rejected, never
+        # queued: a queued second turn is the same splice with a delay on it.
+        if not self._claim_turn(session_id):
+            return ("nudge", {"message": _IN_FLIGHT_NUDGE})
         try:
-            ch.to_worker.put(value)
-            tag, data = ch.from_worker.get()
+            sit = self._sitting_id.get(session_id)
+            if sit is not None and isinstance(value, str):
+                # The user's words persist even if the segment later errors — she DID say them and
+                # the client rendered them (menu indexes are not user text; choose() persists the
+                # title).
+                self._store.append_turn(sit, "you", {"text": value}, datetime.now(timezone.utc))
+            self._step_begin(session_id)
+            try:
+                ch.to_worker.put(value)
+                tag, data = ch.from_worker.get()
+            finally:
+                self._step_end(session_id)
         finally:
-            self._step_end(session_id)
+            self._release_turn(session_id)
         if tag == "menu":
             self._cache_menu(session_id, ch, data)
         elif tag == "say" and isinstance(data.get("menu"), dict):
@@ -2102,26 +2172,39 @@ class SessionRegistry:
                     "nonce": self._menu_nonce.get(session_id, 0),
                 },
             )
-        with self._lock:  # accepted: consume the menu — a replayed identical click must not pass
-            self._menu_nonce[session_id] = self._menu_nonce.get(session_id, 0) + 1
-        sit = self._sitting_id.get(session_id)
-        if sit is not None and 0 <= idx < len(ch.last_menu):
-            now = datetime.now(timezone.utc)
-            self._store.append_turn(sit, "muted", {"text": "door chosen"}, now)
-            self._store.append_turn(sit, "you", {"text": ch.last_menu[idx]}, now)
-        lost_ref = self._lost_ref.get(session_id)
-        lost_eid = self._lost_exp_id.get(session_id)
-        reopened = (0 <= idx < len(ch.last_menu_refs) and ch.last_menu_refs[idx] == lost_ref) or (
-            # eid-grain too (batch-review fold, M8's door-click half): a forged lost segment's
-            # ref is gen:-grain and never matches a curated door ref
-            bool(lost_eid)
-            and 0 <= idx < len(ch.last_menu_eids)
-            and ch.last_menu_eids[idx] == lost_eid
-        )
-        if reopened:
-            # Re-entering the interrupted door: the seam says so honestly (spec §2c).
-            self._seam_pending[session_id] = _REOPEN_SEAM
-        return self.step(session_id, idx)
+        # Single-flight, claimed BEFORE the nonce is consumed: a click refused because another
+        # request is in flight must leave the menu replayable, or the refusal also burns her only
+        # way to make the choice again. Held across the inner step -- which re-claims on the same
+        # thread and must nest -- so the marker+title pair and the step's drive are one turn.
+        if not self._claim_turn(session_id):
+            return ("nudge", {"message": _IN_FLIGHT_NUDGE})
+        try:
+            with (
+                self._lock
+            ):  # accepted: consume the menu — a replayed identical click must not pass
+                self._menu_nonce[session_id] = self._menu_nonce.get(session_id, 0) + 1
+            sit = self._sitting_id.get(session_id)
+            if sit is not None and 0 <= idx < len(ch.last_menu):
+                now = datetime.now(timezone.utc)
+                self._store.append_turn(sit, "muted", {"text": "door chosen"}, now)
+                self._store.append_turn(sit, "you", {"text": ch.last_menu[idx]}, now)
+            lost_ref = self._lost_ref.get(session_id)
+            lost_eid = self._lost_exp_id.get(session_id)
+            reopened = (
+                0 <= idx < len(ch.last_menu_refs) and ch.last_menu_refs[idx] == lost_ref
+            ) or (
+                # eid-grain too (batch-review fold, M8's door-click half): a forged lost segment's
+                # ref is gen:-grain and never matches a curated door ref
+                bool(lost_eid)
+                and 0 <= idx < len(ch.last_menu_eids)
+                and ch.last_menu_eids[idx] == lost_eid
+            )
+            if reopened:
+                # Re-entering the interrupted door: the seam says so honestly (spec §2c).
+                self._seam_pending[session_id] = _REOPEN_SEAM
+            return self.step(session_id, idx)
+        finally:
+            self._release_turn(session_id)
 
     def _drain(self, session_id: str) -> None:
         """Defensive: consume a queued-but-undequeued emission before close/continue branch on
@@ -2323,59 +2406,68 @@ class SessionRegistry:
             # Degraded rebuild (content drift): the honest static — never an unscreened author,
             # and never the SAFE_CONTRACT lie ("I'll push") on a dead engine (spec §2c).
             return ("say", {"text": voice._CONVERSE_DONE_FRESH})
-        reply, next_pressure = voice.converse(
-            rec["model"],
-            rec["exp"],
-            rec["recent"],
-            value,
-            rec["posture"],
-            rec.get("stop_reason", "converged"),
-            has_sequel=self._story(sit) is not None,
-        )
-        lost = self._lost_context(session_id)
-        if lost is not None and lost[1]:
-            # Interrupted-adjacent converse (spec §2c): the honesty line invites talk about the
-            # LOST problem, whose moves the record's own egress screen is blind to — screen the
-            # union. The lost exp was NOT converged, so it may re-offer within the window; an
-            # unscreened reply could hand its move and prime the future intake. FAIL CLOSED
-            # (batch-review C9): an unresolvable lost exp cannot be screened, so the safe static
-            # serves — matching the rebuild-failure doctrine everywhere else in this build.
-            try:
-                lost_exp = next((e for e in load_library() if e.experience_id == lost[1]), None)
-            except Exception:
-                lost_exp = None
-            if lost_exp is None or not voice.egress_safe_reply(rec["model"], lost_exp, reply):
-                # Fail closed to the HONEST static, never SAFE_CONTRACT's "I'll push" lie on a
-                # dead engine (spec §2c consistency fold, 2026-07-05): equally safe (a static,
-                # performs no move), just not a lie. Fresh variant — an interrupted/lost state
-                # is not the place to promise a next chapter.
-                reply = voice._CONVERSE_DONE_FRESH
-        now = datetime.now(timezone.utc)
-        # Don't capture a steer on an interrupted/degraded turn (adversarial-review fold F3): the
-        # reply may have fail-closed to the honest static, and steering does not belong in a
-        # lost-context state — she re-types after resume. The rec["exp"] is None path already
-        # returned above; this covers the lost-context fail-close.
-        interrupted = lost is not None and bool(lost[1])
-        if (
-            next_pressure
-            and not interrupted
-            and sit is not None
-            and self._store.read_world(sit) is not None
-        ):
-            # The mapper gate at CAPTURE (user-steered chapters §2b): a servable fresh pressure
-            # becomes the pending steer (raw words + distilled pressure + pre-mapped territory).
-            self._capture_steer(session_id, sit, value, next_pressure, now, rec["model"])
-        rec["recent"].append(("student", value))
-        rec["recent"].append(("Vera", reply))
-        if sit is not None:
-            # Persist the pair AND rewrite the record in the same short transaction window —
-            # otherwise a second restart makes Vera forget conversation visible on screen (§2b).
-            self._store.append_turn(sit, "you", {"text": value}, now)
-            self._store.append_turn(sit, "vera", {"text": reply}, now)
-            self._store.write_state(sit, record=_serialize_record(rec))
-        data = {"text": reply}
-        self._attach_converse_label(session_id, sit, now, data)
-        return ("say", data)
+        # Single-flight: converse never touches the worker channel, which is exactly why a guard
+        # reasoned about as "protect the channel" would miss it -- it writes the same `you` turns
+        # into the same transcript, calls the model for seconds at a time, and appends to the
+        # same rec["recent"] a racing converse would interleave. Same turn, same guard.
+        if not self._claim_turn(session_id):
+            return ("nudge", {"message": _IN_FLIGHT_NUDGE})
+        try:
+            reply, next_pressure = voice.converse(
+                rec["model"],
+                rec["exp"],
+                rec["recent"],
+                value,
+                rec["posture"],
+                rec.get("stop_reason", "converged"),
+                has_sequel=self._story(sit) is not None,
+            )
+            lost = self._lost_context(session_id)
+            if lost is not None and lost[1]:
+                # Interrupted-adjacent converse (spec §2c): the honesty line invites talk about the
+                # LOST problem, whose moves the record's own egress screen is blind to — screen the
+                # union. The lost exp was NOT converged, so it may re-offer within the window; an
+                # unscreened reply could hand its move and prime the future intake. FAIL CLOSED
+                # (batch-review C9): an unresolvable lost exp cannot be screened, so the safe static
+                # serves — matching the rebuild-failure doctrine everywhere else in this build.
+                try:
+                    lost_exp = next((e for e in load_library() if e.experience_id == lost[1]), None)
+                except Exception:
+                    lost_exp = None
+                if lost_exp is None or not voice.egress_safe_reply(rec["model"], lost_exp, reply):
+                    # Fail closed to the HONEST static, never SAFE_CONTRACT's "I'll push" lie on a
+                    # dead engine (spec §2c consistency fold, 2026-07-05): equally safe (a static,
+                    # performs no move), just not a lie. Fresh variant — an interrupted/lost state
+                    # is not the place to promise a next chapter.
+                    reply = voice._CONVERSE_DONE_FRESH
+            now = datetime.now(timezone.utc)
+            # Don't capture a steer on an interrupted/degraded turn (adversarial-review fold F3): the
+            # reply may have fail-closed to the honest static, and steering does not belong in a
+            # lost-context state — she re-types after resume. The rec["exp"] is None path already
+            # returned above; this covers the lost-context fail-close.
+            interrupted = lost is not None and bool(lost[1])
+            if (
+                next_pressure
+                and not interrupted
+                and sit is not None
+                and self._store.read_world(sit) is not None
+            ):
+                # The mapper gate at CAPTURE (user-steered chapters §2b): a servable fresh pressure
+                # becomes the pending steer (raw words + distilled pressure + pre-mapped territory).
+                self._capture_steer(session_id, sit, value, next_pressure, now, rec["model"])
+            rec["recent"].append(("student", value))
+            rec["recent"].append(("Vera", reply))
+            if sit is not None:
+                # Persist the pair AND rewrite the record in the same short transaction window —
+                # otherwise a second restart makes Vera forget conversation visible on screen (§2b).
+                self._store.append_turn(sit, "you", {"text": value}, now)
+                self._store.append_turn(sit, "vera", {"text": reply}, now)
+                self._store.write_state(sit, record=_serialize_record(rec))
+            data = {"text": reply}
+            self._attach_converse_label(session_id, sit, now, data)
+            return ("say", data)
+        finally:
+            self._release_turn(session_id)
 
     def memory(self, session_id: str, index: int) -> tuple[str, dict]:
         """The memory bubble (Spec-1 5b): a BY-REF pure read of one convergence — the situation
