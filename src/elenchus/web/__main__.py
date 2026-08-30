@@ -4,9 +4,9 @@ import os
 from pathlib import Path
 
 from .app import create_app
+from .runtime import resolve_runtime
 
 _ROOT = Path(__file__).resolve().parents[3]
-DB = str(_ROOT / "data" / "elenchus.db")
 
 
 def _load_dotenv(path: Path) -> None:
@@ -26,9 +26,16 @@ def _load_dotenv(path: Path) -> None:
 
 
 _load_dotenv(_ROOT / ".env")
+
+# Which invitee's database, and what this process serves. Override-only: with nothing set this is
+# byte-for-byte the previous behaviour (data/elenchus.db on 127.0.0.1:8000), so the founder's own
+# instance does not move. Resolved AFTER _load_dotenv so .env can carry these too, and it raises
+# rather than defaulting -- see runtime.py for why every available fallback is worse than not
+# starting.
+DB, HOST, PORT = resolve_runtime(os.environ)
 app = create_app(db_path=DB)
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host=HOST, port=PORT)

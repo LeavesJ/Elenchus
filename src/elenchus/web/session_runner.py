@@ -1150,6 +1150,7 @@ class SessionRegistry:
                             # input and nothing downstream can tell the invented rows from the real.
                             if sit is not None and corrections > 0:
                                 self._store.log_content_gap(
+                                    sitting_id=sit,
                                     situation=situation,
                                     mapped_eid=eid,
                                     confidence=tmap.confidence,
