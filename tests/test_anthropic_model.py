@@ -2044,3 +2044,38 @@ def test_every_refusal_branch_records_what_the_classifier_said():
         f"refusal branches at lines {unlogged} discard the classifier's verdict; every branch "
         "that sees stop_reason == 'refusal' must call _log_refusal"
     )
+
+
+# ---- S4 prep (2026-08-30): the Monday measurement needs per-call durations logged --------------
+
+
+def test_every_api_call_logs_its_duration(caplog):
+    """The S4 plan is measure-then-pick: three real dogfood sittings with per-call durations,
+    THEN choose the client timeout. Nothing logged durations, so the sittings would have
+    produced zero measurement. One seam times everything: the client wrapper covers create and
+    parse alike, names the calling method, and logs server-side only (Invariant 10)."""
+    import logging
+
+    wire = _Wire(frames=[], traps=[])
+    client = _Client(
+        parse_result=_Resp(parsed_output=wire),
+        create_result=_Resp(content=[_TextBlock("a push")]),
+    )
+    m = AnthropicModel(client=client)
+    with caplog.at_level(logging.INFO, logger="elenchus.model"):
+        m.classify_intake(_exp(), "an opening")  # parse path
+        m.generate_push(_exp(), "frame", "protect_the_core_lane")  # create path
+
+    timed = [r.getMessage() for r in caplog.records if "model_call" in r.getMessage()]
+    assert len(timed) == 2, f"expected one timing line per API call, got: {timed}"
+    assert any("parse" in line for line in timed), timed
+    assert any("create" in line for line in timed), timed
+    for line in timed:
+        assert "s " in line or line.rstrip().endswith("s"), f"no duration in: {line!r}"
+
+
+def test_timing_does_not_change_what_calls_return(caplog):
+    """The wrapper is observation only: same results, same exceptions."""
+    client = _Client(parse_result=_Resp(parsed_output=None, stop_reason="refusal"))
+    with pytest.raises(ModelError):
+        AnthropicModel(client=client).classify_intake(_exp(), "opening")  # both retries refused
