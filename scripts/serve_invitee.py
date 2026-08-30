@@ -27,6 +27,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _LABEL = r"[a-z0-9]([a-z0-9-]*[a-z0-9])?"
 _HOSTNAME_RE = re.compile(rf"^{_LABEL}(\.{_LABEL}){{1,}}$")
@@ -53,6 +55,29 @@ def resolve_hostname(raw: str) -> str:
             f"hostname {raw!r} is not a lowercase FQDN (e.g. ada.decisions.example.com)"
         )
     return raw
+
+
+def missing_key_warning(env: dict, repo_root: Path) -> str | None:
+    """None when a model key is reachable; otherwise the message main() refuses with.
+
+    L-18, paid for twice by 2026-08-30: the zero-token front door health-checks green with no
+    key, so a keyless instance looks alive and every DOOR dies on the first click -- the second
+    time from the founder's own phone, launched from a worktree whose root had no .env. The two
+    places a key can come from are the environment this launcher passes through and
+    <repo_root>/.env, which is the exact file __main__'s dotenv load reads (same root). When
+    both are empty the doors WILL break, so this is a refusal, not advice.
+    """
+    if env.get("ANTHROPIC_API_KEY"):
+        return None
+    dotenv = repo_root / ".env"
+    if dotenv.exists() and "ANTHROPIC_API_KEY" in dotenv.read_text():
+        return None
+    return (
+        "no ANTHROPIC_API_KEY in the environment and none in "
+        f"{dotenv}.\nRefusing to serve an invitee a broken instance: the zero-token front door "
+        "would health-check green while every door dies on the first click. Export the key or "
+        "put it in that .env, then relaunch."
+    )
 
 
 def build_env(root: Path, slug: str, host: str, port: int, base: dict | None = None) -> dict:
@@ -93,6 +118,11 @@ def main() -> int:
     slug = resolve_slug(args.slug)
     hostname = resolve_hostname(args.hostname) if args.hostname else None
     tunnel_name = f"elenchus-{slug}"
+
+    refusal = missing_key_warning(dict(os.environ), _REPO_ROOT)
+    if refusal is not None:
+        print(refusal, file=sys.stderr)
+        return 3
 
     if hostname is not None:
         # Preflight BEFORE any file or process exists: the login half is the founders' own
