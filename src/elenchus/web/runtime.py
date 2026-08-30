@@ -13,7 +13,10 @@ people on one file are one learner, and neither of them can be separated out aft
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
+_log = logging.getLogger("elenchus.web.runtime")
 
 _ROOT = Path(__file__).resolve().parents[3]
 
@@ -43,6 +46,15 @@ def resolve_runtime(env) -> tuple[str, str, int]:
                 f"address means serving other people, and {DEFAULT_DB} holds one particular "
                 "person's decisions. Set ELENCHUS_DB to this invitee's own file."
             )
+        # Permitted -- the founder's own loopback boot must keep working -- but LOUD (S6 T2
+        # review): the refusal above keys on bind address, and a tunnel pointed at loopback
+        # presents loopback, so a default boot behind a tunnel serves the founder's own file to
+        # a remote invitee while the front door promises "this invite's own private file".
+        _log.warning(
+            "serving the default database (%s). Do not put a tunnel in front of this instance: "
+            "set ELENCHUS_DB to the invitee's own file first.",
+            DEFAULT_DB,
+        )
         db = DEFAULT_DB
 
     raw_port = (env.get("ELENCHUS_PORT") or "").strip()

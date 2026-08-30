@@ -593,3 +593,160 @@ def test_the_end_control_renders_from_the_first_screen():
     html = pathlib.Path("src/elenchus/web/static/index.html").read_text()
     frontdoor = html[html.index("function renderFrontdoor") : html.index("function renderReserve")]
     assert "showEnd(true)" in frontdoor, "the front door never shows the End control"
+
+
+# ---- T2 review findings on the guard (F1/F2/F3) and on the exit (seed line) --------------------
+
+
+def _converge(reg, sid):
+    """Drive the scripted anchor door to a landing so a rec exists."""
+    reg.resume_or_start(sid)
+    idx = reg.menu_index(sid, "veldra:embedded_anchor_lock_in")
+    reg.step(sid, idx)
+    for _ in range(10):
+        tag, data = reg.step(sid, "a position with its mechanism")
+        if tag == "done":
+            return
+    raise AssertionError(f"the scripted door never landed: {(tag, data)}")
+
+
+def test_a_close_racing_the_claim_window_hangs_nothing_and_leaks_no_claim(tmp_path, make_fake):
+    """T2 review F1, reproduced before fixing: close() reaps the worker in the window between
+    _claim_turn and _step_begin (the slow `you` append holds it open), the step's get() then
+    blocks forever on a pilled worker, and the claim leaks -- surviving the product's own escape
+    hatch, because resume_or_start rebuilds the channel but not _in_flight. An eternal-nudge
+    brick, reachable with two tabs: one clicks End while the other submits a position.
+    """
+    import threading
+
+    db = tmp_path / "f1.db"
+    reg = SessionRegistry(str(db), model_factory=make_fake)
+    _converge(reg, "single")
+    reg.continue_session("single")  # segment 2: a live, non-terminal, mid-probe worker
+
+    real_append = reg._store.append_turn
+    in_window = threading.Event()
+
+    def slow_append(sit, kind, payload, now):
+        if kind == "you":
+            in_window.set()
+            time.sleep(0.6)
+        return real_append(sit, kind, payload, now)
+
+    reg._store.append_turn = slow_append
+    out: dict[str, tuple] = {}
+
+    # daemon: on the RED side of this test the step blocks forever, and a non-daemon thread
+    # would then hang the pytest process at exit -- failing loud beats failing hung.
+    stepper = threading.Thread(
+        target=lambda: out.update(step=reg.step("single", "my position")), daemon=True
+    )
+    stepper.start()
+    assert in_window.wait(5), "the stepper never reached the widened window"
+    time.sleep(0.05)  # inside the window, before _step_begin
+    out["close"] = reg.close("single")
+    stepper.join(timeout=10)
+
+    assert not stepper.is_alive(), "the racing step never returned: the F1 deadlock is back"
+    assert out["step"][0] in ("nudge", "say", "error"), out["step"]
+    assert reg._in_flight == {}, f"the turn claim leaked: {reg._in_flight}"
+    # and the session is not bricked: after a refresh, a fresh step is accepted
+    reg._store.append_turn = real_append
+    tag, data = reg.resume_or_start("single")
+    tag2, data2 = reg.step("single", "a fresh situation after the refresh")
+    assert (tag2, data2.get("message")) != (
+        "nudge",
+        "Still working on the one before this — nothing was sent.",
+    ), "the eternal in-flight nudge survived the refresh"
+
+
+def test_a_continue_refused_by_the_guard_does_not_brick_continue(tmp_path, make_fake):
+    """T2 review F2: continue_session set rec['continued'] and only then ran its inner guarded
+    step; a converse holding the claim nudged that inner step, the flag stayed True, and every
+    later Continue answered 'continuation already in flight' until a restart. The whole
+    continue_session is a turn: it claims up front and refuses cleanly before touching state.
+    """
+    import threading
+
+    db = tmp_path / "f2.db"
+    reg = SessionRegistry(str(db), model_factory=_slow_factory(make_fake, 0.4))
+    _converge(reg, "single")
+
+    out: dict[str, tuple] = {}
+    talker = threading.Thread(
+        target=lambda: out.update(converse=reg.converse("single", "so what about the long run?")),
+        daemon=True,
+    )
+    talker.start()
+    deadline = time.monotonic() + 15
+    while "single" not in reg._in_flight and time.monotonic() < deadline:
+        time.sleep(0.001)
+    assert "single" in reg._in_flight, "the converse never claimed the turn"
+
+    out["continue"] = reg.continue_session("single")
+    talker.join(timeout=60)
+
+    assert out["continue"][0] == "nudge", f"the raced continue was not refused: {out['continue']}"
+    tag, data = reg.continue_session("single")
+    assert (tag, data.get("message")) != ("error", "continuation already in flight"), (
+        "the refused continue left rec['continued'] set and bricked the button"
+    )
+
+
+def test_the_client_unwinds_the_optimistic_bubble_on_a_nudge():
+    """T2 review F3: the client renders the typed text as a `you` bubble and clears the input
+    BEFORE the reply arrives; on a nudge the phantom bubble stood above 'nothing was sent' and
+    the text was gone. The unwind must remove the bubble and put her words back in the box."""
+    import pathlib
+
+    html = pathlib.Path("src/elenchus/web/static/index.html").read_text()
+    assert "unwindSay" in html, "no unwind path for the optimistic say render"
+    # anchor inside advance(), where the say/converse reply lands -- the memory panel has its own
+    # earlier nudge handler that never renders an optimistic bubble
+    advance_at = html.index("if(r.kind==='nudge'){")
+    assert "unwindSay(" in html[advance_at : advance_at + 120], (
+        "advance()'s nudge branch does not unwind the optimistic bubble and restore the text"
+    )
+    submit_at = html.index("composer.addEventListener('submit'")
+    assert "pendingSay=" in html[submit_at : submit_at + 700], (
+        "the submit handler no longer records the optimistic render for the unwind"
+    )
+
+
+def test_the_leave_screen_does_not_plant_a_seed(tmp_path, make_fake):
+    """S3 review finding 1, executed by the reviewer: every leave rendered a world panel with
+    'A seed was planted — your world begins' -- false on a first visit and reading as data loss
+    on a return visit, right under leave copy promising the room keeps what she wrote. The
+    client skips the terrain render when the close payload carries no world at all."""
+    import pathlib
+
+    html = pathlib.Path("src/elenchus/web/static/index.html").read_text()
+    close_fn = html[html.index("function renderClose") : html.index("const homebaseEl")]
+    assert "renderTerrain" in close_fn
+    guarded = "((r.terrain||[]).length || (r.houses||[]).length)" in close_fn
+    assert guarded, "renderClose still renders an empty world (the seed line) on a bare leave"
+
+
+def test_serving_the_default_database_warns(caplog):
+    """S6 review finding 2: with ELENCHUS_DB unset on a loopback bind, the default boot serves
+    the founder's own file -- and a tunnel pointed at loopback then serves it to a remote
+    invitee while the front door promises 'this invite's own private file'. The configuration
+    is permitted (the founder's own boot must keep working), so the honest floor is a loud
+    warning on the record."""
+    import logging
+
+    from elenchus.web.runtime import DEFAULT_DB, resolve_runtime
+
+    with caplog.at_level(logging.WARNING, logger="elenchus.web.runtime"):
+        db, host, port = resolve_runtime({})
+    assert db == DEFAULT_DB
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert "default database" in logged and "tunnel" in logged, (
+        f"no warning on the default-db boot: {logged!r}"
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="elenchus.web.runtime"):
+        resolve_runtime({"ELENCHUS_DB": str(tmp := "/tmp/x/elenchus.db")})
+    assert not caplog.records, "an isolated boot must not warn"
+    assert tmp  # keep ruff quiet about the walrus

@@ -800,9 +800,21 @@ class SessionRegistry:
             # Reap a replaced non-terminal channel (MF-4 class; batch-review C2/C8/C15): the
             # 18h-abandonment path and racing cold-starts otherwise orphan a parked worker
             # holding an open engine store connection forever.
+            #
+            # F1's third pill site (hammer, 2026-08-30, caught by pill-provenance logging): gated
+            # on the SAME busy check as _reset_session_state, because _resume can reach here
+            # while another thread's step is between its claim and its get on the old channel --
+            # the pill was consumed instead of that step's value and the step blocked forever.
+            # Skipping the reap while busy leaks one parked worker, the documented trade. When we
+            # DO pill, terminal is set in the same critical section, so a late user of the old
+            # channel is caught by step's own terminal re-check instead of putting into a dead
+            # queue.
             old = self._ch.get(session_id)
             if old is not None and not old.terminal:
-                old.to_worker.put(_ABANDON)
+                busy = session_id in self._stepping or session_id in self._in_flight
+                if not busy:
+                    old.to_worker.put(_ABANDON)
+                    old.terminal = True
             self._ch[session_id] = ch
 
         # Queue-handshake invariant (load-bearing for write-through, spec §2b): the worker emits
@@ -2153,6 +2165,15 @@ class SessionRegistry:
                 # the client rendered them (menu indexes are not user text; choose() persists the
                 # title).
                 self._store.append_turn(sit, "you", {"text": value}, datetime.now(timezone.utc))
+            # F1: the channel may have been terminated by a close() that won the race into the
+            # claim window (the reaper skips channels whose turn is CLAIMED, so after this check
+            # passes, nothing can pill this worker until the claim is released). Re-checked under
+            # the lock so the check and the reaper's pill cannot interleave. Without this, the
+            # put lands unread on an exited worker and the get below blocks forever.
+            with self._lock:
+                terminated = ch.terminal
+            if terminated:
+                return ("nudge", {"message": _STALE_NUDGE})
             self._step_begin(session_id)
             try:
                 ch.to_worker.put(value)
@@ -2280,6 +2301,26 @@ class SessionRegistry:
         button NAMED (the guarded next pick); menu=True re-enters the front door (doors +
         composer). Idempotent per converged segment (MF-6); reaps a live prior worker (MF-4);
         an absent pick returns the front door, never a silent door-0 (MF-3)."""
+        # F2 (T2 review, 2026-08-30): the whole continuation is a turn. Its INNER step/start are
+        # guarded, so a converse holding the claim used to nudge the inner step AFTER
+        # rec["continued"] was set -- the flag stayed True (the unstick fires only on tag
+        # "error") and every later Continue answered "already in flight" until a restart.
+        # Claiming up front refuses cleanly BEFORE any state moves; the inner claims nest on
+        # this thread. Released in the finally that wraps the rest of the method.
+        if not self._claim_turn(session_id):
+            return ("nudge", {"message": _IN_FLIGHT_NUDGE})
+        try:
+            return self._continue_turn(session_id, menu, work_anyway)
+        finally:
+            self._release_turn(session_id)
+
+    def _continue_turn(
+        self, session_id: str, menu: bool = False, work_anyway: bool = False
+    ) -> tuple[str, dict]:
+        """`continue_session`'s body, behind its claim. Two callers is not the bar here -- this
+        split exists because the alternative was reindenting a 160-line method under a try whose
+        only content is the claim bracket, and the guard's OWN structural test reads method
+        boundaries. Named as a turn because that is what it is."""
         self._drain(session_id)
         with self._lock:  # M1: atomic check-and-set (FastAPI threadpool can race two POSTs)
             rec = self._last_record.get(session_id)
@@ -2290,7 +2331,14 @@ class SessionRegistry:
             rec["continued"] = True
         old_ch = self._ch.get(session_id)
         if old_ch is not None and not old_ch.terminal:
-            old_ch.to_worker.put(_ABANDON)  # reap the parked mid-segment worker
+            # Same busy gate and terminal mark as start()'s reap (F1 class). This thread holds
+            # the turn claim, so `busy` here can only mean an unguarded resume's start is mid
+            # handshake on this channel -- leak that worker rather than eat its emission.
+            with self._lock:
+                busy = session_id in self._stepping
+                if not busy:
+                    old_ch.to_worker.put(_ABANDON)  # reap the parked mid-segment worker
+                    old_ch.terminal = True
         now = datetime.now(timezone.utc)
         sit = self._sitting_id.get(session_id)
         world = self._store.read_world(sit) if sit is not None else None
@@ -3091,11 +3139,20 @@ class SessionRegistry:
         sitting state."""
         ch = self._ch.get(session_id)
         if ch is not None and not ch.terminal:
+            # F1 (T2 review, 2026-08-30): the check and the pill are ONE critical section, and
+            # the guard honors `_in_flight` as well as `_stepping`. A step claims the turn BEFORE
+            # `_step_begin` (its `you` append sits between), so a reap gated on `_stepping` alone
+            # fired inside that window, the step's later get() blocked forever on the pilled
+            # worker, and the leaked claim turned a hung request into a refresh-proof brick.
+            # Checking the claim closes the claim-first interleaving; step's own terminal
+            # re-check (see step()) closes the reaper-first one. put() on an unbounded queue
+            # never blocks, so holding the lock across it is safe -- it is the GET that must
+            # never sit under this lock.
             with self._lock:
-                stepping = session_id in self._stepping
-            if not stepping:
-                ch.to_worker.put(_ABANDON)
-                ch.terminal = True
+                busy = session_id in self._stepping or session_id in self._in_flight
+                if not busy:
+                    ch.to_worker.put(_ABANDON)
+                    ch.terminal = True
         self._ch.pop(session_id, None)
         self._sitting_id.pop(session_id, None)
         self._last_record.pop(session_id, None)

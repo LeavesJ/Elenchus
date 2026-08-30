@@ -112,6 +112,13 @@ function bubble(cls, text){ const d=document.createElement('div'); d.className='
   thread.appendChild(d); thread.scrollTop=thread.scrollHeight; return d; }
 function muted(text){ const d=document.createElement('div'); d.className='muted'; d.innerHTML=esc(text);
   thread.appendChild(d); thread.scrollTop=thread.scrollHeight; }
+// F3 (T2 review 2026-08-30): the submit handler renders the typed text optimistically and
+// clears the box BEFORE the reply arrives; a single-flight nudge then left the phantom bubble
+// standing over "nothing was sent" with her words gone. The unwind removes the bubble and puts
+// the text back. pendingSay is set only by the composer submit, so a nudge on any other path
+// (door clicks, outcome boxes) no-ops here.
+let pendingSay=null;
+function unwindSay(){ if(!pendingSay) return; pendingSay.el.remove(); input.value=pendingSay.text; pendingSay=null; }
 function thinking(){ const d=document.createElement('div'); d.className='thinking';
   d.innerHTML='Vera is thinking<span>.</span><span>.</span><span>.</span>'; thread.appendChild(d);
   thread.scrollTop=thread.scrollHeight; return d; }
@@ -408,7 +415,7 @@ function advance(r){
     if(mode==='converse') renderContinue(nextTitle); return; }
   if(r.kind==='done'){ mode='converse'; if(r.landing) bubble('vera', r.landing); showComposer(true); showEnd(true); nextTitle=r.next_title||''; nextDesc=r.next_desc||''; nextKind=r.next_kind||'pressure'; if(r.ask_expectation) askExpectation(r.expectation_token||''); renderContinue(nextTitle); return; }
   if(r.kind==='close'){ renderClose(r); return; }
-  if(r.kind==='nudge'){ muted(r.message); showComposer(true); return; }
+  if(r.kind==='nudge'){ unwindSay(); muted(r.message); showComposer(true); return; }
   muted('error: '+(r.message||'')); showComposer(true);
 }
 function renderClose(r){ if(contBox){ contBox.remove(); contBox=null; }
@@ -425,7 +432,11 @@ function renderClose(r){ if(contBox){ contBox.remove(); contBox=null; }
     if(newHouseIndices.length>0 || r.confluence) ceremony = {newHouseIndices: newHouseIndices, confluence: r.confluence};
   }
   delete window.__preSittingHouses;
-  renderTerrain(r.terrain||[], r.houses||[], r.vessels, r.confluence, ceremony);
+  // S3 review: a bare leave carries no world at all, and rendering the empty panel planted
+  // "A seed was planted — your world begins" under the leave text — false on a first visit,
+  // reading as data loss on a return visit. A converged close always carries a house or
+  // terrain, so only leaves skip the render.
+  if(((r.terrain||[]).length || (r.houses||[]).length)) renderTerrain(r.terrain||[], r.houses||[], r.vessels, r.confluence, ceremony);
   showComposer(false); }
 const homebaseEl = document.getElementById('homebase');
 // Phase 2: render the cumulative world into the first-screen host (spec §6). Reuses Terrain3D.render
@@ -488,13 +499,14 @@ composer.addEventListener('submit', async e=>{
   e.preventDefault();
   const text=input.value.trim(); if(!text) return;
   hideHomebase();  // a front-door submit begins the saga; the world recedes (Phase 2). idempotent.
-  bubble('you', text); input.value=''; input.disabled=true; send.disabled=true;
+  pendingSay={el: bubble('you', text), text: text}; input.value=''; input.disabled=true; send.disabled=true;
   if(contBox){ contBox.remove(); contBox=null; }  // M2: no continue while a converse is in flight
   const endWas=endBtn.disabled; endBtn.disabled=true;  // no End while a say is in flight (C4/C1)
   const t=thinking();
   const url = mode==='converse' ? '/api/session/single/converse' : '/api/session/single/say';
-  try { const r=await post(url,{text}); t.remove(); advance(r); endBtn.disabled=endWas; }
+  try { const r=await post(url,{text}); t.remove(); advance(r); pendingSay=null; endBtn.disabled=endWas; }
   catch(err){ t.remove(); endBtn.disabled=endWas;
+    unwindSay();  // same honesty as the nudge: nothing was sent, so her words come back
     muted('connection lost — is the server still running? try again.'); showComposer(true); }
 });
 input.addEventListener('keydown', e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); composer.requestSubmit(); } });
