@@ -513,16 +513,33 @@ def test_validate_scene_passes_clean_and_rejects_leaks():
     )  # no raise
 
 
+def _corpus_store(tmp_path):
+    """Open a COPY of the real seeded corpus, never the production file itself.
+
+    `Store.__init__` runs DDL on open and `data/` is a symlink into the main checkout, so opening
+    `data/elenchus.db` directly from a test applies any pending defensive migration to PRODUCTION
+    -- which it did, twice (2026-08-30: `selection_log.content_version`; 2026-08-29: the `at`
+    column via a default boot). The copy gives these tests the identical corpus rows with zero
+    reach into the real file.
+    """
+    import shutil
+
+    from elenchus.persistence import Store
+
+    copy = tmp_path / "corpus-copy.db"
+    shutil.copyfile("data/elenchus.db", copy)
+    return Store(copy)
+
+
 @pytest.mark.skipif(
     not __import__("pathlib").Path("data/elenchus.db").exists(),
     reason="real seeded corpus (gitignored data/) not present",
 )
-def test_seed_ledger_refs_resolve_in_the_real_corpus():
+def test_seed_ledger_refs_resolve_in_the_real_corpus(tmp_path):
     """Catch the orphan class of bug: every seed must bind to a real seeded founder entry."""
     from elenchus.content_loader import load_library
-    from elenchus.persistence import Store
 
-    store = Store("data/elenchus.db")
+    store = _corpus_store(tmp_path)
     try:
         for exp in load_library():
             entry = store.get_corpus(exp.ledger_ref)
@@ -536,7 +553,7 @@ def test_seed_ledger_refs_resolve_in_the_real_corpus():
     not __import__("pathlib").Path("data/elenchus.db").exists(),
     reason="real seeded corpus (gitignored data/) not present",
 )
-def test_both_split_problems_resolve_scene_and_rubric_through_their_own_ref():
+def test_both_split_problems_resolve_scene_and_rubric_through_their_own_ref(tmp_path):
     """BOTH sides, named explicitly. Filename ordering must not decide what this covers.
 
     The earlier version read `veldra:license_fork_risk`'s scene and validated it against
@@ -552,13 +569,12 @@ def test_both_split_problems_resolve_scene_and_rubric_through_their_own_ref():
     from elenchus.content_loader import load_denylist, load_library
     from elenchus.experience import _attach_scene
     from elenchus.generator import validate_scene
-    from elenchus.persistence import Store
 
     lib = {e.experience_id: e for e in load_library()}
     assert lib["continuity_lock_in"].ledger_ref == "veldra:license_fork_risk"
     assert lib["license_continuity"].ledger_ref == "veldra:midrollout_contract_boundary"
 
-    store = Store("data/elenchus.db")
+    store = _corpus_store(tmp_path)
     try:
         corpus = store.load_corpus()
         by_ref = {c.ledger_ref: c for c in corpus}
@@ -639,3 +655,31 @@ def test_select_open_ended_honors_experience_id():
     )
     exp = select_open_ended(None, None, [], [], spec)
     assert exp.experience_id == "license_continuity"
+
+
+def test_no_test_in_this_suite_opens_the_production_database_writably():
+    """THE STANDING HAZARD, RETIRED 2026-08-30 -- after it fired for the second time.
+
+    `data/` in every worktree is a symlink to the main checkout, `Store.__init__` runs DDL on
+    open, and two tests here built a Store over the literal production path, CWD-relative
+    through the symlink. That was harmless
+    exactly as long as the schema was current; the night a new defensive ALTER landed
+    (`selection_log.content_version`), an ordinary full-suite run APPLIED IT TO PRODUCTION.
+    Integrity held and the column is nullable, but a suite run must never be able to migrate the
+    founder's own file. The two corpus tests now copy the file to tmp and open the copy -- same
+    validation, zero production writes -- and this sweep fails the build if any test regresses to
+    opening the real path directly.
+    """
+    import pathlib
+    import re
+
+    banned = re.compile(r'Store\(\s*["\']data/elenchus\.db["\']')
+    offenders = []
+    for path in pathlib.Path(__file__).parent.glob("test_*.py"):
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            if banned.search(line):
+                offenders.append(f"{path.name}:{i}")
+    assert not offenders, (
+        f"these tests open PRODUCTION writably (Store runs DDL on open): {offenders}; "
+        "copy data/elenchus.db to tmp_path and open the copy instead"
+    )
