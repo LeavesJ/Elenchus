@@ -279,3 +279,24 @@ def test_load_lift_candidates_parses_example(tmp_path):
     assert len(cands) == 1
     assert cands[0].frame_code == "build_more_to_own_less"
     assert cands[0].provenance.pointer == "EXECLOG EX-028"
+
+
+def test_library_version_is_deterministic_and_order_blind():
+    """The stamp is an identity of WHAT the selection was computed over, so it must not move when
+    nothing did: same experiences in any order -> same version. And it must move when the content
+    does, at the grain the policy sees -- a decision_frame change is a different library even
+    though no file was added."""
+    from elenchus.content_loader import library_version, load_library
+
+    lib = [e for e in load_library()]
+    v1 = library_version(lib)
+    v2 = library_version(list(reversed(lib)))
+    assert v1 == v2, "reordering the same library changed its version"
+    assert isinstance(v1, str) and len(v1) >= 12
+
+    changed = [
+        lib[0].model_copy(
+            update={"rubric": lib[0].rubric.model_copy(update={"decision_frame": None})}
+        )
+    ] + lib[1:]
+    assert library_version(changed) != v1, "a decision_frame change did not move the version"

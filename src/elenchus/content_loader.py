@@ -129,6 +129,36 @@ def load_experience(name: str, root: Path | None = None) -> Experience:
     )
 
 
+def library_version(experiences) -> str:
+    """A deterministic identity for WHAT a selection was computed over (the two-week plan's
+    replacement for the cut cold-start ordering pin: a pin protected nothing that exists, but a
+    retention or ordering read across a content change silently mixes selections computed over
+    different libraries -- the stamp partitions them at read time).
+
+    Hashes the policy-visible grain: ids, refs, regime, decision_frame, frame and trap codes.
+    Order-blind, because a directory listing's order is not content. Deliberately NOT file
+    hashes: prose edits that change no policy input (a reworded trap_detail) do not move the
+    version, so the partition stays coarse enough to be readable.
+
+    Two callers: orchestration.run_session (stamps the row) and the content tests.
+    """
+    import hashlib
+
+    keys = sorted(
+        (
+            e.experience_id,
+            e.ledger_ref,
+            e.regime.value,
+            e.rubric.decision_frame or "",
+            ",".join(sorted(f.frame_code for f in e.rubric.frames)),
+            ",".join(sorted(t.trap_code for t in e.rubric.traps)),
+        )
+        for e in experiences
+    )
+    digest = hashlib.sha256(repr(keys).encode()).hexdigest()
+    return f"cv-{digest[:16]}"
+
+
 def load_library(root: Path | None = None) -> list[Experience]:
     rubrics = sorted((_root(root) / "rubrics").glob("*.yaml"))
     library = [load_experience(p.stem, root=root) for p in rubrics]

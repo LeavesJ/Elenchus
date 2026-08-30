@@ -288,3 +288,33 @@ def test_loop_guardian_embed_unprompted_on_continuity_lock_in():
     assert (
         "shipped_the_one_shot_term" in probed
     )  # the loop did run a probe — guardian is non-trivial
+
+
+def test_run_session_stamps_the_selection_with_the_library_it_saw(tmp_path):
+    """The content-version stamp, produced by the REAL path (L-9): run_session stamps every
+    selection row with the version of the open-ended library the proposal was computed over."""
+    db = tmp_path / "stamp.db"
+    store = build_store(db)
+    core = derive_core(aim())
+    s1_model = _model_for(
+        frames_present=[LEAD],
+        traps=["scope_creep_to_please", "erode_core_for_one_customer", "commit_without_a_tripwire"],
+        probed_responses={LEAD, "commit_under_the_deadline", "protect_the_core_lane"},
+    )
+    run_session(
+        store,
+        core,
+        s1_model,
+        NOW1,
+        regime=Regime.open_ended,
+        present=_present,
+        decide=_steer("license_continuity"),
+        decide_core=lambda c: [],
+    )
+    from elenchus.content_loader import library_version
+
+    expected = library_version([e for e in load_library() if e.regime is Regime.open_ended])
+    row = store._db.execute("SELECT content_version FROM selection_log").fetchone()
+    assert row["content_version"] == expected, (
+        "the selection row does not carry the version of the library it was computed over"
+    )
