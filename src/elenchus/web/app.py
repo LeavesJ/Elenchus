@@ -106,6 +106,9 @@ def _emit(reg: SessionRegistry, tag: str, data: dict) -> dict:
         out = {
             "kind": "frontdoor",
             "text": data["text"],
+            # S6: the scope statement rides the same projection as the ask -- a static, so the
+            # allowlist stance (L-13) is unaffected.
+            "scope": data.get("scope", ""),
             "menu": {
                 "problems": data["menu"]["problems"],
                 "nonce": data["menu"].get("nonce", 0),

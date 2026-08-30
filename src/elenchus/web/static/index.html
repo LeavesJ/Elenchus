@@ -329,6 +329,7 @@ function renderFrontdoor(r){
   applyTheme(r.theme);
   renderHomebase(r.terrain, r.houses, r.vessels, r.confluence);  // Phase 2: the world is the first screen (spec §6)
   if(r.returning) muted(r.returning);  // the return visit is not amnesiac (§2f review P10)
+  if(r.scope) muted(r.scope);  // S6: the frame renders BEFORE the invitation to disclose
   bubble('vera', r.text);
   muted('or start from one of these');
   renderMenu(r.menu.problems, r.menu.nonce, true);
@@ -381,6 +382,7 @@ function renderResume(r){
   nextTitle = r.next_title || ''; nextDesc = r.next_desc || ''; nextKind = r.next_kind || 'pressure';
   if(r.frontdoor){ // a sitting parked at the front door resumes with its ask + small doors
     renderHomebase(r.terrain, r.houses, r.vessels, r.confluence);  // Phase 2 T7: the world shows on reload-to-front-door too
+    if(r.frontdoor.scope) muted(r.frontdoor.scope);  // S6: same frame on the resume path
     bubble('vera', r.frontdoor.text);
     muted('or start from one of these');
     renderMenu(r.frontdoor.menu.problems, r.frontdoor.menu.nonce, true);

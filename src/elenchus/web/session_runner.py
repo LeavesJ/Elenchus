@@ -542,6 +542,23 @@ _SITTING_MAX_IDLE = timedelta(hours=18)
 # The STATIC front-door ask (§2a): the coldest beat pays zero model calls.
 _FRONTDOOR_ASK = "What are you facing right now? Describe the decision."
 
+# S6 (2026-08-30): the frame around the ask. The ask is an unbounded invitation to disclose, and
+# until this there was no statement anywhere -- index.html has no terms, no storage notice, no
+# description of what this is -- while 106 turns of real situations already sit in the production
+# file. One static string, zero model calls, riding the SAME payload as the ask so no render path
+# can serve the invitation without it. Every sentence is checkable against the tree: per-invite
+# file = ELENCHUS_DB isolation (runtime.py); the model = every turn is authored by the rented
+# model; two people = the founders, who read the transcripts; closing the tab = durable sittings
+# resume (spec §2g). "Not a crisis or care service" is the honest half of the care lane -- the
+# product must never claim the other half exists (readiness audit, 2026-08-29).
+_FRONTDOOR_SCOPE = (
+    "A practice room for decisions you're actually facing — work calls: pricing, contracts, "
+    "cofounders, deadlines. It presses on your reasoning and won't hand answers, and it is not "
+    "a crisis or care service. What you write is saved to this invite's own private file, is "
+    "sent to the AI model that powers the pressing, and is read by the two people who build "
+    "this. Closing the tab ends a visit; your room is here when you come back."
+)
+
 # Honest fit, user-centric (§2a, copy pinned): low mapper confidence never silently stretches.
 _HONEST_FIT = (
     "There's more in that than one sitting can press. The sharpest pressure I can put on it: "
@@ -908,6 +925,7 @@ class SessionRegistry:
                             "say",
                             {
                                 "text": _FRONTDOOR_ASK,
+                                "scope": _FRONTDOOR_SCOPE,
                                 "frontdoor": True,
                                 "menu": {"problems": labels, "refs": refs, "eids": eids},
                                 "theme": theme,
@@ -1598,6 +1616,7 @@ class SessionRegistry:
                 }
                 frontdoor_block = {
                     "text": ch.frontdoor_pending or _FRONTDOOR_ASK,
+                    "scope": _FRONTDOOR_SCOPE,
                     "menu": menu_block,
                 }
                 mode = "engine"
@@ -1629,7 +1648,11 @@ class SessionRegistry:
                         "problems": data["menu"]["problems"],
                         "nonce": data["menu"].get("nonce", 0),
                     }
-                    frontdoor_block = {"text": data["text"], "menu": menu_block}
+                    frontdoor_block = {
+                        "text": data["text"],
+                        "scope": _FRONTDOOR_SCOPE,
+                        "menu": menu_block,
+                    }
 
         rec = self._last_record.get(session_id)
         end_visible = rec is not None

@@ -1266,3 +1266,57 @@ def test_vessels_ride_frontdoor_and_close_payloads_as_bare_count(tmp_path, make_
 
     blob = _json.dumps([cl, reload])
     assert "gen:" not in blob and "veldra:" not in blob
+
+
+# --- S6: the front door says what this is before she types (safety floor, 2026-08-30) -------------
+
+
+def test_the_cold_front_door_carries_the_scope_statement(tmp_path, make_fake):
+    """The front door asks "What are you facing right now? Describe the decision." with no terms,
+    no storage notice and no statement of what this is, anywhere -- an unbounded invitation to
+    disclose. The scope statement rides the SAME payload as the ask, so no render path can serve
+    the invitation without the frame around it. Static, zero model calls.
+    """
+    client = _world_client(tmp_path, make_fake)
+    fd = client.post("/api/session").json()
+    assert fd["kind"] == "frontdoor"
+    scope = fd.get("scope", "")
+    assert scope, "the front door serves no scope statement"
+    low = scope.lower()
+    assert "saved" in low or "stored" in low, "the statement does not say her words are kept"
+    assert "model" in low, "the statement does not say a model sees her words"
+    assert "crisis" in low or "care" in low, (
+        "the statement does not say what this is NOT -- the exit-honesty half of the care lane"
+    )
+
+
+def test_the_resumed_front_door_carries_the_same_scope(tmp_path, make_fake):
+    """A process restart mid-front-door re-serves the ask through a DIFFERENT code path (the
+    resume projection); the statement must survive that path too, or a returning learner gets
+    the invitation without the frame exactly once."""
+    from elenchus.web.session_runner import _FRONTDOOR_SCOPE, SessionRegistry
+
+    db = str(tmp_path / "resume-scope.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    reg.resume_or_start("single")
+    # a fresh registry over the same db = the restarted process (state 8: mid-front-door)
+    reg2 = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    tag, data = reg2.resume_or_start("single")
+    if tag == "resume":
+        block = data.get("frontdoor") or {}
+        assert block.get("scope") == _FRONTDOOR_SCOPE, (
+            f"the resume path serves the ask without the scope statement: {sorted(block)}"
+        )
+    else:
+        assert tag == "say" and data.get("scope") == _FRONTDOOR_SCOPE, (tag, sorted(data))
+
+
+def test_the_client_renders_the_scope_line():
+    """Static check, matching this suite's renderer-pipeline style: both client render paths for
+    the front door must show the scope before the ask. A payload key nothing renders is a
+    compliance claim, not a notice."""
+    from pathlib import Path
+
+    html = Path("src/elenchus/web/static/index.html").read_text()
+    assert html.count("r.scope") >= 1, "renderFrontdoor never renders the scope"
+    assert "frontdoor.scope" in html, "the resume front-door path never renders the scope"
