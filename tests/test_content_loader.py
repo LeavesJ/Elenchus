@@ -205,9 +205,13 @@ def test_a_rubric_without_a_decision_frame_loads_with_none(tmp_path):
     assert content_loader.load_rubric("y", root=tmp_path).decision_frame is None
 
 
-def test_license_continuity_declares_the_commitment_decision_frame():
+def test_license_continuity_declares_the_refusal_decision_frame():
+    """The §2d repair (2026-08-30): the DF moved to lead_with_what_you_refuse_to_do so that
+    commit_under_the_deadline keeps an unprompted channel here once its own territory (the
+    fourth, on veldra:berkeley_focus_allocation) carries it as DF. The commit frame and its
+    trap stay on the rubric -- only the forced-first-probe slot moved."""
     rub = content_loader.load_rubric("license_continuity")
-    assert rub.decision_frame == "commit_under_the_deadline"
+    assert rub.decision_frame == "lead_with_what_you_refuse_to_do"
     assert any(f.frame_code == "commit_under_the_deadline" for f in rub.frames)
     assert any(t.trap_code == "commit_without_a_tripwire" for t in rub.traps)
 

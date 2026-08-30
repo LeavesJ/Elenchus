@@ -196,3 +196,35 @@ def test_the_report_names_the_threshold_it_used(tmp_path):
     assert "6:00:00" in text or "6h" in text, f"the threshold is not in the output: {text!r}"
     assert "post hoc" in text.lower(), "the output does not disclose that it was chosen post hoc"
     assert "D1" in text and "D7" in text
+
+
+def test_the_report_script_runs_over_tenant_files(tmp_path):
+    """The Friday 09-05 deliverable: point the script at data/tenants and read D1/D7. Driven as a
+    real subprocess -- the exact invocation the founders will type -- not an import."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from elenchus.web.sitting_store import SittingStore
+
+    tenants = tmp_path / "tenants"
+    for slug, offsets in {"ada": [0, 25], "bo": [0]}.items():
+        db = tenants / slug / "elenchus.db"
+        db.parent.mkdir(parents=True)
+        store = SittingStore(str(db))
+        sid = store.create_sitting(_T0)
+        for hours in offsets:
+            store.append_turn(sid, "you", {"text": "t"}, _T0 + timedelta(hours=hours))
+
+    src = Path(__file__).resolve().parents[1] / "src"
+    out = subprocess.run(
+        [sys.executable, str(src.parent / "scripts" / "retention_report.py"), str(tenants)],
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(src)},
+    )
+
+    assert out.returncode == 0, out.stderr
+    assert "ada" in out.stdout and "bo" in out.stdout
+    assert "D1" in out.stdout and "D7" in out.stdout
+    assert "post hoc" in out.stdout.lower()
