@@ -475,10 +475,10 @@ _STATIC_SITTING_CLOSE = (
 # had no visible stop. The exit is the honest substitute for the care lane the product must not
 # claim: full recall for anyone who wants out. Factual register, no validation of the choice
 # (Invariant 2's spirit), no village claim -- there is nothing to show yet.
-_STATIC_LEAVE = (
-    "Left there. Nothing more gets asked; your room keeps what you wrote, "
-    "and it's here when you come back."
-)
+# Copy narrowed 2026-08-30 after the founder read it on a real phone: "it's here when you come
+# back" promised a return the design refuses -- a left sitting never resumes; the next visit is
+# a fresh front door. The rows ARE kept (Invariant 4), so say that half and only that half.
+_STATIC_LEAVE = "Left there. Nothing more gets asked, and what you wrote stays saved."
 
 # Durable sittings: the static seam line on a continued segment (signage, not warmth — muted
 # register, not a Vera bubble; the sitting-aware AUTHORED seam is founder-gated, spec §1).

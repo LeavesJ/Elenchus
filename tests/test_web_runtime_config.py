@@ -89,3 +89,36 @@ def test_loopback_without_an_explicit_database_stays_allowed():
 
     assert db == DEFAULT_DB
     assert host == "127.0.0.1"
+
+
+def test_the_entrypoint_makes_info_logs_reach_stderr(tmp_path):
+    """The model_call timing lines log at INFO, and logging's last-resort handler drops below
+    WARNING -- so the production process silently discarded the exact data Monday's measurement
+    needs, while the suite's caplog (which captures at any level) stayed green: L-9's logging
+    variant, found live on 2026-08-30. The entrypoint must configure logging so INFO from the
+    elenchus loggers lands on stderr."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[1] / "src"
+    out = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import logging, elenchus.web.__main__; "
+            "logging.getLogger('elenchus.model').info('model_call probe 0.42s')",
+        ],
+        env={
+            "PYTHONPATH": str(src),
+            "PATH": "/usr/bin:/bin",
+            "ELENCHUS_DB": str(tmp_path / "probe.db"),
+        },
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    assert "model_call probe" in out.stderr, (
+        f"an INFO log from the model logger never reached stderr: {out.stderr!r}"
+    )
