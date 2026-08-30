@@ -10,6 +10,23 @@ SAFE_CONTRACT = (
 
 _INVITE = "The call's yours. Take a position and reason it out — I'll push, I won't hand it over."
 
+# The refusal fallback for a PROBE turn (safety floor S1, 2026-08-30). When the persona author
+# fails -- a stop_reason == "refusal" from the classifier, or an empty completion; concierge_turn
+# collapses both to "" -- the old fallback served the VERBATIM engine push: text authored under
+# push.md ("never hand the answer", "do not validate, reassure, or soften") with no persona layer
+# at all. On the refusal case that is an inversion: the safety system flags the exchange and the
+# response is to serve the strictly harsher artifact. Not SAFE_CONTRACT either -- "take a real
+# position" is wrong mid-press; she just did. This holds the press for ONE turn, keeps the effort
+# hers, performs no move, and the loop's next respond() presses again.
+#
+# Deliberately NOT used on the added-revelation branch below: there the voiced text leaked more
+# than the push, the push is the LESS revealing artifact, and falling back to it is the safety
+# mechanism working.
+_PUSH_HELD = (
+    "I'm going to hold my push this turn. Stay with what you've laid out — "
+    "walk me through the part you're least sure of."
+)
+
 # Post-landing wind-down fallback (spec §2c): the diagnostic is DONE — never promise a push (the
 # old SAFE_CONTRACT fallback lied: "reason it out and I'll push" with no engine behind it). Branch
 # on whether a sequel is actually available (review pt 4 — never promise a chapter that won't
@@ -85,7 +102,9 @@ def turn(
     """Author one engaged visible turn. push != "" -> PROBE: pursue the engine's angle, grounded in
     the student's words; egress = added-revelation vs the push baseline, fallback the verbatim push.
     push == "" -> RE-INVITE: acknowledge + invite a real position; egress = flat (perform no move),
-    fallback SAFE_CONTRACT. A refused/empty author also takes the fallback. arc=(n, cap) is the
+    fallback SAFE_CONTRACT. A refused/empty AUTHOR is different from a leak: it takes _PUSH_HELD
+    on the probe branch (S1 -- never substitute the harsher un-voiced push for a refusal) and
+    SAFE_CONTRACT on the re-invite branch. arc=(n, cap) is the
     frame-blind position hint (probe turns only — the stance doctrine in concierge.md eases on it).
 
     boundary-6 Fix 1: on the PROBE branch, a screen that CANNOT run (ModelError) is treated as
@@ -94,7 +113,7 @@ def turn(
     v = resolve_presentation(posture, exp)["voice"]
     text = model.concierge_turn(exp.prompt, push, recent, arc=arc, voice=v)
     if not text:
-        return push or SAFE_CONTRACT
+        return _PUSH_HELD if push else SAFE_CONTRACT
     if push:
         try:
             added_revelation = _performed(model, exp, text) - _performed(model, exp, push)

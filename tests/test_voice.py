@@ -145,12 +145,17 @@ def test_turn_reinvite_uses_flat_gate_and_safe_contract_on_leak():
 
 
 def test_turn_empty_concierge_output_falls_back():
+    """An empty completion and a refusal are indistinguishable at this seam -- concierge_turn
+    collapses both to "" -- so both take the S1 fallback. Serving the un-voiced push on the
+    'merely empty' case would require the seam to tell them apart, and the safe direction is the
+    same for both: hold the press one turn."""
+
     class _Empty(FakeModel):
         def concierge_turn(self, problem, push, recent, *, arc=None, voice=""):
             return ""
 
     m = _Empty(_intake(), {})
-    assert voice.turn(m, _exp(), "push", [("student", "x")]) == "push"  # probe -> push
+    assert voice.turn(m, _exp(), "push", [("student", "x")]) == voice._PUSH_HELD
     assert (
         voice.turn(m, _exp(), "", [("student", "x")]) == voice.SAFE_CONTRACT
     )  # reinvite -> contract
@@ -898,3 +903,50 @@ def test_converse_fallback_is_honest_and_branches_on_sequel():
     assert story == voice._CONVERSE_DONE_STORY and "chapter" in story.lower()
     assert fresh == voice._CONVERSE_DONE_FRESH and "chapter" not in fresh.lower()
     assert voice.SAFE_CONTRACT not in (story, fresh)
+
+
+# --- S1: the refusal fallback must not trade upward (safety floor, 2026-08-30) --------------------
+
+
+def test_a_refused_probe_serves_the_held_static_not_the_push():
+    """The one inverted branch in the safety audit, driven through the REAL AnthropicModel: a
+    stop_reason == "refusal" on the humane persona turn used to substitute the VERBATIM engine
+    push -- text authored under push.md, whose rules are "never hand the answer" and "do not
+    validate, reassure, or soften", with no persona layer at all. The refusal was not ignored;
+    it was traded upward in adversarial pressure, at exactly the moment the classifier was
+    worried about the exchange.
+    """
+    m = AnthropicModel(client=_RefusingClient())
+    out = voice.turn(m, _exp(), "the canonical push", [("student", "x")])
+    assert out == voice._PUSH_HELD
+    assert out != "the canonical push", "the refusal was traded for the harsher artifact"
+    assert out != voice.SAFE_CONTRACT, (
+        "SAFE_CONTRACT says 'take a real position' -- wrong mid-press; she just did"
+    )
+
+
+def test_a_refused_reinvite_still_serves_the_contract():
+    """The other arm is NOT inverted and must not move: with no push on the table, the contract's
+    'take a real position' is exactly right."""
+    m = AnthropicModel(client=_RefusingClient())
+    assert voice.turn(m, _exp(), "", [("student", "huh?")]) == voice.SAFE_CONTRACT
+
+
+def test_a_revelation_leak_still_serves_the_verbatim_push():
+    """The OTHER path to the push fallback is correct and must not be caught in this fix: when
+    the voiced text performs moves beyond the push, the push is the LESS revealing artifact and
+    falling back to it is the safety mechanism working. Only the authoring-failure branch was
+    inverted."""
+    m = FakeLeakModel(_intake(), {})
+    assert voice.turn(m, _exp(), "the canonical push", [("student", "x")]) == "the canonical push"
+
+
+def test_the_held_static_performs_no_move_and_promises_nothing_false():
+    """The static's own contract: it may not name a frame or a move (Invariant 3 vocabulary
+    lives in rubric details), may not hand an answer, and may not promise an engine action in
+    different words than the loop can keep. It holds the press for ONE turn; the loop's next
+    respond() presses again."""
+    text = voice._PUSH_HELD.lower()
+    for banned in ("frame", "trap", "the move", "the answer is"):
+        assert banned not in text, f"the held static must not say {banned!r}"
+    assert text != voice.SAFE_CONTRACT.lower()
