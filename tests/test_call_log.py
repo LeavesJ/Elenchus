@@ -389,3 +389,34 @@ def test_latency_disclosure_names_the_sdk_retry_contamination():
     )
 
     assert "backoff" in out.lower() or "retries" in out.lower()
+
+
+def test_a_budget_refusal_is_counted_and_never_mistaken_for_a_model_refusal():
+    """Two different events that both mean "a call did not happen", and conflating them would be
+    a bad reading: a MODEL refusal is Anthropic's safety classifier declining, and a BUDGET
+    refusal is our own ceiling firing under load. One is a doctrine signal, the other is an
+    operations signal, and the number that matters is different for each."""
+    from elenchus.model import BudgetExceeded, _TimedMessages
+    from elenchus.spend import Budget
+
+    class _C:
+        class messages:
+            @staticmethod
+            def create(**k):
+                return 1
+
+    def drive():
+        budget = Budget(max_calls=1)
+        c = _TimedMessages(_C(), budget=budget)
+        c.create(model="m")
+        try:
+            c.create(model="m")
+        except Exception:
+            pass
+
+    calls = call_log.parse_calls(_capture(drive).splitlines())
+
+    assert len(calls.timings) == 1, "the refused call must not appear as a billed call"
+    assert calls.refusals == [], "a budget refusal is not a model refusal"
+    assert len(calls.budget_refusals) == 1
+    assert BudgetExceeded is not None  # the type the ceiling raises, re-exported for callers

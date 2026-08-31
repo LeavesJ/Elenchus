@@ -140,3 +140,24 @@ def test_the_web_default_factory_reads_the_ceiling_from_the_environment(monkeypa
 
     monkeypatch.delenv("ELENCHUS_MAX_CALLS", raising=False)
     assert web_app._default_model()._budget is None
+
+
+def test_the_ceiling_says_so_server_side_when_it_fires(caplog):
+    """Invariant 10, and an operations question: the wire is deliberately generic ("that door hit
+    an error"), so if the ceiling is silent server-side too then hitting it is indistinguishable
+    from a 401, a timeout, or a bug. The operator needs to tell "we bounded this" from "this
+    broke", and the whole point of the ceiling is that it fires under abuse -- exactly when
+    somebody will be reading the log to find out what happened."""
+    import logging
+
+    budget = spend.Budget(max_calls=1)
+    client = _TimedMessages(_FakeClient(), budget=budget)
+    client.create(model="m")
+
+    with caplog.at_level(logging.WARNING, logger="elenchus.model"):
+        with pytest.raises(ModelError):
+            client.create(model="m")
+
+    assert any("spend budget" in r.getMessage() for r in caplog.records), (
+        "the ceiling fired and the server log says nothing about it"
+    )

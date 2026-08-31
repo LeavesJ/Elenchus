@@ -30,6 +30,9 @@ _REFUSAL_BRANCHES = {
 
 _TIMING = re.compile(r"model_call (\S+) ([0-9]+\.[0-9]+)s\s*$")
 _REFUSAL = re.compile(r"model refusal in (\S+?): category=(\S*) explanation=(.*)$")
+# Our OWN ceiling firing, which is not the same event as Anthropic's classifier declining. One is
+# a doctrine signal and one is an operations signal, and pooling them would answer neither.
+_BUDGET = re.compile(r"spend budget refused a (\S+) call")
 
 
 @dataclass(frozen=True)
@@ -49,6 +52,7 @@ class Refusal:
 class ModelCalls:
     timings: list[Timing] = field(default_factory=list)
     refusals: list[Refusal] = field(default_factory=list)
+    budget_refusals: list[str] = field(default_factory=list)
 
 
 def parse_calls(lines) -> ModelCalls:
@@ -63,6 +67,10 @@ def parse_calls(lines) -> ModelCalls:
             calls.refusals.append(
                 Refusal(where=m.group(1), category=m.group(2), explanation=m.group(3).strip())
             )
+            continue
+        m = _BUDGET.search(line)
+        if m:
+            calls.budget_refusals.append(m.group(1))
     return calls
 
 
@@ -126,6 +134,14 @@ def report(calls: ModelCalls, sources: list[str]) -> str:
             st = by_kind[kind]
             lines.append(f"{kind:<10}{st.count:>5}{st.median:>9.2f}s{st.p95:>9.2f}s{st.max:>9.2f}s")
         lines.append("")
+
+    if calls.budget_refusals:
+        lines += [
+            f"the per-process spend ceiling refused {len(calls.budget_refusals)} call(s). That is "
+            "OUR bound firing, not the model declining -- either a room is being driven far "
+            "harder than a sitting needs, or the ceiling is set too low for real use.",
+            "",
+        ]
 
     if calls.refusals:
         seen: dict[str, int] = {}

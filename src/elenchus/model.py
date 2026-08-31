@@ -688,6 +688,10 @@ class _TimedMessages:
             try:
                 self._budget.charge()
             except BudgetExceeded as exc:
+                # Server side, and LOUD (Invariant 10). The wire is deliberately generic, so a
+                # silent ceiling is indistinguishable from a 401, a timeout or a bug -- and this
+                # fires precisely when somebody is reading the log to find out what happened.
+                _log.warning("spend budget refused a %s call: %s", kind, exc)
                 raise ModelError(str(exc)) from exc
 
         t0 = _time.perf_counter()
