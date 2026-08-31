@@ -63,5 +63,6 @@ select = ["E4", "E7", "E9", "F"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
+    "real_default_env_file: sees the shipped DEFAULT_ENV_FILE rather than the hermetic stub",
     "live: exercises the real Anthropic API (requires ANTHROPIC_API_KEY); skipped otherwise",
 ]

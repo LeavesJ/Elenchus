@@ -33,6 +33,11 @@ from elenchus.spend import DEFAULT_MAX_CALLS
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# Where the key lives when it is not in the repo. Known to the code rather than exported by hand:
+# a relocation that depends on an env var breaks in the next fresh shell, and the failure mode is
+# a keyless launch, which this project has paid for three times. ELENCHUS_ENV_FILE overrides it.
+DEFAULT_ENV_FILE = Path.home() / ".config" / "elenchus" / "env"
+
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 _LABEL = r"[a-z0-9]([a-z0-9-]*[a-z0-9])?"
 _HOSTNAME_RE = re.compile(rf"^{_LABEL}(\.{_LABEL}){{1,}}$")
@@ -82,17 +87,25 @@ def resolve_key(env: dict, repo_root: Path) -> str | None:
     """
     if env.get("ANTHROPIC_API_KEY"):
         return env["ANTHROPIC_API_KEY"]
-    dotenv = repo_root / ".env"
-    if not dotenv.exists():
-        return None
-    for raw in dotenv.read_text().splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    # In order: the repo's own .env, then a file named by ELENCHUS_ENV_FILE. The out-of-tree
+    # location exists because this repo lives inside macOS's Desktop & Documents sync container,
+    # so a key at <repo>/.env is replicated to Apple and to every device on the Apple ID. Repo
+    # first, so an existing checkout keeps behaving exactly as it does today.
+    candidates = [repo_root / ".env"]
+    outside = (env.get("ELENCHUS_ENV_FILE") or os.environ.get("ELENCHUS_ENV_FILE") or "").strip()
+    candidates.append(Path(outside) if outside else DEFAULT_ENV_FILE)
+    for dotenv in candidates:
+        if not dotenv.exists():
             continue
-        key, _, val = line.partition("=")
-        if key.removeprefix("export ").strip() == "ANTHROPIC_API_KEY":
-            val = val.strip().strip('"').strip("'")
-            return val or None
+        for raw in dotenv.read_text().splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            if key.removeprefix("export ").strip() == "ANTHROPIC_API_KEY":
+                val = val.strip().strip('"').strip("'")
+                if val:
+                    return val
     return None
 
 

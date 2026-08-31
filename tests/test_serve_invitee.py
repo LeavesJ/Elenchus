@@ -21,6 +21,24 @@ sys.path.insert(0, str(SRC.parent / "scripts"))
 from serve_invitee import build_env, resolve_slug  # noqa: E402 -- needs the insert above
 
 
+@pytest.fixture(autouse=True)
+def _no_operator_key_file(request, tmp_path_factory, monkeypatch):
+    """Point DEFAULT_ENV_FILE at a path that does not exist, for every test in this file.
+
+    Once the key moved out of the synced repo, `resolve_key` gained a real default location --
+    and the moment a developer has one installed, every test asserting "no key is reachable"
+    starts reading the OPERATOR'S OWN key and passing or failing on machine state. A suite whose
+    green depends on whether the person running it happens to have a key installed is not a
+    suite. `serve_invitee` is imported by path, so patch the module object directly."""
+    import serve_invitee
+
+    if "real_default_env_file" in request.keywords:
+        return  # this one test is ABOUT the shipped default, so it must see the real value
+    monkeypatch.setattr(
+        serve_invitee, "DEFAULT_ENV_FILE", tmp_path_factory.mktemp("no-key") / "absent"
+    )
+
+
 def test_a_slug_is_a_path_component_not_a_path(tmp_path):
     """Input validation at the system boundary: the slug names a directory UNDER the root, and
     anything that could escape it -- separators, dots, an absolute path -- is refused before a
@@ -335,3 +353,62 @@ def test_every_invitee_launch_carries_a_spend_ceiling_by_default(tmp_path):
         repo_root=tmp_path,
     )
     assert explicit["ELENCHUS_MAX_CALLS"] == "50"
+
+
+def test_the_key_can_live_OUTSIDE_the_repo_so_it_need_not_sit_in_a_synced_folder(
+    tmp_path, monkeypatch
+):
+    """The repo is inside macOS's Desktop & Documents sync container, so `<repo>/.env` — holding a
+    live paid key — is replicated to Apple and to every device on the Apple ID. The file cannot
+    move out until the launcher can find it somewhere else, so this is the code half of that move.
+
+    Order matters and matches `_load_dotenv`'s own setdefault precedence: a real exported variable
+    beats the repo file, and the repo file beats the out-of-tree one, so nothing that works today
+    changes behaviour."""
+    from serve_invitee import resolve_key
+
+    outside = tmp_path / "config" / "elenchus" / "env"
+    outside.parent.mkdir(parents=True)
+    outside.write_text("ANTHROPIC_API_KEY=sk-from-outside-the-repo\n")
+    monkeypatch.setenv("ELENCHUS_ENV_FILE", str(outside))
+
+    repo = tmp_path / "repo"
+    repo.mkdir()  # deliberately no .env here
+
+    assert resolve_key({}, repo) == "sk-from-outside-the-repo"
+
+
+def test_the_repo_env_still_wins_over_the_out_of_tree_one(tmp_path, monkeypatch):
+    """Nothing that works today may change: an existing checkout with its own .env keeps behaving
+    exactly as it does now, whether or not the new location is configured."""
+    from serve_invitee import resolve_key
+
+    outside = tmp_path / "outside-env"
+    outside.write_text("ANTHROPIC_API_KEY=sk-outside\n")
+    monkeypatch.setenv("ELENCHUS_ENV_FILE", str(outside))
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".env").write_text("ANTHROPIC_API_KEY=sk-in-repo\n")
+
+    assert resolve_key({}, repo) == "sk-in-repo"
+
+
+def test_the_out_of_tree_location_has_a_default_so_the_move_needs_no_configuration(
+    tmp_path, monkeypatch
+):
+    """A relocation that only works once an env var is exported is a relocation that breaks the
+    next time somebody opens a fresh shell — and the failure mode is a keyless launch, which this
+    project has now paid for three times. So the default location is known to the code, and
+    ELENCHUS_ENV_FILE only overrides it."""
+    from serve_invitee import resolve_key
+
+    monkeypatch.delenv("ELENCHUS_ENV_FILE", raising=False)
+    monkeypatch.setattr("serve_invitee.DEFAULT_ENV_FILE", tmp_path / "cfg" / "env")
+    (tmp_path / "cfg").mkdir()
+    (tmp_path / "cfg" / "env").write_text("ANTHROPIC_API_KEY=sk-default-location\n")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    assert resolve_key({}, repo) == "sk-default-location"
