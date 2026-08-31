@@ -91,7 +91,9 @@ def _push_label_leak(push: str, rubric) -> str | None:
     push_screen_probe.py's module docstring).
 
     `run_push_screen_probe` later measured the real distribution directly: 64 real `generate_push`
-    outputs (model claude-opus-5, all five open-ended rubrics, 32 with real learner positions and
+    outputs (model claude-opus-5, the five open-ended rubrics that existed on 2026-08-06 -- three
+    more shipped 2026-08-31 and are NOT in that sample, so Invariant 7 leaves this bar
+    unproven on them -- 32 with real learner positions and
     32 blind, 20 stress and 44 not, one run, 2026-08-03) and BOTH bars -- this one and the full
     validate_scene bar -- rejected 0 of 64. On real push output there was no false-positive
     problem for the narrowing to fix, so the empirical argument above is falsified by the same

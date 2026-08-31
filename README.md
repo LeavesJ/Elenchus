@@ -60,17 +60,17 @@ innovation, which is what the world's geography exists to make visible.
 **Single-user dogfood, on localhost. Not a beta.** That is deliberate: what is missing is content,
 not infrastructure.
 
-Everything a learner types is mapped onto one of **five decision territories**
-(`content/territories/`). Five is enough for people whose sittings we watch and not enough for a
+Everything a learner types is mapped onto one of **eight decision territories**
+(`content/territories/`). Eight is enough for people whose sittings we watch and not enough for a
 stranger; ten to twelve is the gate before any external use. The other two things between here and
 a beta are ordinary: multi-user persistence and auth, and a care lane so that someone in real
 distress mid-sitting meets care instead of pressure.
 
 The honest gap in the product is that the world is built for many domains and ours has collapsed
-into one, because all five territories currently share a domain. The plural geography is real code
+into one, because all eight territories currently share a domain. The plural geography is real code
 with real tests and no second instance yet.
 
-Suite: **1282 passing / 35 skipped**, measured from a fresh clone of this repository, which is what
+Suite: **1390 passing / 35 skipped**, measured from a fresh clone of this repository, which is what
 you will see. Four of those skips need a corpus that is not tracked here. The graded engine core
 (`orchestration`, `assessment/`) is held
 byte-stable and surface work rides additive seams around it, so changing the rented model is a
