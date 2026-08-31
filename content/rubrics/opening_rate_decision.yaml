@@ -11,7 +11,7 @@ prompt: >
   is running it. Next week you sit down with the one counterparty whose yes would change that, and
   the number you walk in with is the number every later conversation is measured from. Hold the
   rate, meet a buyer who has seen no proof, or change the shape of the offer. Decide what you take
-  into that room, and account for what you are trading and how it fails if you have read it wrong.
+  into that room, and account for what you are trading.
   (No framework is named for you on purpose.)
 frames:
   - frame_code: choose_the_failure_default_deliberately
