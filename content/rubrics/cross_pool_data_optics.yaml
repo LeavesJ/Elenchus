@@ -1,0 +1,27 @@
+experience_id: cross_pool_data_optics
+display_title: "A moat built on what customers handed you"
+ledger_ref: "veldra:cross_pool_data_optics"
+regime: open_ended
+role: ceo
+mode: genuinely_open
+binding_constraint: null
+prompt: >
+  The capability nobody can copy runs on data your own customers hand you, and it works only
+  because it spans all of them at once. Any one of them, reading plainly what it does, would see
+  how the same signal could be pointed at their rivals. The collection is already live, ahead of
+  anything you have written down about what you will and will not do with it — and a customer's
+  security review asks the question outright this week. Decide what you tell them, and account for
+  what you are trading.
+  (No framework is named for you on purpose.)
+frames:
+  - frame_code: lead_with_what_you_refuse_to_do
+    frame_detail: State the boundary you will not cross before proposing any action.
+    paired_trap: scope_creep_to_please
+traps:
+  - trap_code: scope_creep_to_please
+    trap_detail: Bending the offer to avoid saying no.
+  - trap_code: let_the_collection_settle_the_policy
+    trap_detail: Allowed whatever the gathering already reaches to stand in for a choice about what may be done with it.
+  - trap_code: reassured_in_terms_too_broad_to_bind
+    trap_detail: Offered a soothing generality that survives the room and binds nothing in the months after.
+decision_frame: lead_with_what_you_refuse_to_do

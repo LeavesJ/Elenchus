@@ -94,6 +94,14 @@ TERRITORY_IDS = (
     "irreversible_anchor",
     "continuity_lock_in",
     "proof_before_promise",
+    # The isolated homes (founder-ratified 2026-08-29, authored 2026-08-31). Each is a 1-frame
+    # rubric, so each closes exactly one cold-start content gap in policy._content_gaps. The
+    # FOURTH (commit_under_the_deadline's home, on veldra:berkeley_focus_allocation) is HELD: its
+    # path trips the gate's confidential filename rule on a PUBLIC repo, and re-keying the slug
+    # is a T3 stable-identifier change. See docs/DEVLOG.md 2026-08-31.
+    "opening_rate_decision",
+    "cross_pool_data_optics",
+    "adoption_funnel_stalls",
 )
 
 # The pinned DF matrix (spec §2d), with the signal costs named in the spec (a DF frame loses
@@ -113,6 +121,13 @@ PINNED_DECISION_FRAMES = {
     "irreversible_anchor": "choose_the_failure_default_deliberately",
     "continuity_lock_in": "embed_credentials_as_a_list",
     "proof_before_promise": "protect_the_core_lane",
+    # The isolated homes. A 1-frame rubric FORCES its own DF, so each of these is the frame
+    # itself; the §2d rule survives because every one of them keeps a non-DF home among the
+    # curated five (choose_failure -> proof_before_promise, lead -> decision_under_stakes,
+    # protect -> license_continuity).
+    "opening_rate_decision": "choose_the_failure_default_deliberately",
+    "cross_pool_data_optics": "lead_with_what_you_refuse_to_do",
+    "adoption_funnel_stalls": "protect_the_core_lane",
 }
 
 
@@ -162,8 +177,8 @@ def test_df_matrix_is_pinned_and_the_rule_holds():
     """§2d: every rubric carries the PINNED decision_frame, the DF names a frame that exists in
     that rubric, and the rule holds — computed from content: no frame that lives on 2+ territories
     is DF on all of them (a multi-home frame keeps an unprompted channel somewhere). Since the
-    §2d repair, commit_under_the_deadline is DF nowhere in the curated five; its DF home arrives
-    with the fourth territory (veldra:berkeley_focus_allocation)."""
+    §2d repair, commit_under_the_deadline is DF nowhere at all, and it is the one frame still
+    without an isolated home — its territory is authored but HELD (see TERRITORY_IDS)."""
     library = {e.experience_id: e for e in load_library()}
     assert set(PINNED_DECISION_FRAMES) == set(library)
     homes: dict[str, set[str]] = {}

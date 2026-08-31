@@ -821,10 +821,12 @@ def test_reserve_convergence_adds_a_new_house(tmp_path, make_fake):
     wall = datetime.now(timezone.utc)
     # Every territory except the one the scripted fake maps the situation to -- derived, so a
     # new territory does not leave a door unwindowed and flip the asserted "reserve" to a "say"
-    # (territory-cost audit 2026-08-30). continuity_lock_in is a FIXTURE fact: the fake's map.
-    aged = sorted(
-        e.experience_id for e in load_library() if e.experience_id != "continuity_lock_in"
-    )
+    # (territory-cost audit 2026-08-30). The MAPPED id is derived too as of 2026-08-31: the fake's
+    # map_territories ranks in the given order and session_runner gives it the open-ended library
+    # in glob order, so "the fake's pick" is that list's head -- naming it `continuity_lock_in`
+    # was a fixture fact that stopped being true when the four isolated homes landed.
+    mapped = next(e.experience_id for e in load_library() if e.regime.value == "open_ended")
+    aged = sorted(e.experience_id for e in load_library() if e.experience_id != mapped)
     for i, eid in enumerate(aged):
         store.log_converged("prior", f"gen:prior:{i}", wall - timedelta(hours=len(aged) - i), eid)
 
@@ -835,7 +837,7 @@ def test_reserve_convergence_adds_a_new_house(tmp_path, make_fake):
     assert r0["kind"] == "say"
     r = client.post("/api/session/s/say", json={"text": "yes"}).json()  # the confirm beat
     assert r["kind"] == "say"
-    _drive_to_done(client)  # the fifth territory converges: house 5
+    _drive_to_done(client)  # the last unwindowed territory converges: a house
     rv = client.post("/api/session/s/continue", json={}).json()
     assert rv["kind"] == "reserve"
     r2 = client.post("/api/session/s/continue", json={"work_anyway": True}).json()
@@ -930,10 +932,12 @@ def test_informed_reserve_over_http(tmp_path, make_fake):
     wall = datetime.now(timezone.utc)
     # Every territory except the one the scripted fake maps the situation to -- derived, so a
     # new territory does not leave a door unwindowed and flip the asserted "reserve" to a "say"
-    # (territory-cost audit 2026-08-30). continuity_lock_in is a FIXTURE fact: the fake's map.
-    aged = sorted(
-        e.experience_id for e in load_library() if e.experience_id != "continuity_lock_in"
-    )
+    # (territory-cost audit 2026-08-30). The MAPPED id is derived too as of 2026-08-31: the fake's
+    # map_territories ranks in the given order and session_runner gives it the open-ended library
+    # in glob order, so "the fake's pick" is that list's head -- naming it `continuity_lock_in`
+    # was a fixture fact that stopped being true when the four isolated homes landed.
+    mapped = next(e.experience_id for e in load_library() if e.regime.value == "open_ended")
+    aged = sorted(e.experience_id for e in load_library() if e.experience_id != mapped)
     for i, eid in enumerate(aged):
         store.log_converged("prior", f"gen:prior:{i}", wall - timedelta(hours=len(aged) - i), eid)
 
@@ -945,7 +949,7 @@ def test_informed_reserve_over_http(tmp_path, make_fake):
     assert r0["kind"] == "say"
     r = client.post("/api/session/s/say", json={"text": "yes"}).json()  # the confirm beat
     assert r["kind"] == "say" and r["text"] == _SCENARIO
-    _drive_to_done(client)  # the fifth territory converges: every door is now windowed
+    _drive_to_done(client)  # the last unwindowed territory converges: every door windowed
 
     rv = client.post("/api/session/s/continue", json={}).json()
     assert rv["kind"] == "reserve"

@@ -1,0 +1,27 @@
+experience_id: adoption_funnel_stalls
+display_title: "The first outside adopter stalled halfway"
+ledger_ref: "veldra:adoption_funnel_stalls"
+regime: open_ended
+role: ceo
+mode: genuinely_open
+binding_constraint: null
+prompt: >
+  The path you designed for customers to move from free to paid has exactly one person who has
+  walked the whole of it, and it was you, under conditions you controlled. The first outsider to
+  try has stopped halfway, and their team is plain about the price of going on: build them their
+  own way through, or they stay where they are. Saying yes buys the only real crossing you have
+  ever had, on terms every later customer will hear about. Decide what you do, and account for
+  what you are trading.
+  (No framework is named for you on purpose.)
+frames:
+  - frame_code: protect_the_core_lane
+    frame_detail: Keep the promise the core product makes to everyone intact under pressure.
+    paired_trap: erode_core_for_one_customer
+traps:
+  - trap_code: erode_core_for_one_customer
+    trap_detail: Special-casing one account in a way that weakens the core promise.
+  - trap_code: bought_the_evidence_with_the_product
+    trap_detail: Paid for the single piece of proof with a change to what everyone else is sold.
+  - trap_code: read_one_blockage_as_the_market
+    trap_detail: Treated a lone account's obstacle as the general cause and rebuilt around it without checking.
+decision_frame: protect_the_core_lane

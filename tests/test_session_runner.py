@@ -1137,7 +1137,25 @@ _SCENARIO = (
 
 # Library (glob-sorted) order — FakeModel.map_territories ranks in given order, so the mapped
 # territory is the first and Continue walks this order minus the window.
-_T1, _T2, _T3 = "continuity_lock_in", "decision_under_stakes", "irreversible_anchor"
+#
+# DERIVED, not enumerated (the same correction test_experience.py's SEED_REFS took in the
+# 2026-08-30 territory-cost audit). These three names are a FIXTURE FACT about glob order, never
+# a claim about which territory anything should serve: the four isolated homes authored on
+# 2026-08-31 moved the head of that order and broke 22 tests here that only ever needed "the
+# first three, whatever they are". Deriving it puts the cost of the next territory at zero.
+_T1, _T2, _T3 = tuple(e.experience_id for e in load_library() if e.regime is Regime.open_ended)[:3]
+
+# A territory with 2+ frames and NO binding constraint, so a sitting there makes more than one
+# push. Derived as a PROPERTY, not as an index into glob order: the attempt-2 push-leak test
+# below needs "a rubric long enough to have a push 2", and reaching for _T2 to get that silently
+# broke it when the four isolated homes moved the head of the library on 2026-08-31.
+_T_MULTI_PUSH = next(
+    e.experience_id
+    for e in load_library()
+    if e.regime is Regime.open_ended
+    and len(e.rubric.frames) >= 2
+    and e.rubric.binding_constraint is None
+)
 
 
 def _world_factory(make_fake, briefs=None, outcome=None, screens=None, maps=None):
@@ -2773,10 +2791,11 @@ def test_a_second_attempt_leak_writes_the_push_label_blind_row(tmp_path, make_fa
     calling the code under test. Reaches through the real web path (SessionRegistry -> assess ->
     session_runner's persist loop -> SQLite), never a hand-built Assessment.
 
-    `_open_world`'s default territory (`continuity_lock_in`) has exactly ONE frame and no
-    tripped traps, so it converges after a single push -- there is no push 2 to leak on. Steers
-    `map_territories` (same technique as `_arm_steer`) to rank `decision_under_stakes` (_T2, two
-    frames, no binding constraint) first instead, so a genuine push 2 exists. That is still a
+    `_open_world`'s default territory is whatever the library globs first, and every isolated
+    home is a ONE-frame rubric with no tripped traps, so it converges after a single push -- there
+    is no push 2 to leak on. Steers `map_territories` (same technique as `_arm_steer`) to rank
+    `_T_MULTI_PUSH` (two frames, no binding constraint -- derived, see its definition) first
+    instead, so a genuine push 2 exists. That is still a
     legitimate way to reach an attempt-2 PUSH_LABEL_BLIND row on a push that carried positions --
     it is just no longer the only way to reach that row, per the sibling-path note above."""
     import sqlite3
@@ -2786,7 +2805,7 @@ def test_a_second_attempt_leak_writes_the_push_label_blind_row(tmp_path, make_fa
     def factory():
         m = _world_factory(make_fake)()
         m.map_territories = lambda situation, territories: TerritoryMap(
-            ranked=[_T2] + [e for e, _ in territories if e != _T2],
+            ranked=[_T_MULTI_PUSH] + [e for e, _ in territories if e != _T_MULTI_PUSH],
             confidence="high",
             reflection="[reflect]",
         )
@@ -3152,7 +3171,10 @@ def test_menu_marks_a_forge_converged_territory_as_just_worked(tmp_path, make_fa
     tag, data = reg.continue_session("s1", menu=True)  # back through the front door
     assert tag == "say" and data.get("frontdoor")
     problems = data["menu"]["problems"]
-    title = _voice.display_titles()["veldra:concentrated_market_pricing_power"]
+    # _T2's OWN ref, derived — the marker claim is "the worked territory is marked", never "this
+    # particular territory is marked" (2026-08-31: _T2 is no longer decision_under_stakes).
+    ref = next(e.ledger_ref for e in load_library() if e.experience_id == _T2)
+    title = _voice.display_titles()[ref]
     assert title + " · just worked" in problems  # territory-keyed (the gen: ref matches no door)
     marked = [p for p in problems if p.endswith(" · just worked")]
     assert len(marked) == 1  # the unworked doors stay clean

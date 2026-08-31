@@ -1,0 +1,30 @@
+experience_id: opening_rate_decision
+display_title: "An opening rate set before the proof existed"
+ledger_ref: "veldra:opening_rate_decision"
+regime: open_ended
+role: ceo
+mode: genuinely_open
+binding_constraint: null
+prompt: >
+  The opening rate you published months ago was priced against a delivery promise you have now
+  nearly kept — and against reference customers you still do not have. The build is ready; nobody
+  is running it. Next week you sit down with the one counterparty whose yes would change that, and
+  the number you walk in with is the number every later conversation is measured from. Hold the
+  rate, meet a buyer who has seen no proof, or change the shape of the offer. Decide what you take
+  into that room, and account for what you are trading and how it fails if you have read it wrong.
+  (No framework is named for you on purpose.)
+frames:
+  - frame_code: choose_the_failure_default_deliberately
+    frame_detail: State which way it fails if you are wrong, and justify defaulting to the reversible direction.
+    paired_trap: assumed_the_happy_path
+traps:
+  - trap_code: assumed_the_happy_path
+    trap_detail: Failure direction left unstated, or defaulted to whatever was cheapest.
+  - trap_code: priced_against_the_demonstration_still_owed
+    trap_detail: Anchored the figure to the capability not yet witnessed rather than the one already in hand, so the price survives only if the schedule does.
+  - trap_code: spent_the_opening_to_buy_the_meeting
+    trap_detail: Conceded the starting price to make the room easier, spending leverage that exists once and buying nothing that was ever on the table.
+# FORCED (§2d): 1-frame rubric — the only possible DF. Accepted cost: choose_the_failure loses its
+# unprompted read HERE; proof_before_promise keeps the channel (its DF is protect_the_core_lane),
+# so the §2d rule holds for a frame that now lives on four territories.
+decision_frame: choose_the_failure_default_deliberately
