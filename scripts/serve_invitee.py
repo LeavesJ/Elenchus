@@ -57,21 +57,53 @@ def resolve_hostname(raw: str) -> str:
     return raw
 
 
+def resolve_key(env: dict, repo_root: Path) -> str | None:
+    """The model key this launcher can actually reach, or None.
+
+    Two real callers: `missing_key_warning`, which refuses when this returns None, and
+    `build_env`, which puts the value into the environment the child is handed.
+
+    That second caller is the whole point, and it is why this is a resolver rather than a
+    predicate. The predicate form shipped first and had a hole that cost the beta link a day:
+    it checked `<launcher repo root>/.env` on the stated assumption that this is "the exact file
+    __main__'s dotenv load reads (same root)". The two roots are the same only when the launcher
+    script and the served package come from the same checkout. On 2026-08-30 they did not --
+    serve_invitee.py ran from the main checkout while PYTHONPATH resolved `elenchus` from a
+    worktree -- so the guard read a .env with a key, passed, and handed the child an environment
+    with no key and a root with no .env. Resolving the value here removes the assumption instead
+    of refining it: the child's own root resolution can no longer matter.
+
+    Precedence matches __main__._load_dotenv's setdefault: a real exported variable wins over
+    the file.
+    """
+    if env.get("ANTHROPIC_API_KEY"):
+        return env["ANTHROPIC_API_KEY"]
+    dotenv = repo_root / ".env"
+    if not dotenv.exists():
+        return None
+    for raw in dotenv.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        if key.removeprefix("export ").strip() == "ANTHROPIC_API_KEY":
+            val = val.strip().strip('"').strip("'")
+            return val or None
+    return None
+
+
 def missing_key_warning(env: dict, repo_root: Path) -> str | None:
     """None when a model key is reachable; otherwise the message main() refuses with.
 
-    L-18, paid for twice by 2026-08-30: the zero-token front door health-checks green with no
-    key, so a keyless instance looks alive and every DOOR dies on the first click -- the second
-    time from the founder's own phone, launched from a worktree whose root had no .env. The two
-    places a key can come from are the environment this launcher passes through and
-    <repo_root>/.env, which is the exact file __main__'s dotenv load reads (same root). When
-    both are empty the doors WILL break, so this is a refusal, not advice.
+    L-18, paid for three times by 2026-08-31: the zero-token front door health-checks green with
+    no key, so a keyless instance looks alive and every DOOR dies on the first click -- and the
+    error rides back as HTTP 200, so even the access log reads like a served turn. `resolve_key`
+    now finds the value and `build_env` hands it over, so this refusal fires on the same fact the
+    child will actually see rather than on a root this script guessed at.
     """
-    if env.get("ANTHROPIC_API_KEY"):
+    if resolve_key(env, repo_root) is not None:
         return None
     dotenv = repo_root / ".env"
-    if dotenv.exists() and "ANTHROPIC_API_KEY" in dotenv.read_text():
-        return None
     return (
         "no ANTHROPIC_API_KEY in the environment and none in "
         f"{dotenv}.\nRefusing to serve an invitee a broken instance: the zero-token front door "
@@ -80,14 +112,33 @@ def missing_key_warning(env: dict, repo_root: Path) -> str | None:
     )
 
 
-def build_env(root: Path, slug: str, host: str, port: int, base: dict | None = None) -> dict:
+def build_env(
+    root: Path,
+    slug: str,
+    host: str,
+    port: int,
+    base: dict | None = None,
+    repo_root: Path | None = None,
+) -> dict:
     """The three isolation variables `runtime.resolve_runtime` requires, over the caller's own
-    environment. The db path is always `<root>/<slug>/elenchus.db`: the per-file isolation IS the
-    privacy argument, so the launcher offers no way to point two slugs at one file."""
+    environment, PLUS the model key resolved here rather than left for the child to find.
+
+    The db path is always `<root>/<slug>/elenchus.db`: the per-file isolation IS the privacy
+    argument, so the launcher offers no way to point two slugs at one file.
+
+    The key is carried explicitly because the child resolves its dotenv path from its OWN
+    package location, which is not this script's checkout when the two live in different
+    worktrees -- the exact divergence that served the beta link keyless for hours on 2026-08-30
+    (see `resolve_key`). Absent when there is nothing to resolve: an empty string would turn a
+    loud refusal here into a confusing auth traceback at the invitee's first click.
+    """
     env = dict(base if base is not None else os.environ)
     env["ELENCHUS_DB"] = str(root / slug / "elenchus.db")
     env["ELENCHUS_HOST"] = host
     env["ELENCHUS_PORT"] = str(port)
+    key = resolve_key(env, repo_root if repo_root is not None else _REPO_ROOT)
+    if key is not None:
+        env["ANTHROPIC_API_KEY"] = key
     return env
 
 
