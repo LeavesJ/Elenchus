@@ -27,6 +27,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+# The ceiling's value is defined once, in the package, and imported here rather than copied. Two
+# literals for one number is the drift that put a keyless instance behind a green health check.
+from elenchus.spend import DEFAULT_MAX_CALLS
+
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
@@ -139,6 +143,11 @@ def build_env(
     key = resolve_key(env, repo_root if repo_root is not None else _REPO_ROOT)
     if key is not None:
         env["ANTHROPIC_API_KEY"] = key
+    # Secure by default. Nothing authenticates the invitee surface -- the hostname IS the
+    # credential -- so this ceiling is what bounds a stranger with the link, and a bound that
+    # waits for the operator to remember a flag is not a bound. setdefault, so a deliberate value
+    # still wins.
+    env.setdefault("ELENCHUS_MAX_CALLS", str(DEFAULT_MAX_CALLS))
     return env
 
 

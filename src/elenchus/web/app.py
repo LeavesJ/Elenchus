@@ -67,9 +67,19 @@ class _Outcome(BaseModel):
 
 
 def _default_model():
-    from ..model import AnthropicModel
+    """The served process, and the only caller that faces the public.
 
-    return AnthropicModel()
+    It picks the spend ceiling up from the environment rather than waiting for someone to pass
+    one, because the process that can be looped by a stranger is exactly the process nobody will
+    remember to configure. Unset means unbounded, which is what the CLI, the probes and the suite
+    keep getting.
+    """
+    import os
+
+    from ..model import AnthropicModel
+    from ..spend import from_env
+
+    return AnthropicModel(budget=from_env(os.environ))
 
 
 def _build_stamp() -> str:

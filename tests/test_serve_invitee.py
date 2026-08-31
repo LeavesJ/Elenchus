@@ -314,3 +314,24 @@ def test_a_real_child_process_receives_the_key_from_the_launchers_root(tmp_path)
     assert out.stdout.strip() == "sk-only-in-the-launchers-root", (
         "the served child came up without a key: front door green, every door broken"
     )
+
+
+def test_every_invitee_launch_carries_a_spend_ceiling_by_default(tmp_path):
+    """Secure by default. The public surface has no authentication, so the ceiling is the only
+    thing bounding what a stranger with the link can spend -- and a bound that depends on the
+    operator remembering a flag is not a bound. An explicit value still wins."""
+    from serve_invitee import build_env
+    from elenchus.spend import DEFAULT_MAX_CALLS
+
+    env = build_env(tmp_path, "ada", "0.0.0.0", 9410, base={"PATH": "/usr/bin"}, repo_root=tmp_path)
+    assert env["ELENCHUS_MAX_CALLS"] == str(DEFAULT_MAX_CALLS)
+
+    explicit = build_env(
+        tmp_path,
+        "ada",
+        "0.0.0.0",
+        9410,
+        base={"PATH": "/usr/bin", "ELENCHUS_MAX_CALLS": "50"},
+        repo_root=tmp_path,
+    )
+    assert explicit["ELENCHUS_MAX_CALLS"] == "50"

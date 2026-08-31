@@ -1,0 +1,62 @@
+"""How many paid model calls one process may make before it refuses.
+
+The web surface has no authentication -- the invitee hostname is the only credential -- so anyone
+forwarded a link can loop POSTs, and each learner turn is roughly five or six Opus calls. Auth
+belongs in front of the tunnel (Cloudflare Access) and is not this module's job. This is the bound
+that still holds when auth is absent or misconfigured, which is exactly the state a beta is in
+most often.
+
+Deliberately a CALL count and not a token count. Every call already carries its own `max_tokens`,
+so calls bound cost to within a known factor, and a count is checkable by reading one number. A
+token ceiling would be tighter and would need usage parsed off every response, including the ones
+that raise -- more surface for the thing whose entire job is to be trustworthy under abuse.
+
+Per PROCESS, which is per INVITEE, because the beta runs one process and one database per person.
+That is the same fact the isolation argument already rests on; if that ever stops being true this
+ceiling stops meaning what it says.
+"""
+
+from __future__ import annotations
+
+# Enough for a long real sitting and nowhere near enough to matter as a bill. Measured basis: the
+# founder's own live sitting on 2026-08-30 ran 16 turns; at ~6 calls per turn that is ~100 calls,
+# so this leaves roughly a 5x headroom over the longest sitting anyone has actually had.
+DEFAULT_MAX_CALLS = 500
+
+
+class BudgetExceeded(RuntimeError):
+    """Raised in place of dispatching a call that would cross the ceiling."""
+
+
+class Budget:
+    """A counter with a ceiling. Not thread-safe by design: the single-flight guard already
+    serialises a sitting's model calls, and a lock here would imply a concurrency story the rest
+    of this process does not have."""
+
+    def __init__(self, max_calls: int = DEFAULT_MAX_CALLS):
+        self.max_calls = max_calls
+        self.spent = 0
+
+    def charge(self) -> None:
+        """Count one call, or refuse. Checked BEFORE dispatch: a ceiling enforced afterwards has
+        already paid for the call it existed to prevent."""
+        if self.spent >= self.max_calls:
+            raise BudgetExceeded(
+                f"spend budget exhausted: this process has made {self.spent} model calls and "
+                f"its per-process ceiling is {self.max_calls}. Raise ELENCHUS_MAX_CALLS for this "
+                "invitee, or look at why one room is making this many calls."
+            )
+        self.spent += 1
+
+
+def from_env(env) -> Budget | None:
+    """A budget when the operator asked for one, else None meaning unbounded.
+
+    Absent must mean unbounded and never zero: the suite, the probes and the CLI all construct
+    models with no budget, and a default that refused every call would take the product down
+    rather than bound it.
+    """
+    raw = (env.get("ELENCHUS_MAX_CALLS") or "").strip()
+    if not raw:
+        return None
+    return Budget(max_calls=int(raw))
