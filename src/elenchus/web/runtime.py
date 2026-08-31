@@ -37,9 +37,17 @@ def resolve_runtime(env) -> tuple[str, str, int]:
     and a defaulted port silently collides two invitees onto one process.
     """
     host = (env.get("ELENCHUS_HOST") or DEFAULT_HOST).strip() or DEFAULT_HOST
-    db = (env.get("ELENCHUS_DB") or "").strip()
+    db = (env.get("ELENCHUS_DB") or "").strip() or DEFAULT_DB
 
-    if not db:
+    # Keyed on the VALUE, never on how it arrived. The danger this guard exists for is "an
+    # invitee is being served the founder's own file", and that file holds one particular
+    # person's decisions whether the path was defaulted or typed out in full. Keying on the
+    # variable being EMPTY meant `ELENCHUS_DB=<the default>` -- one copy-paste of the founder's
+    # own launch line -- passed in total silence on ANY bind address, while leaving it unset on
+    # the same address raised (two-instance isolation audit, 2026-08-31). `resolve()` because
+    # the live beta runs a RELATIVE ELENCHUS_DB, so a string compare would miss most spellings
+    # of the same file.
+    if Path(db).resolve() == Path(DEFAULT_DB).resolve():
         if host not in _LOOPBACK:
             raise ValueError(
                 f"refusing to serve {host} out of the default database. Binding a non-loopback "
@@ -55,7 +63,6 @@ def resolve_runtime(env) -> tuple[str, str, int]:
             "set ELENCHUS_DB to the invitee's own file first.",
             DEFAULT_DB,
         )
-        db = DEFAULT_DB
 
     raw_port = (env.get("ELENCHUS_PORT") or "").strip()
     if not raw_port:
