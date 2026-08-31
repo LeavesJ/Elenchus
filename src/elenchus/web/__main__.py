@@ -5,6 +5,7 @@ from pathlib import Path
 
 import logging
 
+from ..call_log import SERVER_LOG_FORMAT
 from .app import create_app
 from .runtime import resolve_runtime
 
@@ -12,7 +13,11 @@ from .runtime import resolve_runtime
 # config, logging's last-resort handler drops below WARNING, so the model_call timing lines --
 # the exact data the S4 measurement reads -- were silently discarded while the suite's caplog
 # stayed green. INFO on stderr; uvicorn adds its own handlers independently.
-logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
+#
+# The format comes from call_log, which is the module that READS these lines back. Two literals,
+# one here and one in the parser, drift apart in silence: the symptom of that drift is an
+# instrument reporting zero calls, which is indistinguishable from a quiet week.
+logging.basicConfig(level=logging.INFO, format=SERVER_LOG_FORMAT)
 
 _ROOT = Path(__file__).resolve().parents[3]
 
