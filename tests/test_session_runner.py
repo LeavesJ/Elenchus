@@ -3581,7 +3581,7 @@ def test_story_missing_instance_row_on_converged_record_logs_loudly(tmp_path, ma
 
 def test_territory_title_is_the_short_display_title(tmp_path, make_fake):
     reg = SessionRegistry(str(tmp_path / "tt.db"), model_factory=make_fake)
-    title = reg._territory_title(_T1)  # continuity_lock_in
+    title = reg._territory_title(_T1)  # whichever territory globs first; the assert is shape-only
     assert title and "veldra:" not in title and len(title) < 60  # short, clean
 
 

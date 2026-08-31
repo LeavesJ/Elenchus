@@ -184,7 +184,9 @@ def test_the_strong_arc_is_closed_at_cold_start_and_this_is_the_tripwire(tmp_pat
     # only home and _transfer returns 0 on a ref already in its breadth. The tie is still TWO
     # wide, but it moved UP from V=1.8333 to V=1.9167 and off the 2-frame rubrics: penalty is the
     # max uncertainty over a rubric's frames, and a 2-frame rubric drags in an unseen frame at
-    # 1.0, so an isolated home always outranks one. Frame code breaks the tie (lead < protect).
+    # 1.0, so an isolated home always outranks one. The remaining tie is broken by `load` FIRST
+    # and only then by frame code (policy.py:83 sort_key is (-V, load, f, ledger_ref, id)); both
+    # tied candidates here are 1-frame rubrics, so it comes down to lead < protect.
     #
     # WHEN THE HELD TERRITORY SHIPS, this widens to a three-way tie headed by
     # berkeley_focus_allocation (commit < lead), and `v[0] > v[2]` becomes false by arithmetic
@@ -201,7 +203,7 @@ def test_the_strong_arc_is_closed_at_cold_start_and_this_is_the_tripwire(tmp_pat
     assert [sp.experience_id for sp, _ in ranked[:2]] == [
         "cross_pool_data_optics",
         "adoption_funnel_stalls",
-    ], "the tie is broken on frame code (lead < protect), per policy.sort_key"
+    ], "equal V and equal load, so policy.sort_key falls through to frame code: lead < protect"
 
     # --- session 2 at +7d on decision_under_stakes, lead's one remaining non-DF home: the
     # unprompted read lands on R2 -- and that is the ONLY unprompted ref lead can ever earn at

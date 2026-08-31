@@ -88,20 +88,15 @@ def test_anthropic_signatures_match_the_plan():
 
 # --- Task L2: territory descriptions (spec §2a) + the DF matrix (spec §2d) ---
 
-TERRITORY_IDS = (
-    "license_continuity",
-    "decision_under_stakes",
-    "irreversible_anchor",
-    "continuity_lock_in",
-    "proof_before_promise",
-    # The isolated homes (founder-ratified 2026-08-29, authored 2026-08-31). Each is a 1-frame
-    # rubric, so each closes exactly one cold-start content gap in policy._content_gaps. The
-    # FOURTH (commit_under_the_deadline's home, on veldra:berkeley_focus_allocation) is HELD: its
-    # path trips the gate's confidential filename rule on a PUBLIC repo, and re-keying the slug
-    # is a T3 stable-identifier change. See docs/DEVLOG.md 2026-08-31.
-    "opening_rate_decision",
-    "cross_pool_data_optics",
-    "adoption_funnel_stalls",
+# DERIVED, not enumerated. These ids drive the ONLY gate the territory descriptions have (the
+# two @parametrize'd tests below), so a literal list means a shipped territory can silently carry
+# an UNGATED learner-facing description. PINNED_DECISION_FRAMES is guarded against the library
+# (`assert set(PINNED_DECISION_FRAMES) == set(library)`), so a new territory is forced into the DF
+# matrix -- but nothing forced it into this tuple. Found by the adversarial review of b41f9e4,
+# 2026-08-31: the same "derive the fixture fact" correction that commit made in three other files
+# and missed here.
+TERRITORY_IDS = tuple(
+    sorted(e.experience_id for e in load_library() if e.regime is Regime.open_ended)
 )
 
 # The pinned DF matrix (spec §2d), with the signal costs named in the spec (a DF frame loses
