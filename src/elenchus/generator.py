@@ -116,8 +116,9 @@ def label_leak(text: str, rubric: Rubric, framework_denylist: list[str]) -> str 
     hits are this function's, not the category scan's.
 
     That twelve-push corpus is one sample, not the distribution. `run_push_screen_probe`
-    (push_screen_probe.py) later ran 64 real `generate_push` outputs across all five open-ended
-    rubrics through `_push_label_leak` (this function's result OR'd with the category scan, same
+    (push_screen_probe.py) later ran 64 real `generate_push` outputs across the five open-ended
+    rubrics THAT EXISTED THEN (three more shipped 2026-08-31 and are NOT in that sample --
+    Invariant 7: the bar is unproven on them) through `_push_label_leak` (this function's result OR'd with the category scan, same
     as above) and found 0 of 64 rejected -- see `judgment_loop._push_label_leak`'s docstring for
     the full account, the confidence bound on that zero, and the open question it leaves for the
     founder."""

@@ -117,11 +117,14 @@ def test_the_strong_arc_is_closed_at_cold_start_and_this_is_the_tripwire(tmp_pat
     The §2d repair (founder-ratified 2026-08-29) moved license_continuity's decision_frame to
     lead_with_what_you_refuse_to_do so that commit_under_the_deadline keeps an unprompted channel
     once its own territory lands. The computed consequence, verified by running this exact
-    scenario against the repaired library: EVERY frame in the curated five now has exactly ONE
-    non-DF home, so no frame can read unprompted at intake on two distinct refs, and the
-    two-curated-refs strong arc -- unprompted on R1 and R2 -> strong -> the 30-day savings
-    effect -- is UNREACHABLE at cold start. Mastery claims move to the isolated homes the new
-    territories bring; the engine's own strong rule keeps its unit teeth in test_state.py
+    scenario against the library: EVERY frame has exactly ONE non-DF home, so no frame can read
+    unprompted at intake on two distinct refs, and the two-curated-refs strong arc -- unprompted
+    on R1 and R2 -> strong -> the 30-day savings effect -- is UNREACHABLE at cold start.
+
+    STILL TRUE after the isolated homes landed 2026-08-31, and that is the load-bearing result
+    of this run: a 1-frame rubric is DF on its own only frame, so every isolated home adds a DF
+    home and never a second FREE one. The matrix sweep below proves it from content
+    rather than from this prose. The engine's own strong rule keeps its unit teeth in test_state.py
     (test_storage_tier_strong_needs_two_unprompted_problems, test_strong_reachable_across_two_problems).
 
     This drives the same two sessions the old strong arc used, through the real engine over the
@@ -174,15 +177,33 @@ def test_the_strong_arc_is_closed_at_cold_start_and_this_is_the_tripwire(tmp_pat
     assert LEAD not in format_problem_menu(Proposal(candidates=select_next(state1, lib, cfg, NOW1)))
 
     # --- ordering at the worst-case forming edge (+7d), derived from the REAL post-S1 state.
-    # These pins SURVIVED the repair (verified by execution): the deploy tie at V=1.83 and the
-    # deterministic lead-first order are properties of forming-day arithmetic, not of the DF.
+    # RE-PINNED 2026-08-31 by execution, when the isolated homes landed. S1 leaves three frames
+    # forming on R1 (lead, commit, protect). lead and protect each gained a 1-frame home on
+    # another ref, so each earns a deploy term there; commit did NOT -- its own isolated home is
+    # authored but HELD (see tests/test_forge.py TERRITORY_IDS), so license_continuity stays its
+    # only home and _transfer returns 0 on a ref already in its breadth. The tie is still TWO
+    # wide, but it moved UP from V=1.8333 to V=1.9167 and off the 2-frame rubrics: penalty is the
+    # max uncertainty over a rubric's frames, and a 2-frame rubric drags in an unseen frame at
+    # 1.0, so an isolated home always outranks one. The remaining tie is broken by `load` FIRST
+    # and only then by frame code (policy.py:83 sort_key is (-V, load, f, ledger_ref, id)); both
+    # tied candidates here are 1-frame rubrics, so it comes down to lead < protect.
+    #
+    # WHEN THE HELD TERRITORY SHIPS, this widens to a three-way tie headed by
+    # berkeley_focus_allocation (commit < lead), and `v[0] > v[2]` becomes false by arithmetic
+    # rather than by regression. That is the expected next move of this pin, written down here so
+    # the next reader does not have to re-derive it.
     now2 = NOW1 + timedelta(days=7)
     ranked = select_next(state1, lib, cfg, now2)
     top_spec, top_rcpt = ranked[0]
-    assert top_spec.experience_id == "decision_under_stakes"
+    assert top_spec.experience_id == "cross_pool_data_optics"
     assert top_rcpt.frame == LEAD and top_rcpt.drive == "deploy"
-    assert ranked[0][1].scores["V"] == ranked[1][1].scores["V"]
-    assert ranked[0][1].scores["V"] > ranked[2][1].scores["V"]
+    v = [r.scores["V"] for _, r in ranked]
+    assert v[0] == v[1], "the two isolated deploy homes must tie"
+    assert v[1] > v[2], "an isolated home must outrank a 2-frame home carrying an unseen frame"
+    assert [sp.experience_id for sp, _ in ranked[:2]] == [
+        "cross_pool_data_optics",
+        "adoption_funnel_stalls",
+    ], "equal V and equal load, so policy.sort_key falls through to frame code: lead < protect"
 
     # --- session 2 at +7d on decision_under_stakes, lead's one remaining non-DF home: the
     # unprompted read lands on R2 -- and that is the ONLY unprompted ref lead can ever earn at

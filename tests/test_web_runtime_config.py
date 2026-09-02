@@ -122,3 +122,51 @@ def test_the_entrypoint_makes_info_logs_reach_stderr(tmp_path):
     assert "model_call probe" in out.stderr, (
         f"an INFO log from the model logger never reached stderr: {out.stderr!r}"
     )
+
+
+def test_the_production_path_set_EXPLICITLY_is_refused_exactly_like_a_defaulted_one():
+    """The guard keyed on the ELENCHUS_DB string being EMPTY, but the danger is its VALUE: the
+    founder's own file holds one particular person's decisions however that path arrived. So
+    `ELENCHUS_DB=<the default>` — one copy-paste of the founder's own launch line into an
+    invitee's — sailed through in total silence, on ANY bind address, while leaving the variable
+    unset on the same address raised. Found by the two-instance isolation audit, 2026-08-31.
+    """
+    from elenchus.web.runtime import DEFAULT_DB, resolve_runtime
+
+    with pytest.raises(ValueError, match="default database"):
+        resolve_runtime({"ELENCHUS_HOST": "0.0.0.0", "ELENCHUS_DB": DEFAULT_DB})
+
+
+def test_the_production_path_set_explicitly_on_loopback_warns_like_a_defaulted_one(caplog):
+    """Same equivalence on the permitted side: loopback keeps working (the founder's own boot
+    must not move) but must be just as LOUD, because a named tunnel presents loopback and that is
+    the topology the live beta actually runs."""
+    from elenchus.web.runtime import DEFAULT_DB, resolve_runtime
+
+    with caplog.at_level("WARNING", logger="elenchus.web.runtime"):
+        db, host, _ = resolve_runtime({"ELENCHUS_HOST": "127.0.0.1", "ELENCHUS_DB": DEFAULT_DB})
+
+    assert db == DEFAULT_DB and host == "127.0.0.1"
+    assert any("default database" in r.getMessage() for r in caplog.records), (
+        "an explicit production path on loopback passed silently"
+    )
+
+
+def test_a_relative_spelling_of_the_production_path_is_still_the_production_path():
+    """The live beta runs with a RELATIVE ELENCHUS_DB (verified: `ps eww` shows
+    `ELENCHUS_DB=data/tenants/rehearsal/elenchus.db`), so a value-based guard that compared
+    strings would miss `./data/elenchus.db` and every other spelling of the same file."""
+    import os
+    from pathlib import Path
+
+    from elenchus.web.runtime import DEFAULT_DB, resolve_runtime
+
+    root = Path(DEFAULT_DB).parent.parent
+    relative = os.path.relpath(DEFAULT_DB, root)
+    cwd = os.getcwd()
+    os.chdir(root)
+    try:
+        with pytest.raises(ValueError, match="default database"):
+            resolve_runtime({"ELENCHUS_HOST": "0.0.0.0", "ELENCHUS_DB": relative})
+    finally:
+        os.chdir(cwd)

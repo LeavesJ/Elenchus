@@ -13,10 +13,22 @@ requires-python = ">=3.12"
 # and needs a Rust toolchain. 2.0.0 is additionally excluded by fastapi's own metadata, so the
 # declared floor set was not merely optimistic, it was unsatisfiable. The suite passes at exactly
 # these versions.
+# Upper bounds on purpose. Every specifier here was lower-bound-only, and CI installs with
+# `pip install -e ".[dev,web]"` on a fresh resolve, so CI silently took the newest release of
+# everything on every run while the local venv and the served process stayed where they were
+# last built. `anthropic>=0.120` admits 1.2.0 -- a MAJOR of the SDK this product rents its whole
+# capability from -- and CI withholds ANTHROPIC_API_KEY, so the 11 @live tests skip there and
+# every SDK assertion that does run is made against a hand-rolled fake. A green built on a stack
+# nobody chose is Invariant 7's failure in the build system: the property is gate TIMES
+# distribution, and CI's distribution was not production's.
+#
+# This is the same call already taken for the linter below ("A gate whose meaning depends on
+# which ruff you happened to install is not a gate"), applied to the runtime. Raising any of
+# these is a deliberate act, taken on purpose, with the @live suite run against a real key.
 dependencies = [
-    "pydantic>=2.12",
-    "pyyaml>=6.0.3",
-    "anthropic>=0.120",
+    "pydantic>=2.12,<3",
+    "pyyaml>=6.0.3,<7",
+    "anthropic>=0.120,<1",
 ]
 
 [project.optional-dependencies]
@@ -24,7 +36,12 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.6",
 ]
-web = ["fastapi>=0.110", "uvicorn>=0.29", "httpx>=0.27"]
+# httpx<1 keeps starlette's TestClient on the client it currently supports: anthropic 1.x
+# requires httpx2, so that migration rides the SDK major and is not a separate chore.
+# starlette pinned explicitly: fastapi<1 still pulls starlette>=0.46 with NO upper bound, and
+# starlette is the one dependency here that actually shipped a major and changed behaviour the
+# suite depends on (pre-merge review, 2026-09-02).
+web = ["fastapi>=0.110,<1", "starlette>=0.46,<2", "uvicorn>=0.29,<1", "httpx>=0.27,<1"]
 
 [project.scripts]
 elenchus = "elenchus.cli:main"
@@ -49,5 +66,6 @@ select = ["E4", "E7", "E9", "F"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
+    "real_default_env_file: sees the shipped DEFAULT_ENV_FILE rather than the hermetic stub",
     "live: exercises the real Anthropic API (requires ANTHROPIC_API_KEY); skipped otherwise",
 ]

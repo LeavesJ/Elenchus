@@ -7,6 +7,7 @@ from typing import Literal, Protocol, runtime_checkable
 from pydantic import BaseModel, ValidationError
 
 from .content_loader import load_prompt, load_spike_prompt
+from .spend import BudgetExceeded
 from .prompt_text import LEARNER_INDENT, bulleted, indent_after_first, labelled
 from .types import (
     CandidateFrame,
@@ -664,15 +665,34 @@ class _TimedMessages:
     and the timing tests.
     """
 
-    def __init__(self, client):
+    def __init__(self, client, budget=None):
         self._client = client
         self.messages = self
+        self._budget = budget
 
     def __getattr__(self, name):
         return getattr(self._client, name)
 
     def _timed(self, kind: str, fn, kwargs):
+        """Charge the budget BEFORE dispatch, then time the call.
+
+        This seam stopped being observation-only when the ceiling landed, and that is deliberate:
+        it is the one place every paid call passes through, so a bound placed anywhere else would
+        have to be repeated per call site and would rot the first time a site was added. A call
+        that RAISES is still charged -- otherwise unlimited attempts are available to anyone who
+        can make each one fail.
+        """
         import time as _time
+
+        if self._budget is not None:
+            try:
+                self._budget.charge()
+            except BudgetExceeded as exc:
+                # Server side, and LOUD (Invariant 10). The wire is deliberately generic, so a
+                # silent ceiling is indistinguishable from a 401, a timeout or a bug -- and this
+                # fires precisely when somebody is reading the log to find out what happened.
+                _log.warning("spend budget refused a %s call: %s", kind, exc)
+                raise ModelError(str(exc)) from exc
 
         t0 = _time.perf_counter()
         try:
@@ -695,17 +715,33 @@ class AnthropicModel:
     mechanism. This class only renders the rubric, calls the model, and parses the result.
     """
 
-    def __init__(self, api_key: str | None = None, model: str = "claude-opus-5", client=None):
+    # Declared on the CLASS so "unbounded" is the default state of an AnthropicModel, not merely
+    # what `__init__` happens to assign. Tests construct this through `AnthropicModel.__new__` to
+    # get an instance with no key and no network (tests/test_forge.py:713), and those instances
+    # must still have a defined budget rather than an AttributeError at the first call.
+    _budget = None
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str = "claude-opus-5",
+        client=None,
+        budget=None,
+    ):
         self._model = model
         self._api_key = api_key
         self._client = client
+        # On the MODEL, never on the wrapper: `_get_client` builds a fresh `_TimedMessages` on
+        # every call, so a counter owned by the wrapper would reset once per call and bound
+        # nothing. None means unbounded, which is what every offline caller gets.
+        self._budget = budget
 
     def _get_client(self):
         if self._client is None:
             import anthropic  # lazy: tests never need the SDK or network
 
             self._client = anthropic.Anthropic(api_key=self._api_key)
-        return _TimedMessages(self._client)
+        return _TimedMessages(self._client, budget=self._budget)
 
     def _parse_required(self, *, max_tokens: int, **kwargs):
         """One structured parse, output REQUIRED — with a SINGLE retry: budget-doubled on

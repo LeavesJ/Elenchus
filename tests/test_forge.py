@@ -88,12 +88,15 @@ def test_anthropic_signatures_match_the_plan():
 
 # --- Task L2: territory descriptions (spec §2a) + the DF matrix (spec §2d) ---
 
-TERRITORY_IDS = (
-    "license_continuity",
-    "decision_under_stakes",
-    "irreversible_anchor",
-    "continuity_lock_in",
-    "proof_before_promise",
+# DERIVED, not enumerated. These ids drive the ONLY gate the territory descriptions have (the
+# two @parametrize'd tests below), so a literal list means a shipped territory can silently carry
+# an UNGATED learner-facing description. PINNED_DECISION_FRAMES is guarded against the library
+# (`assert set(PINNED_DECISION_FRAMES) == set(library)`), so a new territory is forced into the DF
+# matrix -- but nothing forced it into this tuple. Found by the adversarial review of b41f9e4,
+# 2026-08-31: the same "derive the fixture fact" correction that commit made in three other files
+# and missed here.
+TERRITORY_IDS = tuple(
+    sorted(e.experience_id for e in load_library() if e.regime is Regime.open_ended)
 )
 
 # The pinned DF matrix (spec §2d), with the signal costs named in the spec (a DF frame loses
@@ -113,6 +116,13 @@ PINNED_DECISION_FRAMES = {
     "irreversible_anchor": "choose_the_failure_default_deliberately",
     "continuity_lock_in": "embed_credentials_as_a_list",
     "proof_before_promise": "protect_the_core_lane",
+    # The isolated homes. A 1-frame rubric FORCES its own DF, so each of these is the frame
+    # itself; the §2d rule survives because every one of them keeps a non-DF home among the
+    # curated five (choose_failure -> proof_before_promise, lead -> decision_under_stakes,
+    # protect -> license_continuity).
+    "opening_rate_decision": "choose_the_failure_default_deliberately",
+    "cross_pool_data_optics": "lead_with_what_you_refuse_to_do",
+    "adoption_funnel_stalls": "protect_the_core_lane",
 }
 
 
@@ -162,8 +172,8 @@ def test_df_matrix_is_pinned_and_the_rule_holds():
     """§2d: every rubric carries the PINNED decision_frame, the DF names a frame that exists in
     that rubric, and the rule holds — computed from content: no frame that lives on 2+ territories
     is DF on all of them (a multi-home frame keeps an unprompted channel somewhere). Since the
-    §2d repair, commit_under_the_deadline is DF nowhere in the curated five; its DF home arrives
-    with the fourth territory (veldra:berkeley_focus_allocation)."""
+    §2d repair, commit_under_the_deadline is DF nowhere at all, and it is the one frame still
+    without an isolated home — its territory is authored but HELD (see TERRITORY_IDS)."""
     library = {e.experience_id: e for e in load_library()}
     assert set(PINNED_DECISION_FRAMES) == set(library)
     homes: dict[str, set[str]] = {}

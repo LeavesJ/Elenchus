@@ -10,7 +10,9 @@ same sample. The only network call in the whole probe is `model.generate_push`; 
 here is deterministic and model-free.
 
 Run for real via run_push_screen_probe.py on 2026-08-03 (model claude-opus-5): 64 comparable
-outputs across all five open-ended rubrics, and both bars rejected 0. That is now the measured
+outputs across the five open-ended rubrics that existed then, and both bars rejected 0.
+(Three more rubrics shipped 2026-08-31 and are NOT in that sample: Invariant 7 makes the measured
+property a property of gate TIMES distribution, so it is unproven on those three.) That is now the measured
 rate on this sample -- bounded, not proven zero: roughly below 4.7% at 95% confidence for one
 model over one run. See `assessment.judgment_loop._push_label_leak`'s docstring for the full
 account and .superpowers/sdd/probes-report.md for the run record.
