@@ -57,24 +57,29 @@ innovation, which is what the world's geography exists to make visible.
 
 ## Status
 
-**Single-user dogfood, on localhost. Not a beta.** That is deliberate: what is missing is content,
-not infrastructure.
+**A closed beta, one invited person per instance, from 2026-09-05.** Not a public product, and
+not yet a multi-domain one.
 
 Everything a learner types is mapped onto one of **eight decision territories**
-(`content/territories/`). Eight is enough for people whose sittings we watch and not enough for a
-stranger; ten to twelve is the gate before any external use. The other two things between here and
-a beta are ordinary: multi-user persistence and auth, and a care lane so that someone in real
-distress mid-sitting meets care instead of pressure.
+(`content/territories/`), all in one domain. Eight is enough for people whose sittings we watch
+closely; it is not a general library, and a ninth is authored and held pending a naming decision.
 
-The honest gap in the product is that the world is built for many domains and ours has collapsed
-into one, because all eight territories currently share a domain. The plural geography is real code
-with real tests and no second instance yet.
+What "beta" means mechanically: one process, one database file and one hostname per invitee, so
+nothing one person writes can reach another; a Cloudflare Access door (one-time PIN to the
+invitee's own email) in front of every hostname, so the link is not the credential; a per-process
+ceiling on paid model calls in the app and a spend limit on the Anthropic workspace behind it; a
+preflight that reads the host before a link goes out; and a deletion script that honors "please
+remove what I wrote" the same day. Everything a learner says goes to Anthropic and nowhere else.
 
-Suite: **1390 passing / 35 skipped**, measured from a fresh clone of this repository, which is what
-you will see. Four of those skips need a corpus that is not tracked here. The graded engine core
-(`orchestration`, `assessment/`) is held
-byte-stable and surface work rides additive seams around it, so changing the rented model is a
-config line that never touches what does the grading.
+What it does NOT have, said plainly because the invite must not imply otherwise: a care lane. If
+someone is in real distress mid-sitting they meet the same pressure everyone does. That is the
+largest single gap between this and anything wider, and it is a product decision, not a backlog
+item.
+
+Suite: **1439 passed, 35 skipped**, measured from a fresh clone of this repository, which is what you will
+see. Four of those skips need a corpus that is not tracked here. The graded engine core
+(`orchestration`, `assessment/`) is held byte-stable and surface work rides additive seams around
+it, so changing the rented model is a config line that never touches what does the grading.
 
 ## Architecture
 

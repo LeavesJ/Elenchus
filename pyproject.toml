@@ -38,7 +38,10 @@ dev = [
 ]
 # httpx<1 keeps starlette's TestClient on the client it currently supports: anthropic 1.x
 # requires httpx2, so that migration rides the SDK major and is not a separate chore.
-web = ["fastapi>=0.110,<1", "uvicorn>=0.29,<1", "httpx>=0.27,<1"]
+# starlette pinned explicitly: fastapi<1 still pulls starlette>=0.46 with NO upper bound, and
+# starlette is the one dependency here that actually shipped a major and changed behaviour the
+# suite depends on (pre-merge review, 2026-09-02).
+web = ["fastapi>=0.110,<1", "starlette>=0.46,<2", "uvicorn>=0.29,<1", "httpx>=0.27,<1"]
 
 [project.scripts]
 elenchus = "elenchus.cli:main"

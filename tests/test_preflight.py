@@ -225,3 +225,69 @@ def test_only_known_services_exposed_is_a_warn_not_a_failure():
 
     assert check.status == "warn"
     assert "Spotify" in check.detail
+
+
+def test_known_service_names_are_matched_the_way_lsof_actually_prints_them():
+    """Pre-merge review: macOS lsof truncates COMMAND to 9 characters, so three of the seven
+    allowlist entries could never match -- the list did not exempt the services its comment said
+    it did. Match on what lsof prints, not on the full binary name."""
+    lines = [
+        "COMMAND     PID   USER   FD   TYPE  DEVICE SIZE/OFF NODE NAME",
+        "ControlCe   710 a14808    9u  IPv4  0x91e0      0t0  TCP *:7000 (LISTEN)",
+        "AirPlayXP   712 a14808    9u  IPv4  0x91e1      0t0  TCP *:7001 (LISTEN)",
+        "identitys   713 a14808    9u  IPv4  0x91e2      0t0  TCP *:7002 (LISTEN)",
+    ]
+
+    check = preflight.open_listeners(lines)
+
+    assert check.status == "warn", check.detail
+    assert "AirPlayXP" in check.detail and "identitys" in check.detail
+
+
+def test_a_failed_lsof_is_a_warn_never_a_clean_ok(tmp_path, monkeypatch):
+    """Pre-merge review: scripts/preflight.py never checked lsof's exit status, so an lsof that
+    failed or printed nothing reported '[ok] every listener is loopback-only'. A check that could
+    not run is not a check that passed -- the same rule the surrounding code already applies to
+    a missing file."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    (fake_bin / "lsof").write_text("#!/bin/sh\nexit 1\n")
+    (fake_bin / "lsof").chmod(0o755)
+    repo = tmp_path / "repo"
+    (repo / "data" / "tenants").mkdir(parents=True)
+    (repo / ".env").write_text("ANTHROPIC_API_KEY=sk-x\n")
+    (repo / ".env").chmod(0o600)
+
+    src = Path(__file__).resolve().parents[1] / "src"
+    out = subprocess.run(
+        [sys.executable, str(src.parent / "scripts" / "preflight.py"), "--repo", str(repo)],
+        capture_output=True,
+        text=True,
+        env={"PYTHONPATH": str(src), "PATH": f"{fake_bin}:/usr/bin:/bin"},
+        timeout=90,
+    )
+
+    assert "[WARN] open-listeners" in out.stdout, out.stdout
+    assert "[ok  ] open-listeners" not in out.stdout
+
+
+def test_the_out_of_tree_key_file_is_covered_by_the_mode_check(tmp_path, monkeypatch):
+    """Pre-merge review: the branch moved the key to ~/.config/elenchus/env, and preflight's
+    file-modes list did not know. On the real launch root a deliberate .env symlink carries the
+    check onto it, so it was refuted as a blocker -- but a root with no symlink is one preflight
+    away from '[ok]' over a world-readable paid key. The list should name the file directly."""
+    outside = tmp_path / "cfg" / "env"
+    outside.parent.mkdir()
+    outside.write_text("ANTHROPIC_API_KEY=sk-x\n")
+    outside.chmod(0o644)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    check = preflight.file_modes(preflight.sensitive_files(repo, key_file=outside))
+
+    assert check.status == "fail"
+    assert "env is 644" in check.detail

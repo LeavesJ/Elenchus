@@ -27,6 +27,7 @@ from elenchus.preflight import (  # noqa: E402
     open_listeners,
     public_surface,
     report,
+    sensitive_files,
     sync_exposure,
 )
 
@@ -60,21 +61,27 @@ def main() -> int:
     args = parser.parse_args()
     repo = Path(args.repo).resolve()
 
-    sensitive = [repo / ".env"]
-    sensitive += sorted(repo.glob("data/elenchus.db"))
-    sensitive += sorted(repo.glob("data/tenants/*/elenchus.db"))
-    sensitive += sorted(repo.glob("data/tenants/*/server.log"))
+    import os
+
+    from serve_invitee import DEFAULT_ENV_FILE
+
+    key_file = Path(os.environ.get("ELENCHUS_ENV_FILE") or DEFAULT_ENV_FILE)
+    sensitive = sensitive_files(repo, key_file=key_file if key_file.exists() else None)
 
     try:
-        lsof = subprocess.run(
+        proc = subprocess.run(
             ["lsof", "-nP", "-iTCP", "-sTCP:LISTEN"],
             capture_output=True,
             text=True,
             timeout=30,
-        ).stdout.splitlines()
-        listeners = open_listeners(lsof)
+        )
+        if proc.returncode != 0:
+            # lsof exits non-zero when it fails AND when it simply found nothing; either way
+            # its output is not a measurement (pre-merge review, 2026-09-02). Loud, never ok.
+            raise subprocess.SubprocessError(f"lsof exited {proc.returncode}")
+        listeners = open_listeners(proc.stdout.splitlines())
     except (OSError, subprocess.SubprocessError) as exc:
-        # Loud, never a quiet ok: a check that could not run is not a check that passed.
+        # A check that could not run is not a check that passed.
         listeners = Check(
             "open-listeners", "warn", f"could not run lsof, so nothing was checked: {exc}"
         )

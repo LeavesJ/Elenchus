@@ -412,3 +412,18 @@ def test_the_out_of_tree_location_has_a_default_so_the_move_needs_no_configurati
     repo.mkdir()
 
     assert resolve_key({}, repo) == "sk-default-location"
+
+
+@pytest.mark.real_default_env_file
+def test_the_shipped_default_key_location_is_outside_the_repo_and_under_home():
+    """The value that actually ships, read WITHOUT the hermetic fixture masking it. The pre-merge
+    review found this test did not exist: an earlier edit claimed to add it and the replace
+    silently missed, so the marker the fixture advertises was used by zero tests and the constant
+    commit 2ab0f4d exists to add was asserted nowhere. It must sit outside any checkout, or the
+    relocation it exists for is pointless."""
+    from serve_invitee import DEFAULT_ENV_FILE, _REPO_ROOT
+
+    assert DEFAULT_ENV_FILE.is_absolute()
+    assert Path.home() in DEFAULT_ENV_FILE.parents
+    assert _REPO_ROOT not in DEFAULT_ENV_FILE.parents
+    assert DEFAULT_ENV_FILE.name == "env"

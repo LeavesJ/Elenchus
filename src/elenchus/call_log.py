@@ -58,10 +58,11 @@ class ModelCalls:
 def parse_calls(lines) -> ModelCalls:
     calls = ModelCalls()
     for line in lines:
-        m = _TIMING.search(line)
-        if m:
-            calls.timings.append(Timing(kind=m.group(1), seconds=float(m.group(2))))
-            continue
+        # Refusal FIRST. Its `explanation` is classifier-authored free text and can end in
+        # anything, including a model_call-shaped tail; the timing regex is unanchored on the
+        # left and would claim that line as a billed call and drop the refusal -- a wrong count,
+        # silently, in both headline numbers (pre-merge review, 2026-09-02). A timing line can
+        # never contain "model refusal in", so this order is safe in one direction only.
         m = _REFUSAL.search(line)
         if m:
             calls.refusals.append(
@@ -71,6 +72,10 @@ def parse_calls(lines) -> ModelCalls:
         m = _BUDGET.search(line)
         if m:
             calls.budget_refusals.append(m.group(1))
+            continue
+        m = _TIMING.search(line)
+        if m:
+            calls.timings.append(Timing(kind=m.group(1), seconds=float(m.group(2))))
     return calls
 
 

@@ -420,3 +420,24 @@ def test_a_budget_refusal_is_counted_and_never_mistaken_for_a_model_refusal():
     assert calls.refusals == [], "a budget refusal is not a model refusal"
     assert len(calls.budget_refusals) == 1
     assert BudgetExceeded is not None  # the type the ceiling raises, re-exported for callers
+
+
+def test_a_refusal_whose_explanation_looks_like_a_timing_line_is_still_a_refusal():
+    """Pre-merge review: the timing regex is tested FIRST and is unanchored on the left, so a
+    refusal line whose classifier-authored explanation happens to end in a model_call-shaped
+    substring was counted as a billed call and the refusal dropped -- a wrong count, silently, in
+    both headline numbers. The explanation is free text the model wrote; it can say anything."""
+    import logging as _logging
+
+    def emit():
+        _logging.getLogger("elenchus.model").warning(
+            "model refusal in %s: category=%s explanation=%s",
+            "_require",
+            "general_harms",
+            "declined; see model_call parse 9.99s",
+        )
+
+    calls = call_log.parse_calls(_capture(emit).splitlines())
+
+    assert calls.timings == [], "a refusal was counted as a billed call"
+    assert [r.where for r in calls.refusals] == ["_require"]

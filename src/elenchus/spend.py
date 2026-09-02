@@ -13,7 +13,9 @@ that raise -- more surface for the thing whose entire job is to be trustworthy u
 
 Per PROCESS, which is per INVITEE, because the beta runs one process and one database per person.
 That is the same fact the isolation argument already rests on; if that ever stops being true this
-ceiling stops meaning what it says.
+ceiling stops meaning what it says. "Per process" is only true because `web.app` mints the Budget
+ONCE and closes the model factory over it -- a Budget minted inside the factory is per segment and
+resets on every Continue, which is exactly what the first version did.
 """
 
 from __future__ import annotations
@@ -59,4 +61,14 @@ def from_env(env) -> Budget | None:
     raw = (env.get("ELENCHUS_MAX_CALLS") or "").strip()
     if not raw:
         return None
+    # Refuse at boot, never at the first learner's click. `int("abc")` used to raise inside the
+    # segment worker AFTER /api/health had said ok; `0` and `-1` built a ceiling that refused the
+    # very first call. Either way the process looked healthy while every door died -- L-18's shape
+    # with a new cause. `isdigit` rather than int(): it rejects "1.5", "-1", "1_0" and non-ASCII
+    # digits alike, and a ceiling is a plain count or it is nothing.
+    if not raw.isascii() or not raw.isdigit() or int(raw) < 1:
+        raise ValueError(
+            f"ELENCHUS_MAX_CALLS={raw!r} is not a ceiling. It must be a positive integer; leave it "
+            "unset for no ceiling at all."
+        )
     return Budget(max_calls=int(raw))

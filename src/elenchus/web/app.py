@@ -66,20 +66,37 @@ class _Outcome(BaseModel):
     kind: Literal["held", "reversed", "overtaken", "too_early"]
 
 
-def _default_model():
-    """The served process, and the only caller that faces the public.
+def model_factory_for_this_process():
+    """Build the model factory ONCE per process, so the spend ceiling is genuinely per process.
 
-    It picks the spend ceiling up from the environment rather than waiting for someone to pass
-    one, because the process that can be looped by a stranger is exactly the process nobody will
-    remember to configure. Unset means unbounded, which is what the CLI, the probes and the suite
-    keep getting.
+    The served process is the only caller that faces the public, and it picks the ceiling up from
+    the environment rather than waiting to be configured, because the process a stranger can loop
+    is exactly the one nobody remembers to configure. Unset means unbounded, which is what the
+    CLI, the probes and the suite keep getting.
+
+    The Budget is minted HERE, once, and every model the factory returns shares it. The first
+    version minted a fresh Budget inside the factory body -- and SessionRegistry invokes the
+    factory once per worker start, on every `start()` including the one Continue makes. So the
+    counter reset per SEGMENT, and since MAX_PUSHES bounds a segment to far fewer than 500 calls,
+    the ceiling could never fire. A reviewer made 49 paid calls under a ceiling of 20 by clicking
+    Continue three times. Pinned by tests/test_spend_budget.py: two factory calls, one budget.
+
+    Called at create_app time, so a malformed ELENCHUS_MAX_CALLS refuses to BOOT rather than
+    bricking the first learner behind a green health check.
     """
     import os
 
     from ..model import AnthropicModel
     from ..spend import from_env
 
-    return AnthropicModel(budget=from_env(os.environ))
+    budget = from_env(
+        os.environ
+    )  # once per process; from_env raises on a value that is not a ceiling
+
+    def factory():
+        return AnthropicModel(budget=budget)
+
+    return factory
 
 
 def _build_stamp() -> str:
@@ -239,7 +256,7 @@ class _NoStoreStaticFiles(StaticFiles):
 def create_app(db_path: str, model_factory=None) -> FastAPI:
     app = FastAPI(title="Elenchus — Cartographer MVP")
 
-    reg = SessionRegistry(db_path, model_factory or (lambda: _default_model()))
+    reg = SessionRegistry(db_path, model_factory or model_factory_for_this_process())
     build = _build_stamp()
 
     @app.get("/api/health")

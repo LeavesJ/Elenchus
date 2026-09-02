@@ -125,6 +125,7 @@ _LOOPBACK = ("127.0.0.1", "[::1]", "localhost")
 _KNOWN_SERVICES = frozenset(
     {"rapportd", "ControlCe", "ControlCenter", "Spotify", "sharingd", "AirPlayXPCH", "identityse"}
 )
+_KNOWN_PREFIXES = frozenset(name[:9] for name in _KNOWN_SERVICES)
 
 
 def open_listeners(lsof_lines) -> Check:
@@ -142,7 +143,11 @@ def open_listeners(lsof_lines) -> Check:
         if addr in _LOOPBACK:
             continue
         command = line.split()[0] if line.split() else "?"
-        (known if command in _KNOWN_SERVICES else unknown).append(f"{command} on {addr}:{port}")
+        # macOS lsof truncates COMMAND to 9 characters, so compare on what it actually prints.
+        # Three of the seven allowlist entries were longer than that and could never match
+        # (pre-merge review, 2026-09-02): the list did not exempt what its comment said it did.
+        is_known = command[:9] in _KNOWN_PREFIXES
+        (known if is_known else unknown).append(f"{command} on {addr}:{port}")
 
     tail = ""
     if known:
@@ -215,3 +220,21 @@ def report(checks) -> str:
     else:
         lines.append("No blocking axis. WARN lines are known and accepted, not measured clean.")
     return "\n".join(lines)
+
+
+def sensitive_files(repo: Path, key_file: Path | None = None) -> list[Path]:
+    """Every file whose exposure is not recoverable by rotating something cheap.
+
+    Two real callers: `scripts/preflight.py` and the tests. The out-of-tree key is named
+    EXPLICITLY rather than found through `<repo>/.env`: on the launch root a deliberate symlink
+    carries the checks onto it, but a root with no symlink was one preflight away from "[ok]"
+    over a world-readable paid key (pre-merge review, 2026-09-02).
+    """
+    repo = Path(repo)
+    files = [repo / ".env"]
+    files += sorted(repo.glob("data/elenchus.db"))
+    files += sorted(repo.glob("data/tenants/*/elenchus.db"))
+    files += sorted(repo.glob("data/tenants/*/server.log"))
+    if key_file is not None:
+        files.append(Path(key_file))
+    return files

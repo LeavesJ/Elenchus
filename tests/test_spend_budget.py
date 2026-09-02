@@ -128,18 +128,18 @@ def test_from_env_is_absent_by_default_and_reads_the_override():
     assert spend.from_env({"ELENCHUS_MAX_CALLS": "42"}).max_calls == 42
 
 
-def test_the_web_default_factory_reads_the_ceiling_from_the_environment(monkeypatch):
-    """The served process is the only one that faces the public, so it is the one that must pick
-    the budget up without anybody remembering to pass it. Offline callers -- the CLI, the probes,
-    the suite -- keep getting None."""
+def test_the_web_factory_reads_the_ceiling_from_the_environment_once(monkeypatch):
+    """The served process picks the ceiling up from the environment without anybody passing it.
+    Offline callers -- the CLI, the probes, the suite -- keep getting None. (This replaces a test
+    that called the old per-call `_default_model()`, which was the defect.)"""
     from elenchus.web import app as web_app
 
     monkeypatch.setenv("ELENCHUS_MAX_CALLS", "7")
-    model = web_app._default_model()
+    model = web_app.model_factory_for_this_process()()
     assert model._budget is not None and model._budget.max_calls == 7
 
     monkeypatch.delenv("ELENCHUS_MAX_CALLS", raising=False)
-    assert web_app._default_model()._budget is None
+    assert web_app.model_factory_for_this_process()()._budget is None
 
 
 def test_the_ceiling_says_so_server_side_when_it_fires(caplog):
@@ -161,3 +161,43 @@ def test_the_ceiling_says_so_server_side_when_it_fires(caplog):
     assert any("spend budget" in r.getMessage() for r in caplog.records), (
         "the ceiling fired and the server log says nothing about it"
     )
+
+
+def test_the_ceiling_is_per_PROCESS_which_means_one_budget_across_every_segment(monkeypatch):
+    """THE DEFECT THE PRE-MERGE REVIEW FOUND (2026-09-02), confirmed by an independent verifier.
+
+    `_default_model()` minted a fresh Budget on every call, and SessionRegistry invokes the model
+    factory once per worker start -- on every `start()`, including the one `continue_session`
+    makes. So the counter reset on every Continue, the scope was per SEGMENT, and since
+    MAX_PUSHES = 8 bounds a segment to far fewer than 500 calls, the shipped ceiling could never
+    fire at all. Two commit messages and the module docstring said "per process". They were wrong.
+
+    The reviewer made 49 paid calls under a ceiling of 20 by clicking Continue three times. The
+    docstring itself named the hole it was meant to close -- "nothing bounds the number of
+    segments" -- and the code left it open. This test is the one line that would have caught it.
+    """
+    from elenchus.web import app as web_app
+
+    monkeypatch.setenv("ELENCHUS_MAX_CALLS", "7")
+    factory = web_app.model_factory_for_this_process()
+
+    a = factory()
+    b = factory()
+    assert a._budget is b._budget, (
+        "two segments got two budgets: the ceiling resets on Continue and bounds nothing"
+    )
+    assert a._budget.max_calls == 7
+
+
+def test_a_malformed_ceiling_fails_at_boot_not_at_the_first_learners_click():
+    """`ELENCHUS_MAX_CALLS=abc`, `=0`, `=-1` all used to build a factory that raised or refused
+    inside the segment worker -- AFTER /api/health had returned {"ok": true}, so the process looked
+    healthy while every door died on the first click. That is L-18's shape exactly, with a new
+    cause. A value that cannot be a ceiling must refuse to start the process."""
+    for bad in ("abc", "0", "-1", "1.5", ""):
+        env = {"ELENCHUS_MAX_CALLS": bad}
+        if bad == "":
+            assert spend.from_env(env) is None  # unset stays unbounded
+            continue
+        with pytest.raises(ValueError, match="ELENCHUS_MAX_CALLS"):
+            spend.from_env(env)
