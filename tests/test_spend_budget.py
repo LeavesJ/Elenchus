@@ -139,7 +139,7 @@ def test_the_web_factory_reads_the_ceiling_from_the_environment_once(monkeypatch
     assert model._budget is not None and model._budget.max_calls == 7
 
     monkeypatch.delenv("ELENCHUS_MAX_CALLS", raising=False)
-    assert web_app.model_factory_for_this_process()()._budget is None
+    assert web_app.model_factory_for_this_process()()._budget.max_calls == spend.DEFAULT_MAX_CALLS
 
 
 def test_the_ceiling_says_so_server_side_when_it_fires(caplog):
@@ -201,3 +201,22 @@ def test_a_malformed_ceiling_fails_at_boot_not_at_the_first_learners_click():
             continue
         with pytest.raises(ValueError, match="ELENCHUS_MAX_CALLS"):
             spend.from_env(env)
+
+
+def test_the_serving_entrypoint_arms_the_ceiling_even_when_nobody_exported_one(monkeypatch):
+    """Found by a peer session's offline checker (scripts/check_spend_ceiling.py, 2026-09-03), which
+    pops ELENCHUS_MAX_CALLS before driving each launch path on the principle that the PATH must arm
+    the ceiling, not whoever ran it. serve_invitee.py was BOUNDED at 500. `python -m elenchus.web`
+    -- the constitution's own documented launch command -- was UNBOUNDED at 20,000 calls, because
+    `from_env` returns None when unset and only the launcher's setdefault ever filled it in.
+
+    "Absent means unbounded" is the right semantic for OFFLINE callers constructing a model
+    (the CLI, the probes, the suite). It is the wrong semantic for the one entrypoint that serves
+    the public. That entrypoint arms the default itself."""
+    from elenchus.web import app as web_app
+
+    monkeypatch.delenv("ELENCHUS_MAX_CALLS", raising=False)
+    model = web_app.model_factory_for_this_process()()
+
+    assert model._budget is not None, "the serving entrypoint came up with no ceiling at all"
+    assert model._budget.max_calls == spend.DEFAULT_MAX_CALLS

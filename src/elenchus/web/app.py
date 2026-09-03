@@ -87,11 +87,15 @@ def model_factory_for_this_process():
     import os
 
     from ..model import AnthropicModel
-    from ..spend import from_env
+    from ..spend import DEFAULT_MAX_CALLS, Budget, from_env
 
-    budget = from_env(
-        os.environ
-    )  # once per process; from_env raises on a value that is not a ceiling
+    # Once per process. `from_env` raises on a value that is not a ceiling, and returns None when
+    # nothing is set -- the right answer for an OFFLINE caller building a model, and the wrong one
+    # here. This is the entrypoint that serves the public, and a peer's offline checker
+    # (scripts/check_spend_ceiling.py, 2026-09-03) showed `python -m elenchus.web` running 20,000
+    # calls with no refusal when nobody had exported the variable: only serve_invitee's setdefault
+    # ever armed it. The serving path arms the default itself, so it cannot be launched unbounded.
+    budget = from_env(os.environ) or Budget(DEFAULT_MAX_CALLS)
 
     def factory():
         return AnthropicModel(budget=budget)
