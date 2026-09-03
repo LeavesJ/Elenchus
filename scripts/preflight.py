@@ -25,11 +25,24 @@ from elenchus.preflight import (  # noqa: E402
     file_modes,
     launch_blocked,
     open_listeners,
+    origin_reachable,
     public_surface,
     report,
     sensitive_files,
     sync_exposure,
 )
+
+
+def _process_envs() -> list[str]:
+    """Every process's environment, one per line — how a served invitee announces its slug and
+    port. Unreadable ps means the axis reports "nothing served" as a WARN, which is correct: it
+    could not check."""
+    try:
+        return subprocess.run(
+            ["ps", "-axEww", "-o", "command="], capture_output=True, text=True, timeout=15
+        ).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError):
+        return []
 
 
 def key_reachable(repo: Path) -> Check:
@@ -91,6 +104,7 @@ def main() -> int:
         file_modes(sensitive),
         listeners,
         key_reachable(repo),
+        origin_reachable(_process_envs()),
         public_surface(args.access_configured),
     ]
     print(report(checks))
