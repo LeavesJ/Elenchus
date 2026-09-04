@@ -2517,32 +2517,39 @@ class SessionRegistry:
                     rec.get("stop_reason", "converged"),
                     has_sequel=self._story(sit) is not None,
                 )
+                lost = self._lost_context(session_id)
+                if lost is not None and lost[1]:
+                    # Interrupted-adjacent converse (spec §2c): the honesty line invites talk
+                    # about the LOST problem, whose moves the record's own egress screen is blind
+                    # to — screen the union. The lost exp was NOT converged, so it may re-offer
+                    # within the window; an unscreened reply could hand its move and prime the
+                    # future intake. FAIL CLOSED (batch-review C9): an unresolvable lost exp
+                    # cannot be screened, so the safe static serves — matching the
+                    # rebuild-failure doctrine everywhere else in this build.
+                    try:
+                        lost_exp = next(
+                            (e for e in load_library() if e.experience_id == lost[1]), None
+                        )
+                    except Exception:
+                        lost_exp = None
+                    if lost_exp is None or not voice.egress_safe_reply(
+                        rec["model"], lost_exp, reply
+                    ):
+                        # Fail closed to the HONEST static, never SAFE_CONTRACT's "I'll push" lie
+                        # on a dead engine (spec §2c consistency fold, 2026-07-05): equally safe
+                        # (a static, performs no move), just not a lie. Fresh variant — an
+                        # interrupted/lost state is not the place to promise a next chapter.
+                        reply = voice._CONVERSE_DONE_FRESH
             except Exception:
                 # Broad on purpose, like the worker's own net: the ceiling arrives as ModelError,
                 # an auth or overload error arrives as the SDK's own class, and both used to
                 # escape this method as a bare 500 the shell rendered as "connection lost" over
-                # a server that was up. Traceback server side FIRST (Invariant 10); the wire
-                # carries only the nudge. Nothing was persisted, so the nudge is true.
+                # a server that was up. The net covers the author call AND the lost-context
+                # second screen (whose own catch is ModelError-only, voice.egress_safe_reply):
+                # nothing is persisted before either, so the nudge is true on both. Traceback
+                # server side FIRST (Invariant 10); the wire carries only the nudge.
                 _log.exception("converse author failed (session %s); nothing was sent", session_id)
                 return ("nudge", {"message": _CONVERSE_FAILED_NUDGE})
-            lost = self._lost_context(session_id)
-            if lost is not None and lost[1]:
-                # Interrupted-adjacent converse (spec §2c): the honesty line invites talk about the
-                # LOST problem, whose moves the record's own egress screen is blind to — screen the
-                # union. The lost exp was NOT converged, so it may re-offer within the window; an
-                # unscreened reply could hand its move and prime the future intake. FAIL CLOSED
-                # (batch-review C9): an unresolvable lost exp cannot be screened, so the safe static
-                # serves — matching the rebuild-failure doctrine everywhere else in this build.
-                try:
-                    lost_exp = next((e for e in load_library() if e.experience_id == lost[1]), None)
-                except Exception:
-                    lost_exp = None
-                if lost_exp is None or not voice.egress_safe_reply(rec["model"], lost_exp, reply):
-                    # Fail closed to the HONEST static, never SAFE_CONTRACT's "I'll push" lie on a
-                    # dead engine (spec §2c consistency fold, 2026-07-05): equally safe (a static,
-                    # performs no move), just not a lie. Fresh variant — an interrupted/lost state
-                    # is not the place to promise a next chapter.
-                    reply = voice._CONVERSE_DONE_FRESH
             now = datetime.now(timezone.utc)
             # Don't capture a steer on an interrupted/degraded turn (adversarial-review fold F3): the
             # reply may have fail-closed to the honest static, and steering does not belong in a
@@ -2574,7 +2581,16 @@ class SessionRegistry:
                 self._store.append_turn(sit, "vera", {"text": reply}, now)
                 self._store.write_state(sit, record=_serialize_record(rec))
             data = {"text": reply}
-            self._attach_converse_label(session_id, sit, now, data)
+            try:
+                self._attach_converse_label(session_id, sit, now, data)
+            except Exception:
+                # Runs AFTER the pair was persisted, and makes no model call (store reads and
+                # content loads). A raise here rode out as a 500, the shell said "connection
+                # lost", and the retry re-sent a text whose you/vera pair was already on disk:
+                # a duplicated turn. The label is chrome; the reply is served without it.
+                _log.exception(
+                    "wind-down label failed (session %s); reply served without it", session_id
+                )
             return ("say", data)
         finally:
             self._release_turn(session_id)
@@ -2812,7 +2828,16 @@ class SessionRegistry:
                 _log.exception(
                     "close author failed (session %s); serving the static close", session_id
                 )
-                close_text = voice._STATIC_CLOSE
+                # The static has to be TRUE of the stop it closes (review at 540f101). Every
+                # stop lands post-Earned-Landing, so a plateau or budget record reaches this
+                # branch too, and `voice._STATIC_CLOSE` says "You took a position" -- a
+                # manufactured arrival for a learner who never landed the call, the exact lie
+                # `voice.land` keeps its own static to avoid. Converged: that line, which is
+                # then true. Anything else: the close-shaped static that claims no arrival.
+                if rec.get("stop_reason", "converged") == "converged":
+                    close_text = voice._STATIC_CLOSE
+                else:
+                    close_text = _STATIC_RESTART_CLOSE
             result = ("close", {"close": close_text, **village})
         self._end_sitting(session_id)
         return result

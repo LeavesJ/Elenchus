@@ -5039,3 +5039,126 @@ def test_a_model_failure_mapping_the_steer_keeps_the_authored_reply(tmp_path, ma
     assert "s1" not in reg._steer_pending  # no steer, as for any unservable pressure
     rec = next(r for r in caplog.records if "steer" in r.getMessage() and r.exc_info)
     assert rec.exc_info[0] is ModelError
+
+
+# ---- Review round at 540f101 (2026-09-04): three refutations, each fixed -----------------------
+
+
+def test_a_model_failure_at_a_non_converged_close_does_not_claim_a_position_was_taken(
+    tmp_path, make_fake
+):
+    """Reviewer finding (doctrine lens): every stop lands post-Earned-Landing, so a plateau or
+    budget record reaches the close author too, and on an author failure the first fix served
+    `voice._STATIC_CLOSE` -- "You took a position and reasoned the trade-offs" -- to a learner
+    who never landed the call. A manufactured arrival is the exact lie `voice.land` keeps a
+    separate static to avoid. Non-converged: the honest close-shaped static, no arrival claim."""
+    from elenchus.model import ModelError
+    from elenchus.web import voice as _voice
+    from elenchus.web.session_runner import _STATIC_RESTART_CLOSE
+
+    outcome = {"v": "unchanged"}
+
+    def factory():
+        m = _world_factory(make_fake, outcome=outcome)()
+
+        def boom(situation, segments, voice=""):
+            raise ModelError("timeout")
+
+        m.concierge_sitting_close = boom
+        return m
+
+    reg = SessionRegistry(str(tmp_path / "plateau-close-fails.db"), model_factory=factory)
+    _open_world(reg, "s1")
+    tag, _ = _drive(reg, "s1", opening="a hedge")
+    assert tag == "done"
+    assert reg._last_record["s1"]["stop_reason"] == "plateau"
+
+    tag, data = reg.close("s1")
+
+    assert tag == "close"
+    assert data["close"] != _voice._STATIC_CLOSE, "told a plateaued learner they took a position"
+    assert data["close"] == _STATIC_RESTART_CLOSE
+
+
+def test_a_non_model_failure_in_the_lost_context_screen_is_the_same_nudge(
+    tmp_path, make_fake, caplog
+):
+    """Reviewer finding (escape lens): the first net wrapped only `voice.converse`. The
+    lost-context branch then runs a SECOND paid screen (`voice.egress_safe_reply` against the
+    lost exp), which catches ModelError only -- so an SDK-class error there still escaped as a
+    bare 500. Nothing is persisted before that screen either, so the nudge is the truthful
+    answer on this path too."""
+    from elenchus.content_loader import load_library
+    from elenchus.web import voice as voice_mod
+    from elenchus.web.sitting_store import SittingStore
+
+    def factory():
+        m = _world_factory(make_fake)()
+        m.concierge_converse = lambda problem, recent, *, stop_reason="converged", voice="": (
+            ConverseTurn(reply="ok", next_pressure="")
+        )
+        return m
+
+    db = str(tmp_path / "lost-screen-fails.db")
+    reg = SessionRegistry(db, model_factory=factory)
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="position one")
+    worked = reg._last_record["s1"]["exp"]
+    own_details = set(voice_mod._moves(worked))
+    lost = next(
+        e
+        for e in load_library()
+        if e.regime is Regime.open_ended and e.experience_id != worked.experience_id
+    )
+    reg._lost_exp_id["s1"] = lost.experience_id
+    reg._lost_ref["s1"] = "gen:lost:1"
+
+    def screen(moves, text):
+        if set(moves) == own_details:  # the reply's own screen inside voice.converse passes
+            from elenchus.model import EgressScreen
+
+            return EgressScreen(performed=[], evidence="(fake: clean)")
+        raise RuntimeError("the SDK's own class on the second screen")
+
+    reg._last_record["s1"]["model"].screen_moves = screen
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    before = len(store.turns(sit))
+
+    tag, data = reg.converse("s1", "a probe")
+
+    assert tag == "nudge" and "nothing was sent" in data["message"].lower()
+    assert len(store.turns(sit)) == before
+    rec = next(r for r in caplog.records if "converse author" in r.getMessage())
+    assert rec.exc_info is not None and rec.exc_info[0] is RuntimeError
+
+
+def test_a_failure_attaching_the_wind_down_label_keeps_the_persisted_reply(
+    tmp_path, make_fake, caplog
+):
+    """Reviewer finding (escape lens, low): `_attach_converse_label` runs AFTER the pair was
+    persisted. A failure there (store or content, not the model) rode out as a 500, the shell
+    said "connection lost", and the learner's retry re-sent a text whose you/vera pair was
+    already on disk -- a duplicated turn. The reply is the substance; the label is chrome."""
+    from elenchus.web.sitting_store import SittingStore
+
+    db = str(tmp_path / "label-fails.db")
+    reg = SessionRegistry(db, model_factory=_world_factory(make_fake))
+    _open_world(reg, "s1")
+    _drive(reg, "s1", opening="position one")
+
+    def boom(session_id, sit, now):
+        raise RuntimeError("content drift under the label")
+
+    reg._wind_down_label = boom
+    store = SittingStore(db)
+    sit = store.live_sitting()["id"]
+    before = len(store.turns(sit))
+
+    tag, data = reg.converse("s1", "and then?")
+
+    assert tag == "say" and data["text"]
+    assert len(store.turns(sit)) == before + 2
+    assert "next_kind" not in data
+    rec = next(r for r in caplog.records if "label" in r.getMessage() and r.exc_info)
+    assert rec.exc_info[0] is RuntimeError
