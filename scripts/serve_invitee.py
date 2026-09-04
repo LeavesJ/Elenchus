@@ -12,6 +12,15 @@ stderr goes to `<root>/<slug>/server.log`, appended. That is the S2 refusal reco
 `_log_refusal` reaches stderr via logging's last-resort handler, and a refusal recorded into a
 scrolling terminal is only marginally better than one discarded.
 
+The launcher SUPERVISES what it starts (2026-09-04). The beta died at 01:49 on 2026-09-03 with a
+clean SIGTERM sequence in the child, no cause ever established, and nothing noticed for hours:
+this script was waiting on a child that was gone, and the tunnel kept answering 302 to the world.
+Now a child that exits on its own is restarted, with a backoff that doubles while it keeps dying
+young and never gives up, and every restart is written into the tenant log with the exit code and
+how long the child lived. `grep supervisor: <root>/<slug>/server.log` is the restart history.
+What this cannot cover: the launcher itself being killed. That needs a supervisor outside this
+process (launchd on this machine), which is an operator decision, not a line of code here.
+
 `--tunnel` execs `cloudflared tunnel --url` alongside and passes its output through; the
 trycloudflare hostname is random and DIES WITH THIS PROCESS — hand out the printed link, and
 expect to mint a fresh one on every restart.
@@ -25,6 +34,8 @@ import re
 import signal
 import subprocess
 import sys
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 # The ceiling's value is defined once, in the package, and imported here rather than copied. Two
@@ -164,6 +175,117 @@ def build_env(
     return env
 
 
+# ---- supervision --------------------------------------------------------------------------------
+
+_POLL_S = 0.5
+_BACKOFF_FIRST_S = 1.0
+_BACKOFF_MAX_S = 60.0
+# A child that lived at least this long before dying was not crash-looping: its death is a new
+# incident, and the next restart starts the backoff over rather than extending it.
+_STABLE_S = 60.0
+
+
+class _Supervised:
+    """One child under supervision: what to spawn, and how many times in a row it died young.
+
+    Two of these, the server and the tunnel, with independent counters: a tunnel that cannot
+    reach Cloudflare must not slow the server's restarts, and vice versa.
+    """
+
+    def __init__(self, name: str, spawn, clock):
+        self.name, self._spawn, self._clock = name, spawn, clock
+        self.child = None
+        self.born = 0.0
+        self.fast_deaths = 0
+        self.restarts = 0
+
+    def start(self):
+        self.child = self._spawn()
+        self.born = self._clock()
+        return self.child
+
+    def exited(self):
+        """The exit code if the child is gone, else None."""
+        return self.child.poll()
+
+    def backoff(self) -> tuple[float, float]:
+        """(seconds to wait before the next start, seconds the dead child lived).
+
+        Doubles from one second while the child keeps dying inside `_STABLE_S`, capped at a
+        minute, and NEVER gives up: a keyless or half-deployed child costs nothing while it
+        cannot start, and the moment the cause is fixed it should come back by itself. Giving
+        up would recreate the outage this exists for, with a log line on top.
+        """
+        lived = self._clock() - self.born
+        self.fast_deaths = self.fast_deaths + 1 if lived < _STABLE_S else 0
+        wait = min(_BACKOFF_FIRST_S * 2 ** max(self.fast_deaths - 1, 0), _BACKOFF_MAX_S)
+        return wait, lived
+
+
+def supervise(
+    spawn_server,
+    spawn_tunnel,
+    *,
+    should_stop,
+    log,
+    sleep=time.sleep,
+    clock=time.monotonic,
+) -> int:
+    """Keep one invitee served until told to stop: the launcher's run loop.
+
+    `spawn_server` and `spawn_tunnel` (None when there is no tunnel) return Popen-like children.
+    `should_stop` is the signal handler's flag: when it reads True the loop terminates every
+    child and returns the server's exit code, and never restarts anything after it -- a
+    deliberate stop must not turn into a fight. `log` takes one line per event.
+
+    `sleep` and `clock` exist so tests/test_serve_invitee.py can run a crash loop in
+    milliseconds against fake children; the launcher passes nothing and gets the real ones.
+    """
+    server = _Supervised("server", spawn_server, clock)
+    tunnel = _Supervised("tunnel", spawn_tunnel, clock) if spawn_tunnel is not None else None
+    server.start()
+    if tunnel is not None:
+        tunnel.start()
+    units = [u for u in (server, tunnel) if u is not None]
+
+    def wait(seconds: float) -> None:
+        # Sliced, so a stop that lands during a 60s backoff wait is honoured within a poll.
+        end = clock() + seconds
+        while not should_stop():
+            remaining = end - clock()
+            if remaining <= 0:
+                return
+            sleep(min(remaining, _POLL_S))
+
+    while not should_stop():
+        for unit in units:
+            code = unit.exited()
+            if code is None:
+                continue
+            delay, lived = unit.backoff()
+            unit.restarts += 1
+            log(
+                f"{unit.name} exited code={code} after {lived:.0f}s; "
+                f"restart #{unit.restarts} in {delay:g}s"
+            )
+            wait(delay)
+            if should_stop():
+                break
+            child = unit.start()
+            log(f"{unit.name} restarted (pid {child.pid})")
+        sleep(_POLL_S)
+
+    for unit in reversed(units):  # tunnel first, so no new request lands on a server going down
+        unit.child.terminate()
+    for unit in units:
+        try:
+            unit.child.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            unit.child.kill()
+            unit.child.wait()
+    return server.child.returncode
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Serve one invitee's isolated instance.")
     parser.add_argument("slug", help="invitee slug: [a-z0-9-], names <root>/<slug>/")
@@ -225,51 +347,65 @@ def main() -> int:
 
     env = build_env(root, slug, args.host, args.port)
     log_path = tenant / "server.log"
-    children: list[subprocess.Popen] = []
 
     with open(log_path, "ab", buffering=0) as log:
-        server = subprocess.Popen(
-            [sys.executable, "-m", "elenchus.web"], env=env, stdout=log, stderr=log
-        )
-        children.append(server)
+
+        def spawn_server():
+            return subprocess.Popen(
+                [sys.executable, "-m", "elenchus.web"], env=env, stdout=log, stderr=log
+            )
+
+        spawn_tunnel = None
+        if hostname is not None:
+
+            def spawn_tunnel():
+                return subprocess.Popen(
+                    [
+                        "cloudflared",
+                        "tunnel",
+                        "run",
+                        "--url",
+                        f"http://localhost:{args.port}",
+                        tunnel_name,
+                    ]
+                )
+
+        elif args.tunnel:
+
+            def spawn_tunnel():
+                return subprocess.Popen(
+                    ["cloudflared", "tunnel", "--url", f"http://localhost:{args.port}"]
+                )
+
+        def note(line: str) -> None:
+            # Both places: the tenant log is the durable record the next person greps, and
+            # stdout is whoever is watching now. Timestamped, because "restart #3" is only
+            # useful next to WHEN.
+            stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            log.write(f"{stamp} [{slug}] supervisor: {line}\n".encode())
+            print(f"[{slug}] supervisor: {line}", flush=True)
+
+        stopping = False
+
+        def _stop(signum, frame):  # noqa: ARG001 -- signal signature
+            nonlocal stopping
+            stopping = True  # the loop terminates the children itself, within one poll
+
+        signal.signal(signal.SIGINT, _stop)
+        signal.signal(signal.SIGTERM, _stop)
+
         print(f"[{slug}] serving on {args.host}:{args.port}, db {env['ELENCHUS_DB']}")
         print(f"[{slug}] stderr -> {log_path}")
-
         if hostname is not None:
-            tunnel = subprocess.Popen(
-                [
-                    "cloudflared",
-                    "tunnel",
-                    "run",
-                    "--url",
-                    f"http://localhost:{args.port}",
-                    tunnel_name,
-                ]
-            )
-            children.append(tunnel)
             print(f"[{slug}] named tunnel {tunnel_name}: https://{hostname}")
             print(f"[{slug}] this link is STABLE across restarts; hand out this one.")
         elif args.tunnel:
-            tunnel = subprocess.Popen(
-                ["cloudflared", "tunnel", "--url", f"http://localhost:{args.port}"]
-            )
-            children.append(tunnel)
             print(
                 f"[{slug}] QUICK tunnel; hand out the trycloudflare URL it prints. It dies "
                 "with this process and a stale link can serve scareware -- founder checks only."
             )
-
-        def _stop(signum, frame):  # noqa: ARG001 -- signal signature
-            for child in children:
-                child.terminate()
-
-        signal.signal(signal.SIGINT, _stop)
-        signal.signal(signal.SIGTERM, _stop)
-        code = server.wait()
-        for child in children[1:]:
-            child.terminate()
-            child.wait(timeout=10)
-    return code
+        note("watching; a child that dies is restarted and written down here")
+        return supervise(spawn_server, spawn_tunnel, should_stop=lambda: stopping, log=note)
 
 
 if __name__ == "__main__":
