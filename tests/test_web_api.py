@@ -1326,3 +1326,71 @@ def test_the_client_renders_the_scope_line():
     html = Path("src/elenchus/web/static/index.html").read_text()
     assert html.count("r.scope") >= 1, "renderFrontdoor never renders the scope"
     assert "frontdoor.scope" in html, "the resume front-door path never renders the scope"
+
+
+# ---- A model failure at the landing is never a bare 500 (2026-09-04) ------------------------
+
+
+def _converged(client):
+    _, r = _choose_anchor(client)
+    r = client.post(
+        "/api/session/s/say", json={"text": "reasoning that already holds the move"}
+    ).json()
+    while r["kind"] == "say":
+        r = client.post("/api/session/s/say", json={"text": "mechanism"}).json()
+    assert r["kind"] == "done"
+
+
+def test_a_model_failure_at_close_is_a_close_payload_not_a_500(tmp_path, make_fake):
+    """Over the wire the learner actually hits. A `ModelError` out of the close author escaped
+    the route, FastAPI answered `Internal Server Error` as text, `r.json()` threw in the shell,
+    and the End button offered "connection lost -- try again" -- forever, since each retry paid
+    for one more identical failure. The shell's close handler renders `kind: close`; that is what
+    it must get."""
+    from elenchus.model import ModelError
+
+    def factory():
+        m = make_fake()
+
+        def boom(problem, recent, *, voice=""):
+            raise ModelError("spend budget exhausted")
+
+        m.concierge_close = boom
+        return m
+
+    app = create_app(db_path=str(tmp_path / "close500.db"), model_factory=factory)
+    client = TestClient(app, raise_server_exceptions=False)
+    _converged(client)
+
+    resp = client.post("/api/session/s/close")
+
+    assert resp.status_code == 200, resp.text
+    cl = resp.json()
+    assert cl["kind"] == "close" and cl["close"]
+    assert isinstance(cl["terrain"], list)
+
+
+def test_a_model_failure_in_converse_is_a_nudge_not_a_500(tmp_path, make_fake):
+    """The composer's submit path in converse mode: a nudge unwinds her bubble and hands the
+    text back (index.html `unwindSay`); a 500 rendered "connection lost" over a server that was
+    up. The wire must carry the shape the shell already handles."""
+    from elenchus.model import ModelError
+
+    def factory():
+        m = make_fake()
+
+        def boom(problem, recent, *, stop_reason="converged", voice=""):
+            raise ModelError("timeout")
+
+        m.concierge_converse = boom
+        return m
+
+    app = create_app(db_path=str(tmp_path / "converse500.db"), model_factory=factory)
+    client = TestClient(app, raise_server_exceptions=False)
+    _converged(client)
+
+    resp = client.post("/api/session/s/converse", json={"text": "what if I'm wrong?"})
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["kind"] == "nudge" and "nothing was sent" in body["message"].lower()
