@@ -66,11 +66,16 @@ jobs:
       # Not `continue-on-error`. Everywhere except a fork PR -- every push to
       # `main` included -- an unreachable harness must FAIL the job rather than
       # quietly downgrade what `main` is gated by.
+      #
+      # felix-home, not felix. The private repo was renamed on 2026-09-13 and a
+      # public snapshot took the old name. GitHub matches repository names without
+      # regard to case, so `LeavesJ/felix` now resolves to that snapshot, which
+      # carries no project but Felix itself and so cannot gate this one.
       - name: Check out Felix
         if: steps.ctx.outputs.harness == 'yes'
         uses: actions/checkout@v5
         with:
-          repository: LeavesJ/felix
+          repository: LeavesJ/felix-home
           ssh-key: ${{ secrets.FELIX_DEPLOY_KEY }}
           path: felix
 
