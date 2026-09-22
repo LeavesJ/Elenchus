@@ -135,8 +135,8 @@ jobs:
             git checkout -- .
             exit 1
           fi
-          git config user.name "felix[bot]"
-          git config user.email "felix@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "fix: unattended repair, verified by the gate
 
           Produced by the unattended loop and pushed only because the gate went
