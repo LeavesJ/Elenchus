@@ -71,10 +71,20 @@ jobs:
           set -uo pipefail
           ../felix/engine/harness/felix repair | tee /tmp/brief.txt
           rc=${PIPESTATUS[0]}
-          if [ "$rc" != "3" ]; then echo "proceed=yes" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # Only 0 is a brief to act on. 3 is a red path, 2 a repair ceiling
+          # that is reached or could not be counted, and anything else a read
+          # of the gate's runs that failed. Until 2026-09-23 this proceeded on
+          # everything but 3, so a reached ceiling still spent the budget and
+          # handed a model the brief that said to stop.
+          if [ "$rc" = "0" ]; then echo "proceed=yes" >> "$GITHUB_OUTPUT"; exit 0; fi
 
-          echo "out of scope: a red path is implicated" >&2
           echo "proceed=no" >> "$GITHUB_OUTPUT"
+          case "$rc" in
+            3) echo "out of scope: a red path is implicated" >&2 ;;
+            2) echo "the repair ceiling is reached, or could not be counted" >&2 ;;
+            *) echo "felix repair could not read the gate's runs (exit $rc); nothing is repaired from a run nobody read" >&2
+               exit 1 ;;
+          esac
           # Escalation is the one path that must not fail quietly. If the label
           # cannot be applied, the job fails so somebody notices, rather than a
           # red-path failure disappearing into a green checkmark.
