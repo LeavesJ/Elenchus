@@ -80,8 +80,12 @@ jobs:
       # auto-merge streak and the repair ceiling read its runs as evidence about
       # this repository, which runs graded by different engines are not.
       #
-      # The pin sits in this file because a ref read from any other file would
-      # let a pull request choose the Felix that grades it.
+      # The pin sits in this file because a pull request that edits a workflow
+      # here is merged by the founder, never by Felix on green. Such a pull
+      # request can still change the pin and be graded by the Felix it names,
+      # but that grade does not merge it. A ref read from any other file would
+      # let a pull request choose the Felix that grades it and be merged on
+      # that grade.
       #
       # What it costs: felix-home's projects/elenchus/gate.sh and the tables
       # beside it are read at the pin too, so a change to them reaches CI only
@@ -97,7 +101,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: LeavesJ/felix-home
-          ref: bd740748c76510e1fffaffdf23192cb2a5c61a97
+          ref: 'bd740748c76510e1fffaffdf23192cb2a5c61a97'
           ssh-key: ${{ secrets.FELIX_DEPLOY_KEY }}
           path: felix
 
