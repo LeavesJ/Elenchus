@@ -46,16 +46,37 @@ jobs:
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
+      # v5, the lowest major that runs on Node 24. v4 targets Node 20, which
+      # the runner forces onto Node 24 with a warning until it stops doing so.
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.workflow_run.head_branch || github.ref }}
           fetch-depth: 0
           path: repo
 
-      # felix-home, not felix: see the Felix checkout in gate.yml.
+      # Pinned, to the full sha of the Felix commit this file was copied from,
+      # quoted so it is a string: YAML reads a sha of all digits as a number.
+      # Felix publishes no tags. The scope step below branches on felix repair's
+      # exit status, a contract between this file and the engine that
+      # lib/repair.sh lists. Without a ref the engine is whatever Felix's default
+      # branch holds when the job runs, and that contract changed four times on
+      # 2026-09-23 (2 took in a ceiling that could not be counted, 4 split off
+      # from 2, nothing to repair moved from 0 to 5, then 0 narrowed to failed
+      # or timed-out runs with a log) under copies that had not changed.
+      # Pinned, the engine and this file move together, in one change reviewed
+      # here: copy the template again from the commit the new pin names. The
+      # claude-code install below is pinned for the same reason: this job holds
+      # a write token, and an API key once it is switched on, and an unpinned
+      # checkout runs whatever merged in Felix that day.
+      #
+      # What the pin costs: the risk table and gate script Felix holds for this
+      # repository are read from the same commit. A path made red in Felix after
+      # the pin is not red to this loop until the pin moves, so move it when
+      # either changes.
       - uses: actions/checkout@v5
         with:
           repository: LeavesJ/felix-home
+          ref: '685d37beedc4590a989ccd145db3069af8e7f76a'
           ssh-key: ${{ secrets.FELIX_DEPLOY_KEY }}
           path: felix
 
@@ -68,13 +89,43 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
         run: |
-          set -uo pipefail
+          # Actions runs a step that names no shell as `bash -e`, and under
+          # pipefail that ended this step at felix repair's first non-zero
+          # status, before rc was read: a ceiling or a red path failed the job
+          # and escalated nothing, and nothing to repair would have failed it
+          # too. Every exit below is explicit instead.
+          set +e -uo pipefail
           ../felix/engine/harness/felix repair | tee /tmp/brief.txt
           rc=${PIPESTATUS[0]}
-          if [ "$rc" != "3" ]; then echo "proceed=yes" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # Only 0 is a brief to act on: a gate run that failed or timed out,
+          # with a log to read. 5 is nothing to repair: the gate has not run on
+          # the branch, is still running, is green, or ended without failing.
+          # 4 is a checkout the Felix checked out above does not govern, 3 a
+          # red path, 2 a repair ceiling that is reached or could not be
+          # counted, and anything else a gate run nobody could read: its runs
+          # or its log unreadable, or a run that never started and left none.
+          # lib/repair.sh lists the same statuses. Until 2026-09-23 nothing to repair exited
+          # 0, so a dispatch on a green branch would have spent the budget and
+          # handed a model a brief saying nothing was wrong. This also
+          # proceeded on everything but 3, which under plain bash let a
+          # reached ceiling do the same; under `bash -e` the step ended first.
+          if [ "$rc" = "0" ]; then echo "proceed=yes" >> "$GITHUB_OUTPUT"; exit 0; fi
 
-          echo "out of scope: a red path is implicated" >&2
           echo "proceed=no" >> "$GITHUB_OUTPUT"
+          case "$rc" in
+            # Not a stop for a person: nothing failed, so nothing is escalated
+            # and the job passes.
+            5) echo "nothing=yes" >> "$GITHUB_OUTPUT"
+               echo "nothing to repair on $BRANCH"; exit 0 ;;
+            3) echo "out of scope: a red path is implicated" >&2 ;;
+            2) echo "the repair ceiling is reached, or could not be counted" >&2 ;;
+            # Wiring, not the change: it holds for every branch at once, so no
+            # pull request is labelled for it and the job fails instead.
+            4) echo "no project in the Felix this workflow checked out governs this repository, or its .felix names one that does not exist; fix the binding, since no pull request can" >&2
+               exit 1 ;;
+            *) echo "felix repair could not read the gate's runs or the failing run's log (exit $rc); nothing is repaired from a run nobody read" >&2
+               exit 1 ;;
+          esac
           # Escalation is the one path that must not fail quietly. If the label
           # cannot be applied, the job fails so somebody notices, rather than a
           # red-path failure disappearing into a green checkmark.
@@ -108,7 +159,16 @@ jobs:
           set -uo pipefail
           # Pinned. An unpinned global install pulls whatever shipped that
           # morning into a job holding an API key.
-          npm install -g @anthropic-ai/claude-code@2.1.37 >/dev/null 2>&1
+          #
+          # npm's output is shown only when the install fails. It was thrown
+          # away, and Actions runs this step as `bash -e`, so a failed install
+          # ended the step at that line with nothing printed, after the budget
+          # step had already recorded the run's spend.
+          if ! npm_log="$(npm install -g @anthropic-ai/claude-code@2.1.37 2>&1)"; then
+            printf '%s\n' "$npm_log" | tail -20 >&2
+            echo "could not install @anthropic-ai/claude-code@2.1.37, so no repair was attempted; this run's spend is already recorded against the daily budget" >&2
+            exit 1
+          fi
           # Read and Edit only. No git, no shell, no push. The model changes
           # files; this workflow decides whether the change is acceptable.
           claude -p "$(cat /tmp/brief.txt)
@@ -135,6 +195,11 @@ jobs:
             git checkout -- .
             exit 1
           fi
+          # GitHub's documented identity for a commit Actions makes. Until
+          # 2026-09-22 this was a name of our own over the no-reply address of
+          # the GitHub account named felix, a real person's (id 4426), so every
+          # unattended commit in every repository that copied this file was
+          # attributed to a stranger.
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "fix: unattended repair, verified by the gate
@@ -146,7 +211,10 @@ jobs:
       - name: Report
         if: always()
         run: |
-          if [ "${{ steps.scope.outputs.proceed }}" != "yes" ]; then
+          if [ "${{ steps.scope.outputs.nothing }}" = "yes" ]; then
+            echo "Nothing to repair: the gate is green, still running, ended without"
+            echo "failing, or has not run on this branch. Nothing was invoked or spent."
+          elif [ "${{ steps.scope.outputs.proceed }}" != "yes" ]; then
             echo "Stopped at scope. A person decides here."
           elif [ "${{ vars.FELIX_UNATTENDED }}" != "true" ]; then
             echo "In scope, and the switch is off. The guards ran and nothing was"
