@@ -71,11 +71,33 @@ jobs:
       # public snapshot took the old name. GitHub matches repository names without
       # regard to case, so `LeavesJ/felix` now resolves to that snapshot, which
       # carries no project but Felix itself and so cannot gate this one.
+      #
+      # PINNED to a full sha of felix-home main, decided 2026-09-23. With no
+      # `ref:` this took felix-home's default branch as it stood when the job
+      # ran, so the verdict on a commit here depended on when it was graded, and
+      # any felix-home merge, reviewed by nobody here, redefined this
+      # repository's green. `gate` is the required check on `main`, and the
+      # auto-merge streak and the repair ceiling read its runs as evidence about
+      # this repository, which runs graded by different engines are not.
+      #
+      # The pin sits in this file because a ref read from any other file would
+      # let a pull request choose the Felix that grades it.
+      #
+      # What it costs: felix-home's projects/elenchus/gate.sh and the tables
+      # beside it are read at the pin too, so a change to them reaches CI only
+      # when the pin moves, and a local `felix gate` on a newer engine can
+      # disagree with CI until then. To move it, open a pull request here
+      # naming a newer felix-home main commit; its own run grades this
+      # repository with that Felix before that Felix defines green.
+      #
+      # bd740748 is felix-home main on 2026-09-23 and carries engine 0.49.162,
+      # the version deployed locally when it was pinned.
       - name: Check out Felix
         if: steps.ctx.outputs.harness == 'yes'
         uses: actions/checkout@v5
         with:
           repository: LeavesJ/felix-home
+          ref: bd740748c76510e1fffaffdf23192cb2a5c61a97
           ssh-key: ${{ secrets.FELIX_DEPLOY_KEY }}
           path: felix
 
