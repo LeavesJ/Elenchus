@@ -123,6 +123,10 @@ PINNED_DECISION_FRAMES = {
     "opening_rate_decision": "choose_the_failure_default_deliberately",
     "cross_pool_data_optics": "lead_with_what_you_refuse_to_do",
     "adoption_funnel_stalls": "protect_the_core_lane",
+    # The fourth isolated home, held on 2026-08-31 because its filename tripped the gate's
+    # confidential path regex, shipped 2026-09-02 under a filename that names the KIND of decision.
+    # J accepted the ledger_ref being public (it already was, in three tracked comments).
+    "divided_commitment": "commit_under_the_deadline",
 }
 
 
