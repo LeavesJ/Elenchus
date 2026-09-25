@@ -18,6 +18,21 @@ name: unattended repair
 # and edit, and nothing else. It cannot run git, cannot push, and cannot decide
 # that its own work is finished. The workflow runs the gate afterwards and pushes
 # only if the gate is green. An agent that verifies itself is not verified.
+#
+# And the model is left nothing to copy. actions/checkout keeps what it fetched
+# with unless told otherwise: the job's token in repo/.git/config as an
+# http.extraheader, and the deploy key as a file under $RUNNER_TEMP that
+# felix/.git/config names by path. A tool-name allow rule matches every path,
+# so `--allowedTools "Read,Edit"` opens all three, and the push step below
+# commits every tracked change. Measured on the pinned 2.1.37 (2026-09-23, the
+# real binary against a scripted Messages API): Read returned all three, Edit
+# put their contents in a tracked file, and the gate's secret scan passed the
+# diff, since a base64 header and a ghs_ token are shapes it does not know. A
+# model steered by a hostile failing log is the reader to plan for. So neither
+# checkout persists what it fetched with, the token reaches git in the push
+# step alone, from that step's environment, in no file and no argument, and
+# the model's own tools are scoped to the checkout with its .git denied.
+# tests/run holds the checks ("leaves the model no credential to copy").
 
 on:
   workflow_run:
@@ -46,18 +61,49 @@ jobs:
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
+      # v5, the lowest major that runs on Node 24. v4 targets Node 20, which
+      # the runner forces onto Node 24 with a warning until it stops doing so.
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.workflow_run.head_branch || github.ref }}
           fetch-depth: 0
           path: repo
+          # The job's token stays out of repo/.git/config. The push step
+          # supplies it itself, and nothing between here and there needs it:
+          # felix repair and the escalation label go through gh with a
+          # GH_TOKEN of their own, and the gate reads refs this fetch brought.
+          persist-credentials: false
 
-      # felix-home, not felix: see the Felix checkout in gate.yml.
+      # Pinned, to the full sha of the Felix commit this file was copied from,
+      # quoted so it is a string: YAML reads a sha of all digits as a number.
+      # Felix publishes no tags. The scope step below branches on felix repair's
+      # exit status, a contract between this file and the engine that
+      # lib/repair.sh lists. Without a ref the engine is whatever Felix's default
+      # branch holds when the job runs, and that contract changed four times on
+      # 2026-09-23 (2 took in a ceiling that could not be counted, 4 split off
+      # from 2, nothing to repair moved from 0 to 5, then 0 narrowed to failed
+      # or timed-out runs with a log) under copies that had not changed.
+      # Pinned, the engine and this file move together, in one change reviewed
+      # here: copy the template again from the commit the new pin names. The
+      # claude-code install below is pinned for the same reason: this job holds
+      # a write token, and an API key once it is switched on, and an unpinned
+      # checkout runs whatever merged in Felix that day.
+      #
+      # What the pin costs: the risk table and gate script Felix holds for this
+      # repository are read from the same commit. A path made red in Felix after
+      # the pin is not red to this loop until the pin moves, so move it when
+      # either changes.
       - uses: actions/checkout@v5
         with:
           repository: LeavesJ/felix-home
+          ref: 'cb3a72ce4f0d85d37253359ca73b4976e9d45201'
           ssh-key: ${{ secrets.FELIX_DEPLOY_KEY }}
           path: felix
+          # With the fetch done, the checkout takes back the key file under
+          # $RUNNER_TEMP and the core.sshCommand naming it before the next
+          # step runs (its removeAuth). Nothing after this talks to Felix's
+          # remote: the engine is read from disk.
+          persist-credentials: false
 
       # Scope before anything reads the failing log. Handing a model the
       # diagnostics and then telling it what it may not touch is the wrong order.
@@ -68,13 +114,43 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
         run: |
-          set -uo pipefail
+          # Actions runs a step that names no shell as `bash -e`, and under
+          # pipefail that ended this step at felix repair's first non-zero
+          # status, before rc was read: a ceiling or a red path failed the job
+          # and escalated nothing, and nothing to repair would have failed it
+          # too. Every exit below is explicit instead.
+          set +e -uo pipefail
           ../felix/engine/harness/felix repair | tee /tmp/brief.txt
           rc=${PIPESTATUS[0]}
-          if [ "$rc" != "3" ]; then echo "proceed=yes" >> "$GITHUB_OUTPUT"; exit 0; fi
+          # Only 0 is a brief to act on: a gate run that failed or timed out,
+          # with a log to read. 5 is nothing to repair: the gate has not run on
+          # the branch, is still running, is green, or ended without failing.
+          # 4 is a checkout the Felix checked out above does not govern, 3 a
+          # red path, 2 a repair ceiling that is reached or could not be
+          # counted, and anything else a gate run nobody could read: its runs
+          # or its log unreadable, or a run that never started and left none.
+          # lib/repair.sh lists the same statuses. Until 2026-09-23 nothing to repair exited
+          # 0, so a dispatch on a green branch would have spent the budget and
+          # handed a model a brief saying nothing was wrong. This also
+          # proceeded on everything but 3, which under plain bash let a
+          # reached ceiling do the same; under `bash -e` the step ended first.
+          if [ "$rc" = "0" ]; then echo "proceed=yes" >> "$GITHUB_OUTPUT"; exit 0; fi
 
-          echo "out of scope: a red path is implicated" >&2
           echo "proceed=no" >> "$GITHUB_OUTPUT"
+          case "$rc" in
+            # Not a stop for a person: nothing failed, so nothing is escalated
+            # and the job passes.
+            5) echo "nothing=yes" >> "$GITHUB_OUTPUT"
+               echo "nothing to repair on $BRANCH"; exit 0 ;;
+            3) echo "out of scope: a red path is implicated" >&2 ;;
+            2) echo "the repair ceiling is reached, or could not be counted" >&2 ;;
+            # Wiring, not the change: it holds for every branch at once, so no
+            # pull request is labelled for it and the job fails instead.
+            4) echo "no project in the Felix this workflow checked out governs this repository, or its .felix names one that does not exist; fix the binding, since no pull request can" >&2
+               exit 1 ;;
+            *) echo "felix repair could not read the gate's runs or the failing run's log (exit $rc); nothing is repaired from a run nobody read" >&2
+               exit 1 ;;
+          esac
           # Escalation is the one path that must not fail quietly. If the label
           # cannot be applied, the job fails so somebody notices, rather than a
           # red-path failure disappearing into a green checkmark.
@@ -108,15 +184,56 @@ jobs:
           set -uo pipefail
           # Pinned. An unpinned global install pulls whatever shipped that
           # morning into a job holding an API key.
-          npm install -g @anthropic-ai/claude-code@2.1.37 >/dev/null 2>&1
-          # Read and Edit only. No git, no shell, no push. The model changes
-          # files; this workflow decides whether the change is acceptable.
+          #
+          # npm's output is shown only when the install fails. It was thrown
+          # away, and Actions runs this step as `bash -e`, so a failed install
+          # ended the step at that line with nothing printed, after the budget
+          # step had already recorded the run's spend.
+          if ! npm_log="$(npm install -g @anthropic-ai/claude-code@2.1.37 2>&1)"; then
+            printf '%s\n' "$npm_log" | tail -20 >&2
+            echo "could not install @anthropic-ai/claude-code@2.1.37, so no repair was attempted; this run's spend is already recorded against the daily budget" >&2
+            exit 1
+          fi
+          # Read and Edit only, inside the checkout, and not its .git. No git,
+          # no shell, no push. The model changes files; this workflow decides
+          # whether the change is acceptable. The rules are path-scoped
+          # because a bare tool name matches every path. Measured on 2.1.37:
+          # `Read,Edit` read and edited ../felix/.git/config and a file under
+          # $RUNNER_TEMP, and a deny on .git/** alone still left the Felix
+          # checkout's config editable, where core.hooksPath would have made
+          # the verify step's own git commands run code with the token in
+          # their environment. Scoped to ./**, every path outside the working
+          # directory is refused in -p, and .git/** is refused inside it. The
+          # brief already names every file the model may touch.
+          #
+          # And not its own environment. This step's ANTHROPIC_API_KEY is the
+          # claude process's too, and on Linux a process's environment is a
+          # file, /proc/self/environ, which a tool-name allow rule opens like
+          # any other path. Measured on the pinned 2.1.37 on ubuntu-latest
+          # (2026-09-24, the real binary against a scripted Messages API):
+          # Read returned it, key included, and Edit put the key in a tracked
+          # file for the push step to commit. A model steered by a hostile
+          # failing log is the reader to plan for. The deny rule below is
+          # read before the allow rule, and in the same measurement refused
+          # every spelling of the path (/proc/self/environ, /proc/self/../
+          # self/environ, a relative path climbing to /proc, /proc//self/
+          # environ, /proc/thread-self/environ) while the repository's own
+          # files stayed readable. One slash, `Read(/proc/**)`, refused
+          # nothing: it names a path under the working directory. The
+          # measurement is the pin's, so when the claude-code version moves,
+          # measure again. tests/run holds the check ("denies the model its
+          # own environment").
+          # Under the allow list above, /proc is outside the working directory
+          # and refused as ungranted as well; the deny stays as the lock that
+          # does not depend on the allow list's shape, so a later widening of
+          # that list does not reopen it.
           claude -p "$(cat /tmp/brief.txt)
 
           Repair this failure by editing files. Do not touch any path the brief
           did not name. If the fix needs a file outside that set, stop and
           explain instead of widening the change." \
-            --allowedTools "Read,Edit" \
+            --allowedTools "Read(./**),Edit(./**)" \
+            --disallowedTools "Read(.git/**),Edit(.git/**),Read(//proc/**)" \
             || echo "the attempt did not complete; the gate below still decides"
 
       # The gate decides, not the model, and not the absence of an error.
@@ -125,6 +242,9 @@ jobs:
         working-directory: repo
         env:
           BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          # The token's one appearance in this job. The checkout above did
+          # not keep it, so it is here, and only for the push.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
           if git diff --quiet; then
@@ -135,18 +255,33 @@ jobs:
             git checkout -- .
             exit 1
           fi
+          # GitHub's documented identity for a commit Actions makes. Until
+          # 2026-09-22 this was a name of our own over the no-reply address of
+          # the GitHub account named felix, a real person's (id 4426), so every
+          # unattended commit in every repository that copied this file was
+          # attributed to a stranger.
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "fix: unattended repair, verified by the gate
 
           Produced by the unattended loop and pushed only because the gate went
           green afterwards. Scope was checked before the failing log was read."
-          git push origin "HEAD:$BRANCH"
+          # A helper hands git the token from this step's environment at
+          # push time: written to no file, passed in no argument. The empty
+          # helper first clears any list the runner already had, so this
+          # step's token is the one git offers and not whatever a helper
+          # left behind answers with.
+          git -c credential.helper= \
+              -c 'credential.helper=!f() { printf "username=x-access-token\npassword=%s\n" "$GITHUB_TOKEN"; }; f' \
+            push origin "HEAD:$BRANCH"
 
       - name: Report
         if: always()
         run: |
-          if [ "${{ steps.scope.outputs.proceed }}" != "yes" ]; then
+          if [ "${{ steps.scope.outputs.nothing }}" = "yes" ]; then
+            echo "Nothing to repair: the gate is green, still running, ended without"
+            echo "failing, or has not run on this branch. Nothing was invoked or spent."
+          elif [ "${{ steps.scope.outputs.proceed }}" != "yes" ]; then
             echo "Stopped at scope. A person decides here."
           elif [ "${{ vars.FELIX_UNATTENDED }}" != "true" ]; then
             echo "In scope, and the switch is off. The guards ran and nothing was"
