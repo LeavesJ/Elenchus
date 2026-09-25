@@ -18,6 +18,21 @@ name: unattended repair
 # and edit, and nothing else. It cannot run git, cannot push, and cannot decide
 # that its own work is finished. The workflow runs the gate afterwards and pushes
 # only if the gate is green. An agent that verifies itself is not verified.
+#
+# And the model is left nothing to copy. actions/checkout keeps what it fetched
+# with unless told otherwise: the job's token in repo/.git/config as an
+# http.extraheader, and the deploy key as a file under $RUNNER_TEMP that
+# felix/.git/config names by path. A tool-name allow rule matches every path,
+# so `--allowedTools "Read,Edit"` opens all three, and the push step below
+# commits every tracked change. Measured on the pinned 2.1.37 (2026-09-23, the
+# real binary against a scripted Messages API): Read returned all three, Edit
+# put their contents in a tracked file, and the gate's secret scan passed the
+# diff, since a base64 header and a ghs_ token are shapes it does not know. A
+# model steered by a hostile failing log is the reader to plan for. So neither
+# checkout persists what it fetched with, the token reaches git in the push
+# step alone, from that step's environment, in no file and no argument, and
+# the model's own tools are scoped to the checkout with its .git denied.
+# tests/run holds the checks ("leaves the model no credential to copy").
 
 on:
   workflow_run:
@@ -53,6 +68,11 @@ jobs:
           ref: ${{ github.event.workflow_run.head_branch || github.ref }}
           fetch-depth: 0
           path: repo
+          # The job's token stays out of repo/.git/config. The push step
+          # supplies it itself, and nothing between here and there needs it:
+          # felix repair and the escalation label go through gh with a
+          # GH_TOKEN of their own, and the gate reads refs this fetch brought.
+          persist-credentials: false
 
       # Pinned, to the full sha of the Felix commit this file was copied from,
       # quoted so it is a string: YAML reads a sha of all digits as a number.
@@ -76,9 +96,14 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: LeavesJ/felix-home
-          ref: '685d37beedc4590a989ccd145db3069af8e7f76a'
+          ref: 'cb3a72ce4f0d85d37253359ca73b4976e9d45201'
           ssh-key: ${{ secrets.FELIX_DEPLOY_KEY }}
           path: felix
+          # With the fetch done, the checkout takes back the key file under
+          # $RUNNER_TEMP and the core.sshCommand naming it before the next
+          # step runs (its removeAuth). Nothing after this talks to Felix's
+          # remote: the engine is read from disk.
+          persist-credentials: false
 
       # Scope before anything reads the failing log. Handing a model the
       # diagnostics and then telling it what it may not touch is the wrong order.
@@ -169,14 +194,46 @@ jobs:
             echo "could not install @anthropic-ai/claude-code@2.1.37, so no repair was attempted; this run's spend is already recorded against the daily budget" >&2
             exit 1
           fi
-          # Read and Edit only. No git, no shell, no push. The model changes
-          # files; this workflow decides whether the change is acceptable.
+          # Read and Edit only, inside the checkout, and not its .git. No git,
+          # no shell, no push. The model changes files; this workflow decides
+          # whether the change is acceptable. The rules are path-scoped
+          # because a bare tool name matches every path. Measured on 2.1.37:
+          # `Read,Edit` read and edited ../felix/.git/config and a file under
+          # $RUNNER_TEMP, and a deny on .git/** alone still left the Felix
+          # checkout's config editable, where core.hooksPath would have made
+          # the verify step's own git commands run code with the token in
+          # their environment. Scoped to ./**, every path outside the working
+          # directory is refused in -p, and .git/** is refused inside it. The
+          # brief already names every file the model may touch.
+          #
+          # And not its own environment. This step's ANTHROPIC_API_KEY is the
+          # claude process's too, and on Linux a process's environment is a
+          # file, /proc/self/environ, which a tool-name allow rule opens like
+          # any other path. Measured on the pinned 2.1.37 on ubuntu-latest
+          # (2026-09-24, the real binary against a scripted Messages API):
+          # Read returned it, key included, and Edit put the key in a tracked
+          # file for the push step to commit. A model steered by a hostile
+          # failing log is the reader to plan for. The deny rule below is
+          # read before the allow rule, and in the same measurement refused
+          # every spelling of the path (/proc/self/environ, /proc/self/../
+          # self/environ, a relative path climbing to /proc, /proc//self/
+          # environ, /proc/thread-self/environ) while the repository's own
+          # files stayed readable. One slash, `Read(/proc/**)`, refused
+          # nothing: it names a path under the working directory. The
+          # measurement is the pin's, so when the claude-code version moves,
+          # measure again. tests/run holds the check ("denies the model its
+          # own environment").
+          # Under the allow list above, /proc is outside the working directory
+          # and refused as ungranted as well; the deny stays as the lock that
+          # does not depend on the allow list's shape, so a later widening of
+          # that list does not reopen it.
           claude -p "$(cat /tmp/brief.txt)
 
           Repair this failure by editing files. Do not touch any path the brief
           did not name. If the fix needs a file outside that set, stop and
           explain instead of widening the change." \
-            --allowedTools "Read,Edit" \
+            --allowedTools "Read(./**),Edit(./**)" \
+            --disallowedTools "Read(.git/**),Edit(.git/**),Read(//proc/**)" \
             || echo "the attempt did not complete; the gate below still decides"
 
       # The gate decides, not the model, and not the absence of an error.
@@ -185,6 +242,9 @@ jobs:
         working-directory: repo
         env:
           BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
+          # The token's one appearance in this job. The checkout above did
+          # not keep it, so it is here, and only for the push.
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -uo pipefail
           if git diff --quiet; then
@@ -206,7 +266,14 @@ jobs:
 
           Produced by the unattended loop and pushed only because the gate went
           green afterwards. Scope was checked before the failing log was read."
-          git push origin "HEAD:$BRANCH"
+          # A helper hands git the token from this step's environment at
+          # push time: written to no file, passed in no argument. The empty
+          # helper first clears any list the runner already had, so this
+          # step's token is the one git offers and not whatever a helper
+          # left behind answers with.
+          git -c credential.helper= \
+              -c 'credential.helper=!f() { printf "username=x-access-token\npassword=%s\n" "$GITHUB_TOKEN"; }; f' \
+            push origin "HEAD:$BRANCH"
 
       - name: Report
         if: always()
