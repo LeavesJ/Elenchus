@@ -15,6 +15,13 @@ on:
   pull_request:
   push:
     branches: [main]
+  # So a commit can be graded by dispatch. The unattended repair pushes with the
+  # workflow token, and GitHub creates no run from an event that token causes
+  # except workflow_dispatch and repository_dispatch, so its push alone starts
+  # no ordinary run of this workflow. The repair can dispatch this one, and so
+  # can a person: gh workflow run gate.yml --ref BRANCH. A dispatch is not a
+  # pull_request event, so the step below takes the full harness path.
+  workflow_dispatch:
 
 # CI reads code and reports a status. It never writes to the repo.
 permissions:
