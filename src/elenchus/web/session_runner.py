@@ -517,6 +517,14 @@ _STALE_NUDGE = "This room went stale — refresh to pick up where you left off."
 # scolding: a double-click on a slow answer is the whole scenario, and it is not a mistake.
 _IN_FLIGHT_NUDGE = "Still working on the one before this — nothing was sent."
 
+# A post-landing reply the author could not produce (2026-09-04): the ceiling firing, an SDK
+# error, a refusal. Nothing has been persisted at that point -- the model call comes first -- so
+# the truthful shape is the single-flight nudge's: say nothing was sent, which makes the shell
+# hand her words back (`unwindSay`), and name the exit that is on screen. Never the exception.
+_CONVERSE_FAILED_NUDGE = (
+    "That reply didn't come through — nothing was sent. Try again, or end the session."
+)
+
 # An errored segment's dead channel: every reply must point at the honest way forward (refresh →
 # durable-sitting resume: transcript + honesty line + working doors), never a bare dead end.
 _DOOR_FAILED_NUDGE = "That door hit an error — refresh to pick up where you left off."
@@ -2499,33 +2507,49 @@ class SessionRegistry:
         if not self._claim_turn(session_id):
             return ("nudge", {"message": _IN_FLIGHT_NUDGE})
         try:
-            reply, next_pressure = voice.converse(
-                rec["model"],
-                rec["exp"],
-                rec["recent"],
-                value,
-                rec["posture"],
-                rec.get("stop_reason", "converged"),
-                has_sequel=self._story(sit) is not None,
-            )
-            lost = self._lost_context(session_id)
-            if lost is not None and lost[1]:
-                # Interrupted-adjacent converse (spec §2c): the honesty line invites talk about the
-                # LOST problem, whose moves the record's own egress screen is blind to — screen the
-                # union. The lost exp was NOT converged, so it may re-offer within the window; an
-                # unscreened reply could hand its move and prime the future intake. FAIL CLOSED
-                # (batch-review C9): an unresolvable lost exp cannot be screened, so the safe static
-                # serves — matching the rebuild-failure doctrine everywhere else in this build.
-                try:
-                    lost_exp = next((e for e in load_library() if e.experience_id == lost[1]), None)
-                except Exception:
-                    lost_exp = None
-                if lost_exp is None or not voice.egress_safe_reply(rec["model"], lost_exp, reply):
-                    # Fail closed to the HONEST static, never SAFE_CONTRACT's "I'll push" lie on a
-                    # dead engine (spec §2c consistency fold, 2026-07-05): equally safe (a static,
-                    # performs no move), just not a lie. Fresh variant — an interrupted/lost state
-                    # is not the place to promise a next chapter.
-                    reply = voice._CONVERSE_DONE_FRESH
+            try:
+                reply, next_pressure = voice.converse(
+                    rec["model"],
+                    rec["exp"],
+                    rec["recent"],
+                    value,
+                    rec["posture"],
+                    rec.get("stop_reason", "converged"),
+                    has_sequel=self._story(sit) is not None,
+                )
+                lost = self._lost_context(session_id)
+                if lost is not None and lost[1]:
+                    # Interrupted-adjacent converse (spec §2c): the honesty line invites talk
+                    # about the LOST problem, whose moves the record's own egress screen is blind
+                    # to — screen the union. The lost exp was NOT converged, so it may re-offer
+                    # within the window; an unscreened reply could hand its move and prime the
+                    # future intake. FAIL CLOSED (batch-review C9): an unresolvable lost exp
+                    # cannot be screened, so the safe static serves — matching the
+                    # rebuild-failure doctrine everywhere else in this build.
+                    try:
+                        lost_exp = next(
+                            (e for e in load_library() if e.experience_id == lost[1]), None
+                        )
+                    except Exception:
+                        lost_exp = None
+                    if lost_exp is None or not voice.egress_safe_reply(
+                        rec["model"], lost_exp, reply
+                    ):
+                        # Fail closed to the HONEST static, never SAFE_CONTRACT's "I'll push" lie
+                        # on a dead engine (spec §2c consistency fold, 2026-07-05): equally safe
+                        # (a static, performs no move), just not a lie. Fresh variant — an
+                        # interrupted/lost state is not the place to promise a next chapter.
+                        reply = voice._CONVERSE_DONE_FRESH
+            except Exception:
+                # Broad on purpose, like the worker's own net: the ceiling arrives as ModelError,
+                # an auth or overload error arrives as the SDK's own class, and both used to
+                # escape this method as a bare 500 the shell rendered as "connection lost" over
+                # a server that was up. The net covers the author call AND the lost-context
+                # second screen (whose own catch is ModelError-only, voice.egress_safe_reply):
+                # nothing is persisted before either, so the nudge is true on both. Traceback
+                # server side FIRST (Invariant 10); the wire carries only the nudge.
+                _log.exception("converse author failed (session %s); nothing was sent", session_id)
+                return ("nudge", {"message": _CONVERSE_FAILED_NUDGE})
             now = datetime.now(timezone.utc)
             # Don't capture a steer on an interrupted/degraded turn (adversarial-review fold F3): the
             # reply may have fail-closed to the honest static, and steering does not belong in a
@@ -2540,7 +2564,14 @@ class SessionRegistry:
             ):
                 # The mapper gate at CAPTURE (user-steered chapters §2b): a servable fresh pressure
                 # becomes the pending steer (raw words + distilled pressure + pre-mapped territory).
-                self._capture_steer(session_id, sit, value, next_pressure, now, rec["model"])
+                try:
+                    self._capture_steer(session_id, sit, value, next_pressure, now, rec["model"])
+                except Exception:
+                    # The mapper is the SECOND paid call on this turn and runs after the reply
+                    # was authored; the ceiling can fire on exactly it. A failure here means no
+                    # steer -- the outcome an unservable pressure already has -- never a 500 that
+                    # throws away a reply that was paid for. Traceback server side (Invariant 10).
+                    _log.exception("steer capture failed (session %s); no steer taken", session_id)
             rec["recent"].append(("student", value))
             rec["recent"].append(("Vera", reply))
             if sit is not None:
@@ -2550,7 +2581,16 @@ class SessionRegistry:
                 self._store.append_turn(sit, "vera", {"text": reply}, now)
                 self._store.write_state(sit, record=_serialize_record(rec))
             data = {"text": reply}
-            self._attach_converse_label(session_id, sit, now, data)
+            try:
+                self._attach_converse_label(session_id, sit, now, data)
+            except Exception:
+                # Runs AFTER the pair was persisted, and makes no model call (store reads and
+                # content loads). A raise here rode out as a 500, the shell said "connection
+                # lost", and the retry re-sent a text whose you/vera pair was already on disk:
+                # a duplicated turn. The label is chrome; the reply is served without it.
+                _log.exception(
+                    "wind-down label failed (session %s); reply served without it", session_id
+                )
             return ("say", data)
         finally:
             self._release_turn(session_id)
@@ -2762,18 +2802,42 @@ class SessionRegistry:
         else:
             sit = self._sitting_id.get(session_id)
             world = self._store.read_world(sit) if sit is not None else None
-            if world is not None:
-                # The sitting-level close (§2f): the world's story over every landed segment,
-                # ONE union egress screen over the sitting's territories' moves (M13).
-                close_text = voice.sitting_close(
-                    rec["model"],
-                    world,
-                    self._sitting_segments(sit),
-                    self._sitting_exps(sit, rec),
-                    rec["posture"],
+            try:
+                if world is not None:
+                    # The sitting-level close (§2f): the world's story over every landed segment,
+                    # ONE union egress screen over the sitting's territories' moves (M13).
+                    close_text = voice.sitting_close(
+                        rec["model"],
+                        world,
+                        self._sitting_segments(sit),
+                        self._sitting_exps(sit, rec),
+                        rec["posture"],
+                    )
+                else:
+                    close_text = voice.close(
+                        rec["model"], rec["exp"], rec["recent"], rec["posture"]
+                    )
+            except Exception:
+                # The close author failed (2026-09-04: the ceiling, an SDK error, a bug in the
+                # author path). This used to escape whole: FastAPI answered a bare 500, the End
+                # button offered "connection lost -- try again", the sitting stayed LIVE, and
+                # every retry paid for one more identical failure -- at the moment the product
+                # tries to land. The text is a nicety; the village and the honest end are the
+                # substance. Traceback server side first (Invariant 10), then the same static
+                # `voice` already serves on a refusal or a leak, and the sitting still ends.
+                _log.exception(
+                    "close author failed (session %s); serving the static close", session_id
                 )
-            else:
-                close_text = voice.close(rec["model"], rec["exp"], rec["recent"], rec["posture"])
+                # The static has to be TRUE of the stop it closes (review at 540f101). Every
+                # stop lands post-Earned-Landing, so a plateau or budget record reaches this
+                # branch too, and `voice._STATIC_CLOSE` says "You took a position" -- a
+                # manufactured arrival for a learner who never landed the call, the exact lie
+                # `voice.land` keeps its own static to avoid. Converged: that line, which is
+                # then true. Anything else: the close-shaped static that claims no arrival.
+                if rec.get("stop_reason", "converged") == "converged":
+                    close_text = voice._STATIC_CLOSE
+                else:
+                    close_text = _STATIC_RESTART_CLOSE
             result = ("close", {"close": close_text, **village})
         self._end_sitting(session_id)
         return result
