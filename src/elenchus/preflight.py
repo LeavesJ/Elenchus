@@ -238,3 +238,96 @@ def sensitive_files(repo: Path, key_file: Path | None = None) -> list[Path]:
     if key_file is not None:
         files.append(Path(key_file))
     return files
+
+
+# A served invitee announces itself in its own process environment: the launcher passes
+# ELENCHUS_DB (naming the slug) and ELENCHUS_PORT to every child. Same discovery `forget` uses to
+# refuse deleting a room that is still being served.
+_ENV_SLUG_PORT = re.compile(r"ELENCHUS_DB=(\S*?tenants/([a-z0-9-]+)/elenchus\.db)")
+_ENV_PORT = re.compile(r"ELENCHUS_PORT=(\d+)")
+
+
+def _served(process_envs) -> list[tuple[str, int]]:
+    """(slug, port) for every invitee instance this machine is currently serving."""
+    found = []
+    for line in process_envs:
+        m, p = _ENV_SLUG_PORT.search(line), _ENV_PORT.search(line)
+        if m and p:
+            found.append((m.group(2), int(p.group(1))))
+    return sorted(set(found))
+
+
+def probe_origin(port: int) -> int | None:
+    """The origin's own answer on LOOPBACK, or None if it could not be reached.
+
+    Deliberately takes a port and no hostname: the public hostname is the signal that lied, and a
+    probe that could reach it would eventually be pointed at it.
+    """
+    import urllib.error
+    import urllib.request
+
+    # An EMPTY ProxyHandler, so this never traverses a proxy. `urlopen` otherwise consults
+    # http_proxy/https_proxy/ALL_PROXY and will route even a 127.0.0.1 request through one --
+    # which made this axis report a live origin dead five times running, then healthy ten
+    # times minutes later, because tool invocations inherit those variables inconsistently.
+    # A loopback health check has no business leaving the machine.
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    try:
+        with opener.open(f"http://127.0.0.1:{port}/api/health", timeout=5) as r:
+            return r.status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except OSError:
+        return None
+
+
+def origin_reachable(process_envs, probe=probe_origin, retry_wait: float = 1.0) -> Check:
+    """Is every invitee this machine claims to serve actually answering?
+
+    THE OUTAGE THIS EXISTS FOR (2026-09-03): the launcher, its child and cloudflared all died, and
+    `https://<slug>.elenchuslab.dev/` still returned 302 -- Cloudflare Access serves its login page
+    whether or not an origin is behind it. An invitee would authenticate, receive a one-time PIN,
+    sign in, and only then meet nothing. Every external signal read healthy.
+
+    `public_surface` cannot cover this. It is an attestation that Access is configured, and Access
+    WAS up; the origin is a separate fact and gets measured separately. Nothing served is a warn,
+    never an ok: a machine serving nobody has verified nothing, and "no instances" must not read
+    like "every instance healthy".
+    """
+    served = _served(process_envs)
+    if not served:
+        return Check(
+            "origin-reachable",
+            "warn",
+            "no invitee instance is running on this machine, so no origin was checked. A tunnel "
+            "can still answer 302 with nothing behind it.",
+        )
+    # Probed TWICE before convicting. This axis blocks a launch, and one refused connection on a
+    # loopback health endpoint is weak evidence: a single unreproducible FAIL appeared against a
+    # beta the tenant log later showed had been up continuously either side of it. A genuinely
+    # dead origin fails both probes and is still caught; a scanner that cries wolf gets ignored,
+    # which is the same rule the service allowlist above already follows.
+    import time
+
+    dead = []
+    for slug, port in served:
+        status = probe(port)
+        if status != 200:
+            if retry_wait:
+                time.sleep(retry_wait)
+            status = probe(port)
+        if status != 200:
+            dead.append(f"{slug} on :{port} -> {status if status else 'unreachable'}")
+    if dead:
+        return Check(
+            "origin-reachable",
+            "fail",
+            "the tunnel would answer but the ORIGIN is down: "
+            + ", ".join(dead)
+            + ". An invitee signs in through Access and then meets nothing.",
+        )
+    return Check(
+        "origin-reachable",
+        "ok",
+        "every served invitee answers on loopback: " + ", ".join(f"{s} on :{p}" for s, p in served),
+    )

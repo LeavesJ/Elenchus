@@ -291,3 +291,150 @@ def test_the_out_of_tree_key_file_is_covered_by_the_mode_check(tmp_path, monkeyp
 
     assert check.status == "fail"
     assert "env is 644" in check.detail
+
+
+# --- the origin axis: "tunnel up, origin dead" must not read green -------------------------------
+
+_SERVING = ["ELENCHUS_DB=data/tenants/rehearsal/elenchus.db ELENCHUS_PORT=9401 PATH=/usr/bin"]
+
+
+def test_a_served_origin_that_answers_is_ok():
+    check = preflight.origin_reachable(_SERVING, probe=lambda port: 200)
+
+    assert check.status == "ok"
+    assert "rehearsal" in check.detail
+
+
+def test_a_served_slug_whose_ORIGIN_IS_DEAD_fails_even_though_the_tunnel_answers():
+    """THE OUTAGE THIS AXIS EXISTS FOR (2026-09-03 01:49:56). All three processes died. The public
+    URL still returned 302, because Cloudflare Access serves its login page whether or not anything
+    is behind it -- so an invitee would authenticate, receive a one-time PIN, sign in, and only
+    then meet a dead origin. Every external signal said healthy.
+
+    `public_surface` cannot catch this: it is an operator ATTESTATION about Access, and Access was
+    genuinely up. The origin is a separate fact and must be measured separately, on loopback."""
+    check = preflight.origin_reachable(_SERVING, probe=lambda port: None)
+
+    assert check.status == "fail"
+    assert "rehearsal" in check.detail and "9401" in check.detail
+
+
+def test_only_the_dead_slug_is_named_when_several_are_served():
+    envs = [
+        "ELENCHUS_DB=data/tenants/ada/elenchus.db ELENCHUS_PORT=9402",
+        "ELENCHUS_DB=data/tenants/bo/elenchus.db ELENCHUS_PORT=9403",
+    ]
+
+    check = preflight.origin_reachable(envs, probe=lambda port: 200 if port == 9402 else None)
+
+    assert check.status == "fail"
+    assert "bo" in check.detail and "9403" in check.detail
+    assert "ada" not in check.detail
+
+
+def test_an_origin_answering_non_200_is_a_failure_not_a_pass():
+    """A process that is up but broken serves the invitee an error, which is the same experience as
+    a dead one. `{"ok": true}` or it is not healthy."""
+    check = preflight.origin_reachable(_SERVING, probe=lambda port: 500)
+
+    assert check.status == "fail"
+    assert "500" in check.detail
+
+
+def test_nothing_served_is_a_WARN_never_an_ok():
+    """A preflight run on a machine serving nobody has not verified an origin; it has verified
+    nothing. Reporting ok would let 'no instances running' read identically to 'every instance
+    healthy' -- the same rule file_modes already applies to a missing file."""
+    check = preflight.origin_reachable([], probe=lambda port: 200)
+
+    assert check.status == "warn"
+    assert "no invitee" in check.detail.lower() or "nothing" in check.detail.lower()
+
+
+def test_the_axis_probes_LOOPBACK_and_never_the_public_hostname():
+    """The public hostname is exactly the signal that lied. Whatever this axis reports must come
+    from the origin itself, so the probe is handed a port and nothing else -- there is no hostname
+    for it to accidentally consult."""
+    import inspect
+
+    seen = []
+    preflight.origin_reachable(_SERVING, probe=lambda port: seen.append(port) or 200)
+
+    # The axis hands the probe a PORT and no hostname, so there is nothing for it to consult.
+    assert seen == [9401]
+
+    # And the function that actually dials builds a loopback URL only. Asserted on `probe_origin`
+    # rather than on `origin_reachable`, whose docstring names the public URL in prose to explain
+    # the outage -- prose is not a consultation, and grepping the wrong function is how a guard
+    # ends up measuring its own comments.
+    dialer = inspect.getsource(preflight.probe_origin)
+    assert "127.0.0.1" in dialer
+    assert "elenchuslab" not in dialer and "https://" not in dialer
+
+
+def test_one_missed_probe_is_retried_before_a_launch_is_blocked():
+    """A single refused connection on a loopback health endpoint is weak evidence that an origin
+    is down, and this axis BLOCKS a launch. I saw exactly one FAIL against a beta that the tenant
+    log later proved had been up continuously either side of it, and could not reproduce it — so
+    the axis retries once before it convicts. Two spaced failures is strong evidence; one is not.
+
+    A genuinely dead origin fails both probes and is still caught (the test below)."""
+    calls = []
+
+    def flaky(port):
+        calls.append(port)
+        return None if len(calls) == 1 else 200
+
+    check = preflight.origin_reachable(_SERVING, probe=flaky, retry_wait=0)
+
+    assert check.status == "ok", "a transient blocked a launch"
+    assert len(calls) == 2, "the axis did not retry"
+
+
+def test_a_genuinely_dead_origin_fails_both_probes_and_is_still_caught():
+    calls = []
+
+    def dead(port):
+        calls.append(port)
+        return None
+
+    check = preflight.origin_reachable(_SERVING, probe=dead, retry_wait=0)
+
+    assert check.status == "fail"
+    assert len(calls) == 2, "a dead origin must be probed twice, not once"
+
+
+def test_the_loopback_probe_ignores_proxy_environment_variables(monkeypatch):
+    """THE FALSE POSITIVE THIS FIXES (2026-09-03). The axis reported FAIL five times running
+    against a beta the tenant log proved was up throughout, then ok ten times running minutes
+    later. `urllib.request.urlopen` consults http_proxy/https_proxy/ALL_PROXY and will route even
+    a 127.0.0.1 request through a proxy, so the probe returned None while the origin answered 200.
+    Tool invocations inherit proxy variables inconsistently, which is exactly what made it flap.
+
+    A loopback health check must never traverse a proxy. Verified against a REAL server on a real
+    port, with the variables set, rather than by asserting on the opener's shape."""
+    import http.server
+    import threading
+
+    class _Quiet(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"ok":true}')
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), _Quiet)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        # a proxy that could not possibly serve this request
+        for var in ("http_proxy", "https_proxy", "ALL_PROXY", "HTTP_PROXY", "HTTPS_PROXY"):
+            monkeypatch.setenv(var, "http://127.0.0.1:9")
+
+        assert preflight.probe_origin(port) == 200, (
+            "the loopback probe went through the proxy and reported a live origin as dead"
+        )
+    finally:
+        srv.shutdown()
