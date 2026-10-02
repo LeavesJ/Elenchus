@@ -6,6 +6,7 @@ from pathlib import Path
 import logging
 
 from ..call_log import SERVER_LOG_FORMAT
+from ..spend import DEFAULT_MAX_CALLS
 from .app import create_app
 from .runtime import resolve_runtime
 
@@ -39,6 +40,22 @@ def _load_dotenv(path: Path) -> None:
 
 
 _load_dotenv(_ROOT / ".env")
+
+# Secure by default, the same way scripts/serve_invitee.py:163 does it for the launcher path.
+# `spend.from_env` returns None -- unbounded -- when this is unset, which is right for the CLI,
+# the probes and the suite, and wrong for the one process a stranger with the link can loop.
+# Nothing authenticates this surface; the hostname is the credential. So the entrypoint that
+# serves it establishes the bound rather than waiting for an operator to remember a flag.
+#
+# ORDERING IS THE WHOLE POINT, and it is why this sits above `create_app` rather than anywhere
+# that reads as equivalent. `model_factory_for_this_process` samples the environment at
+# create_app time (app.py:90-94), and the `create_app` call below runs at IMPORT, not under
+# the `__main__` guard. The same line placed after it satisfies every grep for this variable and leaves the
+# process exactly as unbounded. tests/test_entrypoints_arm_the_ceiling.py measures the factory
+# create_app actually received, so the wrong placement fails rather than reads fine.
+#
+# setdefault, and AFTER _load_dotenv: a real exported value wins, then .env, then this floor.
+os.environ.setdefault("ELENCHUS_MAX_CALLS", str(DEFAULT_MAX_CALLS))
 
 # Which invitee's database, and what this process serves. Override-only: with nothing set this is
 # byte-for-byte the previous behaviour (data/elenchus.db on 127.0.0.1:8000), so the founder's own
