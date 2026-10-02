@@ -427,3 +427,231 @@ def test_the_shipped_default_key_location_is_outside_the_repo_and_under_home():
     assert Path.home() in DEFAULT_ENV_FILE.parents
     assert _REPO_ROOT not in DEFAULT_ENV_FILE.parents
     assert DEFAULT_ENV_FILE.name == "env"
+
+
+# ---- supervision (2026-09-04): a 3am death is restarted and written down -----------------------
+#
+# The beta died at 01:49 on 2026-09-03 with a clean SIGTERM sequence in the child and no cause
+# ever established, and nothing noticed for hours: the launcher waited on the child, the child was
+# gone, and the tunnel still answered 302 to the world. `supervise` is the launcher's new run loop.
+# It restarts a child that dies, backs off on a crash loop, writes every restart into the tenant
+# log, and stops cleanly when the launcher itself is told to stop.
+
+
+class _Child:
+    """A stand-in for Popen with exactly the surface `supervise` uses. Exits with `code` after
+    `lives_polls` polls, or never when `code` is None; `terminate` ends it with -15."""
+
+    def __init__(self, code=None, lives_polls=0):
+        self.code, self.lives_polls, self.polls = code, lives_polls, 0
+        self.returncode = None
+        self.terminated = False
+        self.pid = id(self) % 100000
+
+    def poll(self):
+        self.polls += 1
+        if self.returncode is None and self.code is not None and self.polls > self.lives_polls:
+            self.returncode = self.code
+        return self.returncode
+
+    def terminate(self):
+        self.terminated = True
+        if self.returncode is None:
+            self.returncode = -15
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+class _Loop:
+    """Wires fakes into `supervise`: scripted children, a sleep that counts and can stop the
+    loop, and a clock that advances by what was slept."""
+
+    def __init__(self, servers, tunnels=None, stop_after_sleeps=None):
+        self.servers, self.tunnels = list(servers), list(tunnels or [])
+        self.spawned_servers, self.spawned_tunnels = [], []
+        self.slept, self.lines = [], []
+        self.now = 1000.0
+        self.stop_after_sleeps = stop_after_sleeps
+        self.stopping = False
+
+    def spawn_server(self):
+        child = self.servers.pop(0)
+        self.spawned_servers.append(child)
+        return child
+
+    def spawn_tunnel(self):
+        child = self.tunnels.pop(0)
+        self.spawned_tunnels.append(child)
+        return child
+
+    def should_stop(self):
+        return self.stopping
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
+        self.now += seconds
+        if self.stop_after_sleeps is not None and len(self.slept) >= self.stop_after_sleeps:
+            self.stopping = True
+
+    def clock(self):
+        return self.now
+
+    def run(self):
+        from serve_invitee import supervise
+
+        return supervise(
+            self.spawn_server,
+            self.spawn_tunnel if self.tunnels else None,
+            should_stop=self.should_stop,
+            log=self.lines.append,
+            sleep=self.sleep,
+            clock=self.clock,
+        )
+
+
+def test_a_dead_server_is_restarted_and_the_restart_is_written_down():
+    """The obligation itself: a child that exits on its own comes back, and the tenant log says
+    so -- exit code, how long it lived, which attempt this is -- because a restart nobody can
+    read about afterwards is the 01:49 outage with a different ending."""
+    loop = _Loop([_Child(code=1, lives_polls=2), _Child()], stop_after_sleeps=12)
+
+    loop.run()
+
+    assert len(loop.spawned_servers) == 2, "the dead server was never restarted"
+    restart = next((line for line in loop.lines if "code=1" in line), None)
+    assert restart is not None, loop.lines
+    assert "restart" in restart.lower() and "#1" in restart
+
+
+def test_a_stop_terminates_every_child_and_returns_the_servers_exit_code():
+    """The launcher's own SIGTERM (Ctrl-C, a relaunch) must still take everything down, or the
+    supervisor turns a deliberate stop into a fight. `should_stop` is the signal handler's flag."""
+    server, tunnel = _Child(), _Child()
+    loop = _Loop([server], [tunnel], stop_after_sleeps=3)
+
+    code = loop.run()
+
+    assert server.terminated and tunnel.terminated
+    assert code == server.returncode
+    assert len(loop.spawned_servers) == 1, "a stop must never be followed by a restart"
+
+
+def test_a_crash_loop_backs_off_and_a_long_life_resets_it():
+    """Restart delays double from one second to a minute while the child keeps dying young, so a
+    keyless or broken child does not spin, and never stop: the launcher keeps trying, because
+    the moment the cause is fixed it should come back by itself. A child that lived a while
+    before dying resets the delay -- that death is a new incident, not the same crash loop."""
+    lived = _Child(code=1, lives_polls=400)  # ~200s of polls at the 0.5s cadence
+    loop = _Loop(
+        [_Child(code=1), _Child(code=1), _Child(code=1), lived, _Child(code=1), _Child()],
+        stop_after_sleeps=600,
+    )
+
+    loop.run()
+
+    restart_waits = [line for line in loop.lines if "restart #" in line]
+    assert len(restart_waits) == 5, restart_waits
+    waits = [float(line.rsplit(" in ", 1)[1].rstrip("s")) for line in restart_waits]
+    assert waits[:3] == [1.0, 2.0, 4.0], waits
+    assert waits[3] == 1.0, "a child that lived long should reset the backoff, not extend it"
+    assert waits[4] == 1.0, "a child that lived long should reset the backoff, not extend it"
+
+
+def test_the_backoff_is_capped_at_a_minute():
+    loop = _Loop([_Child(code=1) for _ in range(9)] + [_Child()], stop_after_sleeps=2000)
+
+    loop.run()
+
+    waits = [
+        float(line.rsplit(" in ", 1)[1].rstrip("s")) for line in loop.lines if "restart #" in line
+    ]
+    assert max(waits) == 60.0, waits
+    assert waits[-1] == 60.0, waits
+
+
+def test_a_dead_tunnel_is_restarted_without_touching_the_server():
+    """cloudflared reconnects to a returning origin by itself, but nothing reconnects a dead
+    cloudflared: it is restarted on its own, and the server -- which holds the live sitting's
+    worker -- is left exactly where it is."""
+    server = _Child()
+    loop = _Loop([server], [_Child(code=1, lives_polls=2), _Child()], stop_after_sleeps=12)
+
+    loop.run()
+
+    assert len(loop.spawned_tunnels) == 2, "the dead tunnel was never restarted"
+    assert len(loop.spawned_servers) == 1, "the server was restarted for a tunnel death"
+    assert any("tunnel" in line and "code=1" in line for line in loop.lines), loop.lines
+
+
+def test_a_stop_during_the_backoff_wait_is_honoured_promptly():
+    """The backoff sleep is sliced, so a SIGTERM that lands during a 60s wait does not leave the
+    operator watching a launcher that has already been told to stop."""
+    loop = _Loop([_Child(code=1) for _ in range(8)] + [_Child()], stop_after_sleeps=None)
+    real_sleep = loop.sleep
+
+    def sleep_then_stop(seconds):
+        real_sleep(seconds)
+        if len(loop.slept) == 40:  # deep inside a long wait
+            loop.stopping = True
+
+    loop.sleep = sleep_then_stop
+    loop.run()
+
+    assert max(loop.slept) <= 1.0, "the wait must be sliced so a stop lands within a second"
+
+
+def _child_of(launcher_pid: int) -> int | None:
+    out = subprocess.run(
+        ["pgrep", "-P", str(launcher_pid)], capture_output=True, text=True, timeout=10
+    )
+    pids = [int(p) for p in out.stdout.split()]
+    return pids[0] if pids else None
+
+
+def test_a_killed_child_comes_back_on_the_same_port_and_the_log_says_so(tmp_path):
+    """The real path (L-9): the launcher as a subprocess, its child found and SIGTERMed the way
+    the 01:49 death looked from the inside, and health measured again on the same port. The
+    restart line lands in the tenant's own server.log, where the next person will look."""
+    import os
+    import signal as _signal
+
+    port = 8485
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            str(SRC.parent / "scripts" / "serve_invitee.py"),
+            "ada",
+            "--root",
+            str(tmp_path),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        env={"PYTHONPATH": str(SRC), "PATH": "/usr/bin:/bin", "ANTHROPIC_API_KEY": "sk-test-fake"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        _wait_health(port)
+        first = _child_of(proc.pid)
+        assert first is not None, "the launcher has no child to supervise"
+
+        os.kill(first, _signal.SIGTERM)
+
+        deadline = time.monotonic() + 30
+        second = None
+        while time.monotonic() < deadline:
+            second = _child_of(proc.pid)
+            if second is not None and second != first:
+                break
+            time.sleep(0.25)
+        assert second is not None and second != first, "no new child appeared after the kill"
+        _wait_health(port)
+        log = (tmp_path / "ada" / "server.log").read_text(errors="replace")
+        assert "restart #1" in log, log[-2000:]
+        assert proc.poll() is None, "the launcher itself died"
+    finally:
+        proc.terminate()
+        proc.wait(timeout=15)
