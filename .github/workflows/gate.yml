@@ -1,8 +1,8 @@
 name: gate
 
-# The gate itself lives in the private Felix repo, not here. This file is only
-# the wiring that lets GitHub run it, which is why it is the single addition to
-# this repo's tracked set. Everything it enforces is defined elsewhere.
+# The gate lives in Felix, not here. This file is only the wiring that lets
+# GitHub run it, which is why it should stay the smallest possible addition to
+# this repository.
 #
 # ONE JOB, DELIBERATELY. `gate` is the required status check on `main`, and a
 # required check is satisfied by a context of that exact name. Splitting the
@@ -15,15 +15,10 @@ on:
   pull_request:
   push:
     branches: [main]
-  # So a commit can be graded by dispatch. The unattended repair pushes with the
-  # workflow token, and GitHub creates no run from an event that token causes
-  # except workflow_dispatch and repository_dispatch, so its push alone starts
-  # no ordinary run of this workflow. The repair can dispatch this one, and so
-  # can a person: gh workflow run gate.yml --ref BRANCH. A dispatch is not a
-  # pull_request event, so the step below takes the full harness path.
+  # The unattended repair runs the gate again after it pushes, since nothing
+  # its token pushes starts a workflow by itself.
   workflow_dispatch:
 
-# CI reads code and reports a status. It never writes to the repo.
 permissions:
   contents: read
 
@@ -35,14 +30,26 @@ jobs:
   gate:
     runs-on: ubuntu-latest
     steps:
-      # Two sibling checkouts rather than nesting Felix inside the tree being
-      # gated. A harness sitting in the working tree would show up in the very
-      # checks it is running: ruff would descend into it and git status would
-      # report it.
-      - name: Check out Elenchus
-        uses: actions/checkout@v5
+      # Sibling checkouts. A harness inside the tree being gated shows up in the
+      # checks it is running. v5, the lowest major that runs on Node 24; v4
+      # runs on Node 20.
+      #
+      # Every action in this file is pinned to a full commit sha, with the
+      # release it was read from after it, for the reason Felix is below: a
+      # tag is a ref its owner can move, every action here runs with the job's
+      # token, and the second checkout is handed the key that reads Felix.
+      # Moving a pin is the same one-change review as moving the Felix pin: a
+      # pull request here, graded by the action code it names and merged by a
+      # person. Read the tag's commit (gh api repos/OWNER/NAME/git/ref/tags/vN,
+      # and git/tags/SHA when that answers with a tag object), and write the
+      # release that commit is after the new sha.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           path: repo
+          # The job's token stays out of repo/.git/config, where the pull
+          # request's own code, which the gate runs, could read it. This job
+          # pushes nothing, so nothing after the fetch needs it.
+          persist-credentials: false
 
       # Decided from the EVENT, before anything tries to clone. GitHub withholds
       # repository secrets from a pull request opened on a fork, so
@@ -70,67 +77,75 @@ jobs:
             echo "harness=yes" >> "$GITHUB_OUTPUT"
           fi
 
-      # Not `continue-on-error`. Everywhere except a fork PR -- every push to
-      # `main` included -- an unreachable harness must FAIL the job rather than
-      # quietly downgrade what `main` is gated by.
+      # Felix at a pinned commit, decided 2026-09-23. With no ref this took
+      # Felix's default branch as it stood when the job ran, so a verdict here
+      # depended on when it was graded, and whatever merged in Felix that day,
+      # reviewed by nobody here, redefined green for this repository. Branch
+      # protection, the auto-merge streak and the repair ceiling read these
+      # runs as evidence about this repository, which runs graded by different
+      # engines are not. The job fetches with a read token and a key that
+      # reads Felix, keeps neither past its checkouts, and holds no model key,
+      # so the case is the verdict, not the credentials.
+      #
+      # The pin sits in this file because Felix does not merge a pull request
+      # that edits a workflow; a person does. Such a pull request can still
+      # change the pin and be graded by the Felix it names, but that grade does
+      # not merge it. A ref read from any other file would let a pull request
+      # choose the Felix that grades it and be merged on that grade.
+      #
+      # What it costs: the gate script and tables Felix keeps for this
+      # repository are read at the pin too, so changes to them reach CI only
+      # when it moves, and a local felix gate on a newer engine can disagree
+      # with CI until then. Moving it is a pull request here that grades this
+      # repository with the new Felix before that Felix defines green. A repair
+      # loop that checks Felix out at the same commit gets the same verdict
+      # from its pre-push gate; one on another commit can disagree with it.
+      #
+      # A full sha, since a branch or tag can move. Quoted, so YAML reads it as
+      # a string whatever it holds: unquoted, the placeholder is a mapping and
+      # the whole file is refused, which leaves a required check that never
+      # reports. A copy still reading {{FELIX_REF}} fails at this checkout
+      # instead of falling back to the default branch.
+      #
+      # 6fe5f986 is the merge of felix-home #416 (2026-10-03), main on
+      # 2026-10-08, and carries engine 0.49.273. unattended.yml pins the same
+      # commit; move the two together, so the repair loop's pre-push gate and
+      # this workflow give one verdict.
       #
       # felix-home, not felix. The private repo was renamed on 2026-09-13 and a
       # public snapshot took the old name. GitHub matches repository names without
       # regard to case, so `LeavesJ/felix` now resolves to that snapshot, which
       # carries no project but Felix itself and so cannot gate this one.
       #
-      # PINNED to a full sha of felix-home main, decided 2026-09-23. With no
-      # `ref:` this took felix-home's default branch as it stood when the job
-      # ran, so the verdict on a commit here depended on when it was graded, and
-      # any felix-home merge, reviewed by nobody here, redefined this
-      # repository's green. `gate` is the required check on `main`, and the
-      # auto-merge streak and the repair ceiling read its runs as evidence about
-      # this repository, which runs graded by different engines are not.
-      #
-      # The pin sits in this file because a pull request that edits a workflow
-      # here is merged by the founder, never by Felix on green. Such a pull
-      # request can still change the pin and be graded by the Felix it names,
-      # but that grade does not merge it. A ref read from any other file would
-      # let a pull request choose the Felix that grades it and be merged on
-      # that grade.
-      #
-      # What it costs: felix-home's projects/elenchus/gate.sh and the tables
-      # beside it are read at the pin too, so a change to them reaches CI only
-      # when the pin moves, and a local `felix gate` on a newer engine can
-      # disagree with CI until then. To move it, open a pull request here
-      # naming a newer felix-home main commit; its own run grades this
-      # repository with that Felix before that Felix defines green.
-      #
-      # cb3a72ce is felix-home main on 2026-09-24, the merge of felix-home #344,
-      # and carries engine 0.49.194. Pin unattended.yml here to the same commit
-      # and move the two together, so the repair loop's pre-push gate and this
-      # workflow give one verdict.
-      - name: Check out Felix
+      # Not `continue-on-error`. Everywhere except a fork PR -- every push to
+      # `main` included -- an unreachable harness must FAIL the job rather than
+      # quietly downgrade what `main` is gated by.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         if: steps.ctx.outputs.harness == 'yes'
-        uses: actions/checkout@v5
         with:
           repository: LeavesJ/felix-home
-          ref: 'cb3a72ce4f0d85d37253359ca73b4976e9d45201'
+          ref: '6fe5f98688456fa95a7198e4c0eceadb9fe43741'
           ssh-key: ${{ secrets.FELIX_DEPLOY_KEY }}
           path: felix
+          # Once the fetch is done, the key file under $RUNNER_TEMP and the
+          # core.sshCommand in felix/.git/config that names it are removed,
+          # so the pull request's code finds neither. Nothing after this talks
+          # to Felix's remote: the engine is read from disk.
+          persist-credentials: false
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
+      # v6, not the v5.6.0 felix bootstrap renders: v6 runs on Node 24, v5 on
+      # Node 20, the reason both checkouts are on v5.
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: '3.14'
-
+          python-version: "3.14"
       # Pinned to the versions the gate was authored against. pyproject allows
       # ruff>=0.6, and its own comment records that a ruff bump once turned a
       # green tree red across ~40 untouched sites. A gate whose verdict depends
       # on which ruff CI happened to resolve that morning is not a gate.
-      - name: Install dependencies
-        working-directory: repo
-        run: |
+      - run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev,web]" "ruff==0.16.0" "pytest==9.1.1"
-
-      # Fails the job if Felix cannot tell which project this is, so a broken
-      # binding surfaces here rather than silently gating nothing.
+        working-directory: repo
       - name: Confirm the governing project
         if: steps.ctx.outputs.harness == 'yes'
         working-directory: repo
