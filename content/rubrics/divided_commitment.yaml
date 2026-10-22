@@ -1,0 +1,30 @@
+experience_id: divided_commitment
+display_title: "Two commitments drawing on the same hours"
+ledger_ref: "veldra:berkeley_focus_allocation"
+regime: open_ended
+role: ceo
+mode: genuinely_open
+binding_constraint: null
+prompt: >
+  You took on a second obligation on the argument that it feeds the first: the people you will
+  need next year are there and nowhere else within reach. Two months in it is drawing the hours
+  the first has no slack to give, and everything standing between them is one sentence about which
+  one comes first. Nothing external will tell you when you have crossed the line, and the cost
+  arrives only as work that quietly did not happen. Decide today what you keep and what you drop,
+  and account for what you are trading.
+  (No framework is named for you on purpose.)
+frames:
+  - frame_code: commit_under_the_deadline
+    frame_detail: Commit to a decision today, account for what you trade for it, and name what would force you to reverse.
+    paired_trap: commit_without_a_tripwire
+traps:
+  - trap_code: commit_without_a_tripwire
+    trap_detail: Committing to a course without naming what would make you reverse it.
+  - trap_code: restated_the_priority_as_the_mechanism
+    trap_detail: Reaffirmed which of the two matters more and stopped there, leaving nothing that decides a single real hour.
+  - trap_code: kept_both_and_borrowed_the_schedule
+    trap_detail: Preserved every obligation on both sides by drawing on a timeline that had no room in it to begin with.
+# FORCED (§2d): 1-frame rubric — the only possible DF. This is the commit frame's DF home; the
+# §2d repair (2026-08-30) moved license_continuity's DF to lead so the frame keeps an unprompted
+# channel there. Do not make commit the DF of license_continuity again.
+decision_frame: commit_under_the_deadline

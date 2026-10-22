@@ -181,29 +181,33 @@ def test_the_strong_arc_is_closed_at_cold_start_and_this_is_the_tripwire(tmp_pat
     # forming on R1 (lead, commit, protect). lead and protect each gained a 1-frame home on
     # another ref, so each earns a deploy term there; commit did NOT -- its own isolated home is
     # authored but HELD (see tests/test_forge.py TERRITORY_IDS), so license_continuity stays its
-    # only home and _transfer returns 0 on a ref already in its breadth. The tie is still TWO
+    # only home and _transfer returns 0 on a ref already in its breadth. (That held until the
+    # ninth territory shipped; see the re-pin below.) The tie was TWO
     # wide, but it moved UP from V=1.8333 to V=1.9167 and off the 2-frame rubrics: penalty is the
     # max uncertainty over a rubric's frames, and a 2-frame rubric drags in an unseen frame at
     # 1.0, so an isolated home always outranks one. The remaining tie is broken by `load` FIRST
     # and only then by frame code (policy.py:83 sort_key is (-V, load, f, ledger_ref, id)); both
     # tied candidates here are 1-frame rubrics, so it comes down to lead < protect.
     #
-    # WHEN THE HELD TERRITORY SHIPS, this widens to a three-way tie headed by
-    # berkeley_focus_allocation (commit < lead), and `v[0] > v[2]` becomes false by arithmetic
-    # rather than by regression. That is the expected next move of this pin, written down here so
-    # the next reader does not have to re-derive it.
+    # THE HELD TERRITORY SHIPPED 2026-09-02 as `divided_commitment` (J accepted the ledger_ref
+    # being public; the filename names the kind of decision). Exactly what the previous version of
+    # this comment predicted: the tie widened to three, headed by the commit home, and the old
+    # `v[0] > v[2]` became false by arithmetic. Re-pinned from executed output, not from memory.
     now2 = NOW1 + timedelta(days=7)
     ranked = select_next(state1, lib, cfg, now2)
     top_spec, top_rcpt = ranked[0]
-    assert top_spec.experience_id == "cross_pool_data_optics"
-    assert top_rcpt.frame == LEAD and top_rcpt.drive == "deploy"
+    assert top_spec.experience_id == "divided_commitment"
+    assert top_rcpt.frame == "commit_under_the_deadline" and top_rcpt.drive == "deploy"
     v = [r.scores["V"] for _, r in ranked]
-    assert v[0] == v[1], "the two isolated deploy homes must tie"
-    assert v[1] > v[2], "an isolated home must outrank a 2-frame home carrying an unseen frame"
-    assert [sp.experience_id for sp, _ in ranked[:2]] == [
+    assert v[0] == v[1] == v[2], "the three isolated deploy homes must tie"
+    assert v[2] > v[3], "an isolated home must outrank a 2-frame home carrying an unseen frame"
+    assert [sp.experience_id for sp, _ in ranked[:3]] == [
+        "divided_commitment",
         "cross_pool_data_optics",
         "adoption_funnel_stalls",
-    ], "equal V and equal load, so policy.sort_key falls through to frame code: lead < protect"
+    ], (
+        "equal V and equal load, so policy.sort_key falls through to frame code: commit < lead < protect"
+    )
 
     # --- session 2 at +7d on decision_under_stakes, lead's one remaining non-DF home: the
     # unprompted read lands on R2 -- and that is the ONLY unprompted ref lead can ever earn at
